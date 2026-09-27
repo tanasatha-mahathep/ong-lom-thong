@@ -1,6 +1,14 @@
 {
   "name": "@ong/db",
+  "version": "0.0.0",
   "private": true,
+  "description": "Drizzle schema · migrations · plpgsql · seed",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tanasatha-mahathep/ong-lom-thong.git",
+    "directory": "packages/db"
+  },
+  "license": "UNLICENSED",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",

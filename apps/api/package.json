@@ -1,13 +1,21 @@
 {
   "name": "@ong/api",
+  "version": "0.0.0",
   "private": true,
+  "description": "Hono REST API · better-auth · PDF pipeline · เสิร์ฟ apps/web",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tanasatha-mahathep/ong-lom-thong.git",
+    "directory": "apps/api"
+  },
+  "license": "UNLICENSED",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
     "build": "tsup",
+    "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@hono/node-server": "^1.14",
