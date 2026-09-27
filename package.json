@@ -19,6 +19,8 @@
     "db:migrate": "pnpm --filter @ong/db migrate",
     "db:seed": "pnpm --filter @ong/db seed",
     "dev": "pnpm -r --parallel --filter \"./apps/*\" dev",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "infra:down": "docker compose down",
     "infra:up": "docker compose up -d",
     "test": "pnpm -r test",
@@ -26,6 +28,7 @@
   },
   "devDependencies": {
     "@types/node": "^22",
+    "prettier": "^3.9.9",
     "typescript": "^5.9"
   },
   "packageManager": "pnpm@10.18.2",

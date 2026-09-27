@@ -1,0 +1,9 @@
+pnpm-lock.yaml
+.pnpm-store/
+**/dist/
+coverage/
+
+# generated
+apps/web/src/routeTree.gen.ts
+apps/web/.tanstack/
+packages/db/migrations/
