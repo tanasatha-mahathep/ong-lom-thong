@@ -12,6 +12,16 @@ const REPO = "tanasatha-mahathep/ong-lom-thong";
 const REGION = "asia-southeast1-eqsg3a";
 /** gotenberg ฟังพอร์ตนี้ (Railway ฉีด PORT=8080 ทับ ENV ใน image ถ้าไม่ตั้งเป็น service variable) */
 const GOTENBERG_PORT = "3000";
+/**
+ * Railway environment → git branch ที่ deploy (flow: dev → testing → staging → main)
+ * สร้าง environment บน Railway เฉพาะที่ต้องใช้ — มีในตารางนี้ไม่ได้แปลว่าถูกสร้าง
+ */
+const BRANCH_BY_ENVIRONMENT: Record<string, string> = {
+  dev: "dev",
+  testing: "testing",
+  staging: "staging",
+  production: "main",
+};
 
 /**
  * ค่าลับ: อ่านจาก shell เฉพาะตอน apply ครั้งแรกหรือตอนหมุนคีย์ แล้ว seal ไว้ใน Railway
@@ -31,14 +41,16 @@ function secret(name: string) {
 export default defineRailway((ctx) => {
   // fail closed: ไม่รู้จักชื่อ environment (เช่น รันใน railway run/shell ที่ส่ง RAILWAY_ENVIRONMENT_ID มา) = หยุด ไม่เดา
   const environment = ctx.environment;
-  if (environment !== "staging" && environment !== "production") {
+  const branch =
+    environment && Object.hasOwn(BRANCH_BY_ENVIRONMENT, environment) ? BRANCH_BY_ENVIRONMENT[environment] : undefined;
+  if (!environment || !branch) {
     throw new Error(
-      `unknown Railway environment "${String(environment)}" — link ด้วย railway link --environment staging|production และอย่ารันใน railway run/shell`,
+      `unknown Railway environment "${String(environment)}" — link ด้วย railway link --environment ${Object.keys(BRANCH_BY_ENVIRONMENT).join("|")} และอย่ารันใน railway run/shell`,
     );
   }
   const production = environment === "production";
-  // staging deploy จาก branch staging · production จาก main — รอ GitHub Actions ผ่านก่อน (checkSuites)
-  const source = { branch: production ? "main" : "staging", checkSuites: true };
+  // deploy จาก branch ของ environment นั้น — รอ GitHub Actions ผ่านก่อน (checkSuites)
+  const source = { branch, checkSuites: true };
   const oneReplicaInRegion = { [REGION]: 1 };
 
   const db = postgres("Postgres", { region: REGION });
@@ -77,7 +89,7 @@ export default defineRailway((ctx) => {
         "/tsconfig.base.json",
       ],
     },
-    // migrate ทุก deploy · staging ใส่ข้อมูลอ้างอิงด้วย (รันซ้ำได้) · production seed เองเมื่อได้รหัสสาขาจริง
+    // migrate ทุก deploy · ที่ไม่ใช่ production ใส่ข้อมูลอ้างอิงด้วย (รันซ้ำได้) · production seed เองเมื่อได้รหัสสาขาจริง
     preDeploy: production ? "node dist/migrate.js" : '/bin/sh -c "node dist/migrate.js && node dist/seed.js"',
     healthcheck: "/healthz",
     healthcheckTimeout: 120,
