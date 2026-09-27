@@ -4,3 +4,14 @@ packages:
 
 onlyBuiltDependencies:
   - esbuild
+
+# release-notes-generator 14.x ใช้ conventional-changelog-writer 8 ซึ่ง render preset v10 ไม่ได้
+# plugin โหลด preset จาก directory ของตัวเองก่อน → ให้แต่ละ plugin มี preset v9 เป็น dependency ของตัวเอง
+# (preset v10 ยังอยู่สำหรับ @commitlint/config-conventional) — ถอดได้เมื่อ generator ขยับไป writer 9
+packageExtensions:
+  "@semantic-release/commit-analyzer":
+    dependencies:
+      conventional-changelog-conventionalcommits: ^9.3.1
+  "@semantic-release/release-notes-generator":
+    dependencies:
+      conventional-changelog-conventionalcommits: ^9.3.1
