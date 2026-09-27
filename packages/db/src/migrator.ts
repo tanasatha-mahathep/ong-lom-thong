@@ -9,7 +9,7 @@ export async function runMigrations(url: string, migrationsFolder: string): Prom
     // NOTICE ของ "IF NOT EXISTS" ไม่ใช่ข้อผิดพลาด — ไม่ต้องพิมพ์ลง log ของ deploy
     onnotice: () => {},
     // DDL รอ lock นานเกิน = ล้มเลย (exit 1 → Railway ไม่สลับ deploy) แทนการค้างและทำให้ query ของแอปต่อคิว
-    connection: { lock_timeout: "10s" },
+    connection: { lock_timeout: 10_000 }, // ms
   });
   try {
     await migrate(drizzle(client), { migrationsFolder });
