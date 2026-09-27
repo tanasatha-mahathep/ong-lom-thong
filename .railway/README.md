@@ -3,14 +3,16 @@
 `railway.ts` คือแหล่งเดียวของโครงสร้างบน Railway (Infrastructure as Code) — ใช้แทน `railway.json` ที่ถูก deprecate
 Railway **ไม่อ่านไฟล์นี้ตอน deploy** · แก้ไฟล์แล้วต้อง `pnpm railway:plan` → `pnpm railway:apply` เอง
 
-| resource    | ชนิด                                                            | หมายเหตุ                                                                                  |
-| ----------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `api`       | service (Dockerfile `apps/api/Dockerfile`, context = root repo) | เสิร์ฟ web + REST · pre-deploy: migrate (staging: + seed) · healthcheck `/healthz`        |
-| `gotenberg` | service (root `services/gotenberg`)                             | private เท่านั้น · `PORT=3000` · basic auth · healthcheck `/health`                       |
-| `Postgres`  | database (Postgres 18)                                          | `DATABASE_URL` อ้างจาก api                                                                |
-| `files`     | bucket (region `sin`)                                           | private · virtual-hosted style · **ไม่มี versioning/object lock** → สำเนา off-site รายคืน |
+| resource    | ชนิด                                                            | หมายเหตุ                                                                                        |
+| ----------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `api`       | service (Dockerfile `apps/api/Dockerfile`, context = root repo) | เสิร์ฟ web + REST · pre-deploy: migrate (ที่ไม่ใช่ production: + seed) · healthcheck `/healthz` |
+| `gotenberg` | service (root `services/gotenberg`)                             | private เท่านั้น · `PORT=3000` · basic auth · healthcheck `/health`                             |
+| `Postgres`  | database (Postgres 18)                                          | `DATABASE_URL` อ้างจาก api                                                                      |
+| `files`     | bucket (region `sin`)                                           | private · virtual-hosted style · **ไม่มี versioning/object lock** → สำเนา off-site รายคืน       |
 
-environment: `staging` deploy จาก branch `staging` · `production` จาก `main` · ทั้งคู่รอ GitHub Actions ผ่านก่อน (Wait for CI)
+environment → branch: `dev` → `dev` · `testing` → `testing` · `staging` → `staging` · `production` → `main` · ทุกตัวรอ GitHub Actions ผ่านก่อน (Wait for CI)
+ชื่ออื่นไฟล์จะหยุดทันที · สร้าง environment เฉพาะที่ต้องใช้ (แต่ละตัวมี Postgres/bucket/gotenberg ของตัวเอง = ค่าใช้จ่ายเพิ่ม)
+จะเพิ่ม `dev` หรือ `testing`: ทำขั้น 3–6 ด้วยชื่อนั้นแทน `staging`
 
 ## ตั้งครั้งแรก (staging)
 

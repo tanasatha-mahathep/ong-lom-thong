@@ -25,9 +25,10 @@ pnpm build               # web → apps/web/dist · api → apps/api/dist
 ## Commit / release
 
 Conventional Commits (ภาษาอังกฤษ) บังคับด้วย commitlint + husky (`pre-commit` = lint-staged: eslint · prettier · sort-package-json)
-งานลง branch `staging` (Railway staging) → ทดสอบผ่าน → promote เข้า `main` แบบ fast-forward (`git push origin staging:main`)
-push เข้า `main` → CI (commitlint · lint · format · typecheck · test · build) → semantic-release ออก tag `vX.Y.Z` + [GitHub Release](https://github.com/tanasatha-mahathep/ong-lom-thong/releases) + อัปเดต [CHANGELOG.md](CHANGELOG.md) → ดึง `staging` ตาม `main` ให้อัตโนมัติ
-dependency อัปเดตผ่าน [Renovate](renovate.json) — PR ไปที่ `staging` ทุกวันจันทร์ · major ต้องอนุมัติใน Dependency Dashboard
+branch: `dev` (พัฒนา) → `testing` (ทดสอบ) → `staging` (ก่อนขึ้นจริง · Railway staging) → `main` (production + release)
+commit ลง `dev` · ผ่านแต่ละขั้นแล้ว promote แบบ fast-forward ทีละขั้น: `git push origin dev:testing` → `testing:staging` → `staging:main`
+push เข้า `main` → CI (commitlint · lint · format · typecheck · test · build) → semantic-release ออก tag `vX.Y.Z` + [GitHub Release](https://github.com/tanasatha-mahathep/ong-lom-thong/releases) + อัปเดต [CHANGELOG.md](CHANGELOG.md) → ดึง `staging` `testing` `dev` ตาม `main` ให้อัตโนมัติ
+dependency อัปเดตผ่าน [Renovate](renovate.json) — PR ไปที่ `dev` ทุกวันจันทร์ · major ต้องอนุมัติใน Dependency Dashboard
 
 ## โครง
 
@@ -51,4 +52,4 @@ services/gotenberg  image Gotenberg + ฟอนต์ Sarabun
 | files     | Railway Bucket (`sin`)                      | `S3_*` reference · private · ไม่มี versioning/object lock |
 | cron      | ยังไม่ทำ                                    | `pg_dump` + `rclone` → R2/B2 ทุกคืน (ภาคบังคับ)           |
 
-branch `staging` → environment staging · `main` → production · Railway รอ CI ผ่านก่อน deploy
+environment บน Railway ใช้ชื่อเดียวกับ branch (`dev` `testing` `staging` · `production` ← `main`) — ตอนนี้ตั้งแค่ staging + production · Railway รอ CI ผ่านก่อน deploy
