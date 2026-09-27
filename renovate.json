@@ -1,0 +1,41 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests", "docker:pinDigests", ":maintainLockFilesWeekly"],
+  "description": "PR ไปที่ staging ก่อน (Railway staging) แล้ว promote เข้า main ตามปกติ",
+  "baseBranchPatterns": ["staging"],
+  "timezone": "Asia/Bangkok",
+  "schedule": ["before 9am on monday"],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "description": "major ทุกตัวต้องอนุมัติใน Dependency Dashboard ก่อน",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "รวม minor/patch ของ production เป็น PR เดียว — ตรวจเองก่อน merge",
+      "matchDepTypes": ["dependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "production dependencies (non-major)"
+    },
+    {
+      "description": "devDependencies minor/patch merge เองเมื่อ CI ผ่าน",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "dev dependencies (non-major)",
+      "automerge": true
+    },
+    {
+      "description": "GitHub Actions merge เองเมื่อ CI ผ่าน (ปักด้วย digest อยู่แล้ว)",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "digest", "pinDigest"],
+      "groupName": "github actions",
+      "automerge": true
+    },
+    {
+      "description": "Gotenberg / Node image: ทดสอบ PDF ภาษาไทยกับใบจริงก่อน — ไม่ automerge",
+      "matchDatasources": ["docker"],
+      "automerge": false
+    }
+  ]
+}
