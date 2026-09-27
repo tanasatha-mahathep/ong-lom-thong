@@ -1,0 +1,15 @@
+node_modules/
+.pnpm-store/
+dist/
+coverage/
+*.log
+.DS_Store
+
+# secrets
+.env
+.env.*
+!.env.example
+
+# local data (postgres/minio volumes live in docker, nothing here — but never commit dumps)
+*.dump
+*.sql.gz

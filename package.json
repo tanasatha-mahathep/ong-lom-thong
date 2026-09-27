@@ -1,0 +1,23 @@
+{
+  "name": "ong-lom-thong",
+  "private": true,
+  "packageManager": "pnpm@10.18.2",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter ./apps/* dev",
+    "build": "pnpm --filter @ong/web build && pnpm --filter @ong/api build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "db:generate": "pnpm --filter @ong/db generate",
+    "db:migrate": "pnpm --filter @ong/db migrate",
+    "db:seed": "pnpm --filter @ong/db seed",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5.9"
+  }
+}
