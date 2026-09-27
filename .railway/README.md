@@ -16,10 +16,10 @@ environment → branch: `dev` → `dev` · `testing` → `testing` · `staging` 
 
 ## สถานะ (28 ก.ย. 2569)
 
-| environment  | สถานะ                                              | URL                                     |
-| ------------ | -------------------------------------------------- | --------------------------------------- |
-| `staging`    | api · gotenberg · Postgres online · bucket `files` | https://api-staging-5a78.up.railway.app |
-| `production` | ว่าง — ยังไม่ apply                                | —                                       |
+| environment  | สถานะ                                              | URL                                          |
+| ------------ | -------------------------------------------------- | -------------------------------------------- |
+| `staging`    | api · gotenberg · Postgres online · bucket `files` | https://ong-lom-thong-staging.up.railway.app |
+| `production` | ว่าง — ยังไม่ apply                                | —                                            |
 
 staging สร้างจาก dashboard ก่อนมี IaC: rename bucket `bundled-taco` → `files` และ service `ong-lom-thong` → `api` ให้ IaC รับไปแก้ในที่ (ไม่มีการลบ)
 ของค้างที่ยังไม่ได้ลบ: volume `postgres-volume` และ `postgres-volume-GJW5` (detached ใน staging) · service ระดับ project `@ong/web` `@ong/api` (ไม่มี instance ใน environment ไหน)
