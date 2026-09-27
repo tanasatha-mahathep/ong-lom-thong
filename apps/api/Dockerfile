@@ -1,5 +1,6 @@
 # build context = repo root (railway.json → dockerfilePath: apps/api/Dockerfile)
 FROM node:22-alpine AS build
+ENV HUSKY=0
 RUN corepack enable && corepack prepare pnpm@10.18.2 --activate
 WORKDIR /repo
 
@@ -21,5 +22,8 @@ COPY --from=build /out/dist ./dist
 COPY --from=build /out/node_modules ./node_modules
 COPY --from=build /out/package.json ./package.json
 COPY --from=build /repo/apps/web/dist ./public
+# dist/migrate.js อ่านจากที่นี่ (Railway preDeployCommand)
+COPY --from=build /repo/packages/db/migrations ./migrations
+USER node
 EXPOSE 8787
-CMD ["node", "dist/index.js"]
+CMD ["node", "--enable-source-maps", "dist/index.js"]
