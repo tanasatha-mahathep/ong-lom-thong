@@ -15,10 +15,17 @@ pnpm dev                 # web http://localhost:5173 (proxy /api → api :8787)
 ```
 
 ```bash
-pnpm test                # vitest — ตรรกะเงินใน packages/core ต้องเขียวเสมอ
+pnpm test                # vitest ทุกแพ็กเกจ (projects) — ตรรกะเงินใน packages/core ต้องเขียวเสมอ
 pnpm typecheck
+pnpm lint                # eslint (type-checked) · lint:fix
+pnpm format              # prettier · format:check
 pnpm build               # web → apps/web/dist · api → apps/api/dist
 ```
+
+## Commit / release
+
+Conventional Commits บังคับด้วย commitlint + husky (`pre-commit` = lint-staged: eslint · prettier · sort-package-json)
+push เข้า `main` → CI (commitlint · lint · format · typecheck · test · build) → semantic-release ออก tag `vX.Y.Z` + GitHub Release
 
 ## โครง
 

@@ -21,4 +21,12 @@
 
 ## คำสั่ง
 
-`pnpm test` (ต้องเขียวก่อน commit) · `pnpm typecheck` · `pnpm dev` · `pnpm db:generate` หลังแก้ schema · plpgsql อยู่ `packages/db/sql/functions.sql`
+`pnpm test` · `pnpm typecheck` · `pnpm lint` · `pnpm format:check` — ต้องเขียวทั้งหมดก่อน commit (CI รันชุดเดียวกัน)
+`pnpm dev` · `pnpm db:generate` หลังแก้ schema · plpgsql อยู่ `packages/db/sql/functions.sql`
+
+## Commit
+
+- **Conventional Commits** — commitlint (husky `commit-msg`) ปฏิเสธข้อความผิดรูป · semantic-release ออกเวอร์ชันจาก type
+- `feat` = minor · `fix`/`perf` = patch · `BREAKING CHANGE:` = major · `chore` `ci` `docs` `style` `test` `build` `refactor` ไม่ออกเวอร์ชัน
+- scope: `core` `db` `api` `web` `gotenberg` `deps` `release` (หรือไม่ใส่) · หัวเรื่องภาษาไทยได้ · บรรทัด body ≤ 100 ตัวอักษร
+- แยก commit ตามเรื่อง · ห้าม `--no-verify` · ห้ามแก้ `version` ใน package.json เอง
