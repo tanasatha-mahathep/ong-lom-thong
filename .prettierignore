@@ -7,3 +7,6 @@ coverage/
 apps/web/src/routeTree.gen.ts
 apps/web/.tanstack/
 packages/db/migrations/
+
+# semantic-release เขียนเอง — รูปแบบตาม conventional-changelog
+CHANGELOG.md
