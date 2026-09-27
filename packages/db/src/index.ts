@@ -18,3 +18,5 @@ function requireEnv(key: string): string {
 
 export { schema };
 export * from "./schema";
+export * from "./migrator";
+export * from "./seedData";
