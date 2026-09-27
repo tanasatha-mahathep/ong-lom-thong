@@ -5,6 +5,8 @@ on:
     # dev → testing → staging → main (promote แบบ fast-forward) · release ออกจาก main เท่านั้น
     branches: [main, staging, testing, dev]
   pull_request:
+  # ขั้น sync หลัง release สั่งรันบน branch ที่ขยับ (push ด้วย GITHUB_TOKEN ไม่ trigger ci เอง) · รันซ้ำเองได้
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -62,6 +64,7 @@ jobs:
     concurrency: release
     permissions:
       contents: write # tag + GitHub Release + commit CHANGELOG.md + sync branches
+      actions: write # สั่ง ci บน branch ที่ sync แล้ว
       issues: write # คอมเมนต์ใน issue ที่ถูกปิดโดย release
       pull-requests: write
     steps:
@@ -80,23 +83,29 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # release commit (CHANGELOG.md) อยู่บน main แล้ว — ดึง staging/testing/dev ตามให้ promote ครั้งหน้ายัง fast-forward ได้
-      # ปกติเป็น fast-forward · ถ้า branch มี commit ใหม่ระหว่างนั้นจะเป็น merge commit (CHANGELOG ไม่ชนกับงานบน branch)
+      # release commit (CHANGELOG.md) อยู่บน main แล้ว — ไล่ตามลำดับ promotion: staging ← main · testing ← staging · dev ← testing
+      # fast-forward ถ้าได้ ไม่งั้น merge ต่อสายกัน → main ⊂ staging ⊂ testing ⊂ dev จึง promote แบบ fast-forward ต่อได้เสมอ
+      # push ด้วย GITHUB_TOKEN ไม่ trigger ci → สั่ง ci เองบน branch ที่ขยับ
       - name: sync branches with main
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          remote="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git fetch "$remote" main:refs/remotes/origin/main
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q "$remote" "+refs/heads/*:refs/remotes/origin/*"
+          upstream=origin/main
           for branch in staging testing dev; do
-            if ! git ls-remote --exit-code --heads "$remote" "$branch" >/dev/null; then
+            if ! git rev-parse --verify -q "origin/$branch" >/dev/null; then
               echo "skip $branch (no such branch)"
               continue
             fi
-            git fetch "$remote" "$branch:refs/remotes/origin/$branch"
-            git checkout -B "$branch" "origin/$branch"
-            git merge --no-edit origin/main
-            git push "$remote" "HEAD:$branch"
+            git checkout -q -B "$branch" "origin/$branch"
+            before=$(git rev-parse HEAD)
+            git merge --no-edit "$upstream"
+            if [ "$(git rev-parse HEAD)" != "$before" ]; then
+              git push "$remote" "HEAD:$branch"
+              gh workflow run ci.yml --ref "$branch"
+            fi
+            upstream=$branch
           done
