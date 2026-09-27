@@ -25,7 +25,9 @@ pnpm build               # web → apps/web/dist · api → apps/api/dist
 ## Commit / release
 
 Conventional Commits (ภาษาอังกฤษ) บังคับด้วย commitlint + husky (`pre-commit` = lint-staged: eslint · prettier · sort-package-json)
-push เข้า `main` → CI (commitlint · lint · format · typecheck · test · build) → semantic-release ออก tag `vX.Y.Z` + GitHub Release
+งานลง branch `staging` (Railway staging) → ทดสอบผ่าน → promote เข้า `main` แบบ fast-forward (`git push origin staging:main`)
+push เข้า `main` → CI (commitlint · lint · format · typecheck · test · build) → semantic-release ออก tag `vX.Y.Z` + [GitHub Release](https://github.com/tanasatha-mahathep/ong-lom-thong/releases) + อัปเดต [CHANGELOG.md](CHANGELOG.md) → ดึง `staging` ตาม `main` ให้อัตโนมัติ
+dependency อัปเดตผ่าน [Renovate](renovate.json) — PR ไปที่ `staging` ทุกวันจันทร์ · major ต้องอนุมัติใน Dependency Dashboard
 
 ## โครง
 

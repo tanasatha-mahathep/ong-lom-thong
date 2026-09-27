@@ -30,3 +30,5 @@
 - `feat` = minor · `fix`/`perf` = patch · `BREAKING CHANGE:` = major · `chore` `ci` `docs` `style` `test` `build` `refactor` ไม่ออกเวอร์ชัน
 - scope: `core` `db` `api` `web` `gotenberg` `deps` `release` (หรือไม่ใส่) · subject ขึ้นต้นตัวพิมพ์เล็ก รูปคำสั่ง (`add …` ไม่ใช่ `Added …`) · บรรทัด body ≤ 100 ตัวอักษร
 - แยก commit ตามเรื่อง · ห้าม `--no-verify` · ห้ามแก้ `version` ใน package.json เอง
+- `CHANGELOG.md` semantic-release เขียนเอง — ห้ามแก้มือ · dependency อัปเดตผ่าน Renovate (PR ไป `staging`) ไม่ต้องไล่อัปเองถ้าไม่จำเป็น
+- branch: commit ลง `staging` · promote เข้า `main` แบบ fast-forward เท่านั้น · หลัง release CI ดึง `staging` ตาม `main` ให้เอง
