@@ -14,16 +14,29 @@ const REGION = "asia-southeast1-eqsg3a";
 const GOTENBERG_PORT = "3000";
 
 /**
- * ค่าลับ: อ่านจาก shell ตอน apply ครั้งแรก (หรือตอนหมุนคีย์) แล้ว seal ไว้ใน Railway
- * apply ครั้งต่อไปไม่มีค่าใน shell → preserve() = คงค่าเดิมใน Railway · ไม่มีค่าลับใน git
+ * ค่าลับ: อ่านจาก shell เฉพาะตอน apply ครั้งแรกหรือตอนหมุนคีย์ แล้ว seal ไว้ใน Railway
+ * ไม่มีค่าใน shell → preserve() = คงค่าเดิม · ไม่มีค่าลับใน git
+ * ใช้ชื่อ RAILWAY_SET_* ที่แอปไม่อ่าน — .env ของเครื่อง dev (direnv) จึงหลุดไปทับค่าจริงไม่ได้
  */
 function secret(name: string) {
-  const value = process.env[name];
-  return value ? { value, isSealed: true } : preserve();
+  const key = `RAILWAY_SET_${name}`;
+  const value = process.env[key];
+  if (!value) return preserve();
+  if (value.length < 32 || /change-me/i.test(value)) {
+    throw new Error(`${key} ต้องเป็นค่าสุ่มยาว ≥ 32 ตัวอักษร เช่น openssl rand -hex 32`);
+  }
+  return { value, isSealed: true };
 }
 
 export default defineRailway((ctx) => {
-  const production = ctx.isEnvironment("production");
+  // fail closed: ไม่รู้จักชื่อ environment (เช่น รันใน railway run/shell ที่ส่ง RAILWAY_ENVIRONMENT_ID มา) = หยุด ไม่เดา
+  const environment = ctx.environment;
+  if (environment !== "staging" && environment !== "production") {
+    throw new Error(
+      `unknown Railway environment "${String(environment)}" — link ด้วย railway link --environment staging|production และอย่ารันใน railway run/shell`,
+    );
+  }
+  const production = environment === "production";
   // staging deploy จาก branch staging · production จาก main — รอ GitHub Actions ผ่านก่อน (checkSuites)
   const source = { branch: production ? "main" : "staging", checkSuites: true };
   const oneReplicaInRegion = { [REGION]: 1 };

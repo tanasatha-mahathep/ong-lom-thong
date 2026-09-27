@@ -15,6 +15,8 @@ environment: `staging` deploy จาก branch `staging` · `production` จา�
 ## ตั้งครั้งแรก (staging)
 
 ต้องทำโดยคนที่มีบัญชี Railway — ขั้น 2 ต้องเป็นเจ้าของบัญชี GitHub `tanasatha-mahathep`
+branch `staging` บน GitHub ต้องมีโค้ดชุดนี้แล้ว (apply สร้าง service แล้ว deploy ทันทีจาก branch นั้น)
+รัน `railway:plan` / `railway:apply` จาก directory ที่ `railway link` แล้วเท่านั้น — **ห้ามรันใน `railway run` / `railway shell`** (ไฟล์จะหยุดเพราะไม่รู้ชื่อ environment)
 
 1. ติดตั้ง CLI (≥ 5.42.1) แล้ว login
    ```bash
@@ -28,19 +30,21 @@ environment: `staging` deploy จาก branch `staging` · `production` จา�
    railway environment new staging
    railway link --project ong-pos --environment staging
    ```
-4. สร้างค่าลับแล้ว apply — ค่าลับอ่านจาก shell ครั้งแรกเท่านั้น แล้ว seal ไว้ใน Railway (ไม่ลง git)
+4. สร้างค่าลับแล้ว apply — อ่านจาก `RAILWAY_SET_*` เท่านั้น (แอปไม่ใช้ชื่อนี้ · `.env` ของเครื่อง dev ทับค่าจริงไม่ได้) แล้ว seal ไว้ใน Railway
+   ค่าต้องยาว ≥ 32 ตัวอักษร ไม่งั้นไฟล์หยุด
    ```bash
-   export GOTENBERG_PASSWORD="$(openssl rand -hex 24)"
-   export BETTER_AUTH_SECRET="$(openssl rand -base64 32)"
-   pnpm railway:plan        # ตรวจ: สร้าง 4 resource · ไม่มีลบ
+   export RAILWAY_SET_GOTENBERG_PASSWORD="$(openssl rand -hex 32)"
+   export RAILWAY_SET_BETTER_AUTH_SECRET="$(openssl rand -base64 32)"
+   pnpm railway:plan        # ตรวจ: สร้าง 4 resource · ไม่มีลบ · ดูค่าที่ไม่ลับด้วย --show-values
    pnpm railway:apply
-   unset GOTENBERG_PASSWORD BETTER_AUTH_SECRET
+   unset RAILWAY_SET_GOTENBERG_PASSWORD RAILWAY_SET_BETTER_AUTH_SECRET
    ```
 5. สร้าง domain สาธารณะให้ api (IaC ไม่จัดการ generated domain)
    ```bash
    railway domain --service api
    ```
-6. push branch `staging` → CI ผ่าน → Railway deploy
+6. ตั้ง **Pre-deploy Timeout** ของ service `api` ใน dashboard (เช่น 300 วินาที) — IaC ตั้งค่านี้ไม่ได้ · ค่าเริ่มต้นไม่มีเวลาจำกัด
+7. ต่อจากนี้ push branch `staging` → CI ผ่าน → Railway deploy
 
 ## ตรวจหลัง deploy
 
@@ -55,8 +59,8 @@ curl https://<domain>/healthz
 
 ## หมุนค่าลับ
 
-export ค่าใหม่แล้ว `pnpm railway:apply` — ไม่ export = `preserve()` คงค่าเดิม
-`GOTENBERG_PASSWORD` ใช้ทั้งใน `gotenberg` และ `api` ต้องหมุนพร้อมกันในการ apply ครั้งเดียว
+export `RAILWAY_SET_*` ค่าใหม่แล้ว `pnpm railway:apply` — ไม่ export = `preserve()` คงค่าเดิม
+`RAILWAY_SET_GOTENBERG_PASSWORD` ใช้ทั้งใน `gotenberg` และ `api` — หมุนในการ apply ครั้งเดียวจึงตรงกันเสมอ
 
 ## production
 
