@@ -1,4 +1,4 @@
-# Railway — project `ong-pos` (Singapore)
+# Railway — project `Ong Lom Thong` (Singapore)
 
 `railway.ts` คือแหล่งเดียวของโครงสร้างบน Railway (Infrastructure as Code) — ใช้แทน `railway.json` ที่ถูก deprecate
 Railway **ไม่อ่านไฟล์นี้ตอน deploy** · แก้ไฟล์แล้วต้อง `pnpm railway:plan` → `pnpm railway:apply` เอง
@@ -14,6 +14,16 @@ environment → branch: `dev` → `dev` · `testing` → `testing` · `staging` 
 ชื่ออื่นไฟล์จะหยุดทันที · สร้าง environment เฉพาะที่ต้องใช้ (แต่ละตัวมี Postgres/bucket/gotenberg ของตัวเอง = ค่าใช้จ่ายเพิ่ม)
 จะเพิ่ม `dev` หรือ `testing`: ทำขั้น 3–6 ด้วยชื่อนั้นแทน `staging`
 
+## สถานะ (28 ก.ย. 2569)
+
+| environment  | สถานะ                                              | URL                                     |
+| ------------ | -------------------------------------------------- | --------------------------------------- |
+| `staging`    | api · gotenberg · Postgres online · bucket `files` | https://api-staging-5a78.up.railway.app |
+| `production` | ว่าง — ยังไม่ apply                                | —                                       |
+
+staging สร้างจาก dashboard ก่อนมี IaC: rename bucket `bundled-taco` → `files` และ service `ong-lom-thong` → `api` ให้ IaC รับไปแก้ในที่ (ไม่มีการลบ)
+ของค้างที่ยังไม่ได้ลบ: volume `postgres-volume` และ `postgres-volume-GJW5` (detached ใน staging) · service ระดับ project `@ong/web` `@ong/api` (ไม่มี instance ใน environment ไหน)
+
 ## ตั้งครั้งแรก (staging)
 
 ต้องทำโดยคนที่มีบัญชี Railway — ขั้น 2 ต้องเป็นเจ้าของบัญชี GitHub `tanasatha-mahathep`
@@ -28,9 +38,9 @@ branch `staging` บน GitHub ต้องมีโค้ดชุดนี้�
 2. ติดตั้ง [Railway GitHub App](https://github.com/apps/railway-app/installations/new) ให้บัญชี `tanasatha-mahathep` เข้าถึง repo `ong-lom-thong`
 3. ตั้ง region เริ่มต้นของ workspace เป็น Singapore (Account Settings) แล้วสร้าง project + environment
    ```bash
-   railway init --name ong-pos        # ได้ environment production มาด้วย
+   railway init --name "Ong Lom Thong"   # ได้ environment production มาด้วย (project นี้มีอยู่แล้ว — ข้ามได้)
    railway environment new staging
-   railway link --project ong-pos --environment staging
+   railway link --project "Ong Lom Thong" --environment staging
    ```
 4. สร้างค่าลับแล้ว apply — อ่านจาก `RAILWAY_SET_*` เท่านั้น (แอปไม่ใช้ชื่อนี้ · `.env` ของเครื่อง dev ทับค่าจริงไม่ได้) แล้ว seal ไว้ใน Railway
    ค่าต้องยาว ≥ 32 ตัวอักษร ไม่งั้นไฟล์หยุด

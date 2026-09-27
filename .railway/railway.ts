@@ -1,5 +1,5 @@
 /**
- * Railway Infrastructure as Code — project "ong-pos" (region Singapore)
+ * Railway Infrastructure as Code — project "Ong Lom Thong" (region Singapore)
  * ใช้แทน railway.json (Config as Code ถูก deprecate · หยุดอ่าน 2026-12-01)
  *
  * Railway ไม่อ่านไฟล์นี้ตอน deploy — ต้องสั่ง `pnpm railway:plan` / `pnpm railway:apply` เอง

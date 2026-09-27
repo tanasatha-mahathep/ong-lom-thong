@@ -40,7 +40,7 @@ packages/db     Drizzle schema · migrations · plpgsql (sql/functions.sql)
 services/gotenberg  image Gotenberg + ฟอนต์ Sarabun
 ```
 
-## Railway (project `ong-pos` · region Singapore)
+## Railway (project `Ong Lom Thong` · region Singapore)
 
 โครงสร้างทั้งหมดอยู่ใน [`.railway/railway.ts`](.railway/railway.ts) (Infrastructure as Code) — วิธีตั้งครั้งแรก · ค่าลับ · ตรวจหลัง deploy: [`.railway/README.md`](.railway/README.md)
 
