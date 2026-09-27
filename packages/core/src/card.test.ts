@@ -19,7 +19,7 @@ describe("parseThaiDate — รูปแบบที่ Siam ID พิมพ์"
   it.each(["", "abc", "30/02/2570", "31/04/2570", "13/13/2570", "1/1/70", "2027/12/31", null, undefined])(
     "ใช้ไม่ได้: %j → null",
     (input) => {
-      expect(parseThaiDate(input as string | null | undefined)).toBeNull();
+      expect(parseThaiDate(input)).toBeNull();
     },
   );
 });

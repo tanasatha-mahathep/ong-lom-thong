@@ -20,7 +20,7 @@ export function parseDecimal(v: unknown): Decimal | null {
   if (isBlank(v)) return null;
   if (typeof v !== "string" && typeof v !== "number" && !(v instanceof Decimal)) return null;
   try {
-    const d = D(v as Numeric);
+    const d = D(v);
     return d.isFinite() ? d : null;
   } catch {
     return null;

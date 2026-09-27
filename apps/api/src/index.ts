@@ -15,7 +15,7 @@ api.get("/healthz", health);
 
 // ตัวอย่าง endpoint แรก — ใช้ฟังก์ชันเดียวกับที่ PUT /gold-price/today จะใช้ตอนบันทึก
 api.post("/gold-price/quote", async (c) => {
-  const body = await c.req.json<{ bar_sell?: string }>().catch(() => ({}) as { bar_sell?: string });
+  const body: { bar_sell?: string } = await c.req.json<{ bar_sell?: string }>().catch(() => ({}));
   try {
     const q = deriveGoldPrice(body.bar_sell ?? "");
     return c.json({
