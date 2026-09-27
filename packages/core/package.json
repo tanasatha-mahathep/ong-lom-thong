@@ -1,0 +1,20 @@
+{
+  "name": "@ong/core",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "decimal.js": "^10.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.9",
+    "vitest": "^3"
+  }
+}
