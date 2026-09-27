@@ -1,0 +1,25 @@
+{
+  "name": "@ong/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.14",
+    "@ong/core": "workspace:*",
+    "@ong/db": "workspace:*",
+    "hono": "^4.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "tsup": "^8",
+    "tsx": "^4",
+    "typescript": "^5.9",
+    "vitest": "^3"
+  }
+}
