@@ -22,7 +22,8 @@ environment → branch: `dev` → `dev` · `testing` → `testing` · `staging` 
 | `production` | ว่าง — ยังไม่ apply                                | —                                            |
 
 staging สร้างจาก dashboard ก่อนมี IaC: rename bucket `bundled-taco` → `files` และ service `ong-lom-thong` → `api` ให้ IaC รับไปแก้ในที่ (ไม่มีการลบ)
-ของค้างที่ยังไม่ได้ลบ: volume `postgres-volume` และ `postgres-volume-GJW5` (detached ใน staging) · service ระดับ project `@ong/web` `@ong/api` (ไม่มี instance ใน environment ไหน)
+ล้างแล้ว 28 ก.ย.: volume `postgres-volume` และ `postgres-volume-GJW5` (detached · ถูกตั้งลบถาวร 29 ก.ย. — กู้ได้ก่อนนั้น) · service `@ong/web` `@ong/api` ไม่มีแล้ว
+staging: Pre-deploy Timeout ของ `api` = 300 วินาที (ตั้งผ่าน API `serviceInstanceUpdate`)
 
 ## ตั้งครั้งแรก (staging)
 
@@ -55,7 +56,7 @@ branch `staging` บน GitHub ต้องมีโค้ดชุดนี้�
    ```bash
    railway domain --service api
    ```
-6. ตั้ง **Pre-deploy Timeout** ของ service `api` ใน dashboard (เช่น 300 วินาที) — IaC ตั้งค่านี้ไม่ได้ · ค่าเริ่มต้นไม่มีเวลาจำกัด
+6. ตั้ง **Pre-deploy Timeout** ของ service `api` เป็น 300 วินาที ใน dashboard (Settings → Deploy) — IaC และ `railway environment edit` ตั้งค่านี้ไม่ได้ · ค่าเริ่มต้นไม่มีเวลาจำกัด (migration มี `lock_timeout` 10 วินาทีกันค้างอีกชั้น)
 7. ต่อจากนี้ push branch `staging` → CI ผ่าน → Railway deploy
 
 ## ตรวจหลัง deploy
