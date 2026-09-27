@@ -27,10 +27,7 @@ export interface GoldPriceQuote {
  * ยืนยันกับกระดานราคาจริง 27 ก.ย. 2569: 67,850 → 67,650 → 64,268
  * ทองรูปพรรณต้องปัดครึ่งขึ้น (HALF_UP) ไม่ใช่ปัดเลขคู่ — 64,267.50 → 64,268
  */
-export function deriveGoldPrice(
-  barSell: Numeric,
-  setting: GoldPriceSetting = DEFAULT_GOLD_SETTING,
-): GoldPriceQuote {
+export function deriveGoldPrice(barSell: Numeric, setting: GoldPriceSetting = DEFAULT_GOLD_SETTING): GoldPriceQuote {
   const sell = parseDecimal(barSell);
   if (!sell || sell.lte(0)) throw new RangeError("ราคาทองแท่งขายออกต้องเป็นตัวเลขมากกว่า 0");
   const barBuy = sell.minus(D(setting.diff));

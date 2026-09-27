@@ -49,7 +49,10 @@ export const user = pgTable("user", {
   // app fields
   role: text("role", { enum: ROLES }).notNull().default("staff"),
   branchId: uuid("branch_id").references(() => branch.id),
-  allowedBranchIds: uuid("allowed_branch_ids").array().notNull().default(sql`'{}'::uuid[]`),
+  allowedBranchIds: uuid("allowed_branch_ids")
+    .array()
+    .notNull()
+    .default(sql`'{}'::uuid[]`),
   canViewAll: boolean("can_view_all").notNull().default(false),
   isActive: boolean("is_active").notNull().default(true),
 });
@@ -204,14 +207,20 @@ export const buyReceipt = pgTable(
     fullTax: boolean("full_tax").notNull().default(false),
     totalWeight: grams("total_weight").notNull(),
     totalAmount: money("total_amount").notNull(),
-    status: text("status", { enum: ["active", "void"] }).notNull().default("active"),
+    status: text("status", { enum: ["active", "void"] })
+      .notNull()
+      .default("active"),
     pdfKey: text("pdf_key"),
     pdfSha256: text("pdf_sha256"),
-    pdfStatus: text("pdf_status", { enum: ["pending", "ready", "failed"] }).notNull().default("pending"),
+    pdfStatus: text("pdf_status", { enum: ["pending", "ready", "failed"] })
+      .notNull()
+      .default("pending"),
     pdfGeneratedAt: tz("pdf_generated_at"),
     idcardPdfKey: text("idcard_pdf_key"),
     idcardSha256: text("idcard_sha256"),
-    idcardStatus: text("idcard_status", { enum: ["none", "pending", "ready", "failed"] }).notNull().default("none"),
+    idcardStatus: text("idcard_status", { enum: ["none", "pending", "ready", "failed"] })
+      .notNull()
+      .default("none"),
     createdBy: text("created_by")
       .notNull()
       .references(() => user.id),

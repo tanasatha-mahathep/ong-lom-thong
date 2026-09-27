@@ -43,7 +43,9 @@ describe("quoteBuy — ใบจริง: 5.860 กรัม รับซื้
   });
 
   it("ราคา/กรัม ปัดครึ่งขึ้น: 1 ÷ 8 = 0.125 → 0.13 (banker's จะให้ 0.12)", () => {
-    const r = quoteBuy(base({ lines: [{ metalId: GOLD, weightG: "8", amount: "1" }], payments: [{ method: "cash", amount: "1" }] }));
+    const r = quoteBuy(
+      base({ lines: [{ metalId: GOLD, weightG: "8", amount: "1" }], payments: [{ method: "cash", amount: "1" }] }),
+    );
     expect(r.lines[0]?.pricePerG).toBe("0.13");
   });
 });

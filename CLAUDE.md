@@ -3,11 +3,13 @@
 ระบบซื้อเข้าหน้าร้าน + สมาชิก ของร้านทอง "โอเอ็นจี หลอมทอง" — **production จริง** ตัวเลขทุกตัวคือเงินและเอกสารภาษี
 
 ## อ่านก่อนเขียน
+
 - สเปก: `../Work_2026-09-27/05-spec-vite-tanstack.md` (routes · โมเดล · API · กฎ R1–R15 · PDF · deploy)
 - ผลสำรวจระบบเดิม PHP: `../Work_2026-09-27/01–04` — ทุกกฎมีที่มาจากระบบเดิมหรือใบจริง **ไม่เดา**
 - reference จาก Django รุ่นก่อน (ไม่ใช้ Python แล้ว แต่สูตร/เทมเพลตพิมพ์พิสูจน์กับใบจริงแล้ว): `../Work_2026-09-27/reference-django/`
 
 ## กฎที่ห้ามละเมิด
+
 1. **เงินและน้ำหนักเป็น `decimal.js` / `numeric` เท่านั้น — ห้าม `number`/`float8`** · API ส่งเป็น string
 2. **คำนวณฝั่งเซิร์ฟเวอร์** — `quoteBuy()` ใน `packages/core` ตัวเดียวใช้ทั้ง preview และ save ห้ามมีสูตรที่สอง
 3. ปัดเศษ: เงิน HALF_UP 2 · น้ำหนัก 3 · ราคาทองรูปพรรณ HALF_UP 0 · ต้นทุน/กรัม (โหมดประเมิน) FLOOR
@@ -18,4 +20,5 @@
 8. ห้าม commit `.env` · ห้ามเอาข้อมูลลูกค้าจริงขึ้น staging
 
 ## คำสั่ง
+
 `pnpm test` (ต้องเขียวก่อน commit) · `pnpm typecheck` · `pnpm dev` · `pnpm db:generate` หลังแก้ schema · plpgsql อยู่ `packages/db/sql/functions.sql`

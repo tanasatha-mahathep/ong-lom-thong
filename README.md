@@ -32,10 +32,10 @@ services/gotenberg  image Gotenberg + ฟอนต์ Sarabun
 
 ## Railway (project เดียว · region Singapore)
 
-| service | root directory | config |
-|---|---|---|
-| api | `/` (repo root) | `railway.json` → `apps/api/Dockerfile` · env จาก `.env.example` |
-| gotenberg | `services/gotenberg` | `services/gotenberg/railway.json` · private only |
-| postgres | Railway Postgres | `DATABASE_URL` reference |
-| bucket | Railway Object Storage | `S3_*` env · private |
-| cron | root, cron schedule | `pg_dump` + `rclone` → R2/B2 ทุกคืน |
+| service   | root directory         | config                                                          |
+| --------- | ---------------------- | --------------------------------------------------------------- |
+| api       | `/` (repo root)        | `railway.json` → `apps/api/Dockerfile` · env จาก `.env.example` |
+| gotenberg | `services/gotenberg`   | `services/gotenberg/railway.json` · private only                |
+| postgres  | Railway Postgres       | `DATABASE_URL` reference                                        |
+| bucket    | Railway Object Storage | `S3_*` env · private                                            |
+| cron      | root, cron schedule    | `pg_dump` + `rclone` → R2/B2 ทุกคืน                             |
