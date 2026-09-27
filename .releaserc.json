@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json.schemastore.org/semantic-release",
+  "branches": ["main"],
+  "tagFormat": "v${version}",
+  "plugins": [
+    ["@semantic-release/commit-analyzer", { "preset": "conventionalcommits" }],
+    [
+      "@semantic-release/release-notes-generator",
+      {
+        "preset": "conventionalcommits",
+        "presetConfig": {
+          "types": [
+            { "type": "feat", "section": "ฟีเจอร์ใหม่" },
+            { "type": "fix", "section": "แก้บั๊ก" },
+            { "type": "perf", "section": "ประสิทธิภาพ" },
+            { "type": "revert", "section": "ย้อนการเปลี่ยนแปลง" },
+            { "type": "refactor", "hidden": true },
+            { "type": "docs", "hidden": true },
+            { "type": "style", "hidden": true },
+            { "type": "test", "hidden": true },
+            { "type": "build", "hidden": true },
+            { "type": "ci", "hidden": true },
+            { "type": "chore", "hidden": true }
+          ]
+        }
+      }
+    ],
+    "@semantic-release/github"
+  ]
+}

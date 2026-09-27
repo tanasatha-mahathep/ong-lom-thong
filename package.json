@@ -26,6 +26,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "prepare": "husky",
+    "release": "semantic-release",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "pnpm -r typecheck"
@@ -35,6 +36,7 @@
     "@commitlint/config-conventional": "^21.2.3",
     "@eslint/js": "^10.0.1",
     "@types/node": "^22",
+    "conventional-changelog-conventionalcommits": "^10.4.0",
     "eslint": "^10.11.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.1.1",
@@ -43,6 +45,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^17.6.0",
     "prettier": "^3.9.9",
+    "semantic-release": "^25.0.9",
     "sort-package-json": "^4.0.0",
     "typescript": "^5.9",
     "typescript-eslint": "^8.70.1",
