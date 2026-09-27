@@ -23,13 +23,22 @@
     "format:check": "prettier --check .",
     "infra:down": "docker compose down",
     "infra:up": "docker compose up -d",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.12.0",
     "prettier": "^3.9.9",
-    "typescript": "^5.9"
+    "typescript": "^5.9",
+    "typescript-eslint": "^8.70.1"
   },
   "packageManager": "pnpm@10.18.2",
   "engines": {
