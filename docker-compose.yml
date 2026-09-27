@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine # ตรงกับ Railway postgres() (postgres-ssl:18)
     environment:
       POSTGRES_DB: ong
       POSTGRES_USER: ong
@@ -8,7 +8,8 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # PG 18 ย้าย PGDATA ไปใต้ /var/lib/postgresql/18 — mount ที่ระดับนี้ตามคำแนะนำของ image
+      - pgdata18:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ong"]
       interval: 5s
@@ -47,5 +48,5 @@ services:
       "
 
 volumes:
-  pgdata:
+  pgdata18:
   miniodata:
