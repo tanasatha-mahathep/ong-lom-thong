@@ -13,3 +13,9 @@ coverage/
 # local data (postgres/minio volumes live in docker, nothing here — but never commit dumps)
 *.dump
 *.sql.gz
+
+# railway link state — เก็บเฉพาะไฟล์ IaC
+.railway/*
+!.railway/railway.ts
+!.railway/README.md
+!.railway/tsconfig.json
