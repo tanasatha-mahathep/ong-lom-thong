@@ -24,7 +24,7 @@ pnpm build               # web → apps/web/dist · api → apps/api/dist
 
 ## Commit / release
 
-Conventional Commits บังคับด้วย commitlint + husky (`pre-commit` = lint-staged: eslint · prettier · sort-package-json)
+Conventional Commits (ภาษาอังกฤษ) บังคับด้วย commitlint + husky (`pre-commit` = lint-staged: eslint · prettier · sort-package-json)
 push เข้า `main` → CI (commitlint · lint · format · typecheck · test · build) → semantic-release ออก tag `vX.Y.Z` + GitHub Release
 
 ## โครง

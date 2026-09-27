@@ -1,9 +1,17 @@
-/** Conventional Commits — semantic-release อ่าน type จาก commit เพื่อออกเลขเวอร์ชัน */
+/** Conventional Commits ภาษาอังกฤษ — semantic-release อ่าน type จาก commit เพื่อออกเลขเวอร์ชัน */
+const THAI = /[฀-๿]/;
+
 export default {
   extends: ["@commitlint/config-conventional"],
+  plugins: [
+    {
+      rules: {
+        "english-only": ({ raw }) => [!THAI.test(raw ?? ""), "commit message must be written in English"],
+      },
+    },
+  ],
   rules: {
-    // หัวเรื่องเป็นภาษาไทยปนชื่อเฉพาะ (Hono, Vite, README) — ไม่มีตัวพิมพ์เล็ก/ใหญ่ให้บังคับ
-    "subject-case": [0],
+    "english-only": [2, "always"],
     "scope-enum": [2, "always", ["core", "db", "api", "web", "gotenberg", "deps", "release"]],
   },
 };

@@ -26,7 +26,7 @@
 
 ## Commit
 
-- **Conventional Commits** — commitlint (husky `commit-msg`) ปฏิเสธข้อความผิดรูป · semantic-release ออกเวอร์ชันจาก type
+- **Conventional Commits ภาษาอังกฤษเท่านั้น** (header + body) — commitlint (husky `commit-msg`) ปฏิเสธข้อความผิดรูป · semantic-release ออกเวอร์ชันจาก type
 - `feat` = minor · `fix`/`perf` = patch · `BREAKING CHANGE:` = major · `chore` `ci` `docs` `style` `test` `build` `refactor` ไม่ออกเวอร์ชัน
-- scope: `core` `db` `api` `web` `gotenberg` `deps` `release` (หรือไม่ใส่) · หัวเรื่องภาษาไทยได้ · บรรทัด body ≤ 100 ตัวอักษร
+- scope: `core` `db` `api` `web` `gotenberg` `deps` `release` (หรือไม่ใส่) · subject ขึ้นต้นตัวพิมพ์เล็ก รูปคำสั่ง (`add …` ไม่ใช่ `Added …`) · บรรทัด body ≤ 100 ตัวอักษร
 - แยก commit ตามเรื่อง · ห้าม `--no-verify` · ห้ามแก้ `version` ใน package.json เอง
