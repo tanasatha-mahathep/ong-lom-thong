@@ -9,7 +9,7 @@ TypeScript ล้วน · Vite + TanStack (web) · Hono (api) · Drizzle + Post
 ```bash
 pnpm install
 cp .env.example .env
-pnpm infra:up            # postgres · gotenberg (+ฟอนต์ Sarabun) · minio (S3 local)
+pnpm infra:up            # postgres 18 · gotenberg (+ฟอนต์ Sarabun) · minio (S3 local)
 pnpm db:migrate && pnpm db:seed
 pnpm dev                 # web http://localhost:5173 (proxy /api → api :8787)
 ```
@@ -37,12 +37,16 @@ packages/db     Drizzle schema · migrations · plpgsql (sql/functions.sql)
 services/gotenberg  image Gotenberg + ฟอนต์ Sarabun
 ```
 
-## Railway (project เดียว · region Singapore)
+## Railway (project `ong-pos` · region Singapore)
 
-| service   | root directory         | config                                                          |
-| --------- | ---------------------- | --------------------------------------------------------------- |
-| api       | `/` (repo root)        | `railway.json` → `apps/api/Dockerfile` · env จาก `.env.example` |
-| gotenberg | `services/gotenberg`   | `services/gotenberg/railway.json` · private only                |
-| postgres  | Railway Postgres       | `DATABASE_URL` reference                                        |
-| bucket    | Railway Object Storage | `S3_*` env · private                                            |
-| cron      | root, cron schedule    | `pg_dump` + `rclone` → R2/B2 ทุกคืน                             |
+โครงสร้างทั้งหมดอยู่ใน [`.railway/railway.ts`](.railway/railway.ts) (Infrastructure as Code) — วิธีตั้งครั้งแรก · ค่าลับ · ตรวจหลัง deploy: [`.railway/README.md`](.railway/README.md)
+
+| resource  | ที่มา                                       | หมายเหตุ                                                  |
+| --------- | ------------------------------------------- | --------------------------------------------------------- |
+| api       | `apps/api/Dockerfile` (context = root repo) | เสิร์ฟ web + REST · pre-deploy migrate · public domain    |
+| gotenberg | `services/gotenberg`                        | private only · basic auth · `PORT=3000`                   |
+| Postgres  | Railway Postgres 18                         | `DATABASE_URL` reference                                  |
+| files     | Railway Bucket (`sin`)                      | `S3_*` reference · private · ไม่มี versioning/object lock |
+| cron      | ยังไม่ทำ                                    | `pg_dump` + `rclone` → R2/B2 ทุกคืน (ภาคบังคับ)           |
+
+branch `staging` → environment staging · `main` → production · Railway รอ CI ผ่านก่อน deploy
