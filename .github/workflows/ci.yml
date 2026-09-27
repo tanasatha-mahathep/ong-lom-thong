@@ -2,7 +2,8 @@ name: ci
 
 on:
   push:
-    branches: [main, staging] # staging = Railway staging environment
+    # dev → testing → staging → main (promote แบบ fast-forward) · release ออกจาก main เท่านั้น
+    branches: [main, staging, testing, dev]
   pull_request:
 
 concurrency:
@@ -60,7 +61,7 @@ jobs:
     timeout-minutes: 10
     concurrency: release
     permissions:
-      contents: write # tag + GitHub Release + commit CHANGELOG.md + sync staging
+      contents: write # tag + GitHub Release + commit CHANGELOG.md + sync branches
       issues: write # คอมเมนต์ใน issue ที่ถูกปิดโดย release
       pull-requests: write
     steps:
@@ -79,16 +80,23 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # release commit (CHANGELOG.md) อยู่บน main แล้ว — ดึง staging ตามให้ promote ครั้งหน้ายัง fast-forward ได้
-      # ปกติเป็น fast-forward · ถ้า staging มี commit ใหม่ระหว่างนั้นจะเป็น merge commit (CHANGELOG ไม่ชนกับงานบน staging)
-      - name: sync staging with main
+      # release commit (CHANGELOG.md) อยู่บน main แล้ว — ดึง staging/testing/dev ตามให้ promote ครั้งหน้ายัง fast-forward ได้
+      # ปกติเป็น fast-forward · ถ้า branch มี commit ใหม่ระหว่างนั้นจะเป็น merge commit (CHANGELOG ไม่ชนกับงานบน branch)
+      - name: sync branches with main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           remote="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git fetch "$remote" main:refs/remotes/origin/main staging:refs/remotes/origin/staging
-          git checkout -B staging origin/staging
-          git merge --no-edit origin/main
-          git push "$remote" HEAD:staging
+          git fetch "$remote" main:refs/remotes/origin/main
+          for branch in staging testing dev; do
+            if ! git ls-remote --exit-code --heads "$remote" "$branch" >/dev/null; then
+              echo "skip $branch (no such branch)"
+              continue
+            fi
+            git fetch "$remote" "$branch:refs/remotes/origin/$branch"
+            git checkout -B "$branch" "origin/$branch"
+            git merge --no-edit origin/main
+            git push "$remote" "HEAD:$branch"
+          done
