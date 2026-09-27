@@ -116,5 +116,5 @@ export default defineRailway((ctx) => {
     },
   });
 
-  return project("ong-pos", { resources: [db, files, gotenberg, api] });
+  return project("Ong Lom Thong", { resources: [db, files, gotenberg, api] });
 });
