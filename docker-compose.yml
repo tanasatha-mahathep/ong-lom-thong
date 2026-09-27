@@ -17,6 +17,9 @@ services:
 
   gotenberg:
     build: ./services/gotenberg
+    environment:
+      GOTENBERG_API_BASIC_AUTH_USERNAME: ong
+      GOTENBERG_API_BASIC_AUTH_PASSWORD: ongongong
     ports:
       - "3000:3000"
 
