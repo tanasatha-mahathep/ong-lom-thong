@@ -1401,10 +1401,15 @@ describe.skipIf(!available)("ซื้อเข้า — สัญญาที�
       { who: "multi", branch: "00000", allow: ["00001"] }, // สาขาหลัก 00000 + มีสิทธิ์ 00001
       { who: "staff", branch: "00000" },
       { who: "staff2", branch: "00002" },
+      { who: "manager2", role: "manager" as const, branch: "00002" }, // บิลย้อนหลังได้เฉพาะผู้จัดการขึ้นไป
     ];
     for (const { who, ...a } of accounts) {
       ids[who] = (await t.createUser({ email: `gap-${who}@ong.test`, password: PW, ...a })).id;
       cookies[who] = await t.login(`gap-${who}@ong.test`, PW);
+    }
+    // ใบรับซื้อต้องมีรหัสสาขาของกรมสรรพากร (ไม่งั้นบันทึกไม่ได้ — BUY_API_MSG.noTaxBranchCode) · รหัสสมมติตาม code
+    for (const code of ["00001", "00002"]) {
+      await t.db.update(branch).set({ taxBranchCode: code }).where(eq(branch.code, code));
     }
     const [g] = await t.db.select({ id: metal.id }).from(metal).where(eq(metal.code, "gold"));
     gold = g?.id ?? "";
@@ -1552,50 +1557,62 @@ describe.skipIf(!available)("ซื้อเข้า — สัญญาที�
     expectMoneyAsStrings(JSON.parse(detailText), "GET /api/buy/:id");
   });
 
-  it("audit (R12): บิลย้อนหลัง → buy.backdate แถวเดียว · user_id คือคนเปิดบิล · audit_log ทั้งตารางไม่มีเลขบัตรเต็ม", async () => {
-    const res = await save(bill({ date: BACKDATE }), cookies.staff2);
+  it("audit (R12): บิลย้อนหลังโดยผู้จัดการพร้อมเหตุผล → buy.backdate แถวเดียว · user_id คือคนเปิดบิล · เหตุผลอยู่ใน diff · audit_log ทั้งตารางไม่มีเลขบัตรเต็ม", async () => {
+    const reason = "ทดสอบ ระบบล่ม คีย์ใบเขียนมือ";
+    const res = await save(bill({ date: BACKDATE, time: "16:30", backdate_reason: reason }), cookies.manager2);
     expect(res.status).toBe(201);
     const { id, doc_no } = (await res.json()) as { id: string; doc_no: string };
     const rows = await t.db.select().from(auditLog).where(eq(auditLog.rowId, id));
     expect(rows).toEqual([
-      expect.objectContaining({ action: "buy.backdate", tableName: "buy_receipt", userId: ids.staff2 }),
+      expect.objectContaining({ action: "buy.backdate", tableName: "buy_receipt", userId: ids.manager2 }),
     ]);
-    expect(rows[0]?.diff).toMatchObject({ doc_no, date: BACKDATE, entered_on: TODAY_BE });
+    expect(rows[0]?.diff).toMatchObject({ doc_no, date: BACKDATE, time: "16:30", entered_on: TODAY_BE, reason });
     const all = await t.db.select().from(auditLog);
     expectNoNationalId(JSON.stringify(all), "audit_log ทั้งตาราง", knownIds);
   });
 
-  // F14 — ต้นเหตุเดียวกับ F6 แต่คนละ endpoint: quoteBuy (packages/core/src/buy.ts:135-136 · :186) ใช้ parseDecimal
-  // (packages/core/src/money.ts:8-28) ซึ่งรับไวยากรณ์เต็มของ decimal.js (0x/0b/0o · e-notation · "_") และลบ "," ทุกตำแหน่ง
-  // → "0x5" กรัม = 5 กรัม · "2.003e4" บาท = 20,030 บาท ผ่านเป็นแถวที่ถูกต้องและบันทึกได้ (ASVS 4.0.3 V5.1.3 · V5.1.4)
-  // เพดาน 999,999.999 กรัม / ยอดต่อแถวกัน DoS ของ e-notation ไว้แล้ว — เหลือแค่รูปแบบที่ไม่ใช่ตัวเลขเงินปกติ
-  // ที่ถูก: ช่องนั้นถูกปฏิเสธ (400 หรือ ok:false ที่ lines.0.weight_g / lines.0.amount) · แก้: รูปแบบเข้มใน parseDecimal (แก้ F6 พร้อมกัน)
-  it.fails(
-    "F14 — /api/buy/quote: น้ำหนัก/ราคารูปแบบที่ไม่ใช่ตัวเลขปกติ (hex · binary · octal · e-notation · _ · , ผิดตำแหน่ง) ต้องถูกปฏิเสธที่ช่องนั้น",
-    async () => {
-      const cases: [string, Record<string, string>][] = [
-        ["lines.0.weight_g", { weight_g: "0x5" }],
-        ["lines.0.weight_g", { weight_g: "0b101" }],
-        ["lines.0.weight_g", { weight_g: "5.86e0" }],
-        ["lines.0.weight_g", { weight_g: "5_860" }],
-        ["lines.0.amount", { amount: "0x4e3e" }],
-        ["lines.0.amount", { amount: "0o47076" }],
-        ["lines.0.amount", { amount: "2.003e4" }],
-        ["lines.0.amount", { amount: "2,00,30" }],
-      ];
-      const flagged: { field: string; input: string; rejected: boolean }[] = [];
-      for (const [field, over] of cases) {
-        const res = await quote(
-          bill({ lines: [{ metal_id: gold, weight_g: "5.860", amount: "20030", ...over }] }),
-          cookies.staff,
-        );
-        const body = (await res.json()) as { field?: string; errors?: { field: string }[] };
-        const fields = [body.field, ...(body.errors ?? []).map((e) => e.field)];
-        flagged.push({ field, input: Object.values(over).join(""), rejected: fields.includes(field) });
-      }
-      expect(flagged).toEqual(flagged.map((f) => ({ ...f, rejected: true })));
-    },
-  );
+  // F14 — แก้แล้วใน dev (PR #53 · fix(core): reject thousands separators in weights): quoteBuy ใช้ parser เข้มตัวเดียวกับ F6
+  // น้ำหนักรับเฉพาะตัวเลขล้วน ("5,860" ที่ตั้งใจพิมพ์ 5.860 เคยถูกอ่านเป็น 5,860 กรัม) · ราคารับตัวเลขล้วนหรือคั่นหลักพันถูกต้อง
+  // เดิมเป็น it.fails ("0x5" กรัม = 5 กรัม · "2.003e4" บาท = 20,030 บาท) · ตอนนี้ตรึงพฤติกรรมที่ถูกไว้
+  it("F14 (แก้แล้ว) — /api/buy/quote: น้ำหนักรับเฉพาะตัวเลขล้วน · ราคารับตัวเลขล้วนหรือคั่นหลักพันถูกต้อง · รูปแบบอื่นถูกปฏิเสธที่ช่องนั้น", async () => {
+    const quoteLine = async (weight_g: string, amount: string) => {
+      const res = await quote(
+        bill({ lines: [{ metal_id: gold, weight_g, amount }], payments: [{ method: "cash", amount: "20030" }] }),
+        cookies.staff,
+      );
+      expect(res.status, `${weight_g} / ${amount}`).toBe(200);
+      return (await res.json()) as {
+        ok: boolean;
+        errors: { field: string }[];
+        total_weight: string;
+        total_amount: string;
+      };
+    };
+    const rejected: [string, string, string][] = [
+      ...["0x5", "0b101", "5.86e0", "5_860", "5,860", ".5", "5."].map((w): [string, string, string] => [
+        "lines.0.weight_g",
+        w,
+        "20030",
+      ]),
+      ...["0x4e3e", "0o47076", "2.003e4", "2,00,30", "20,03"].map((a): [string, string, string] => [
+        "lines.0.amount",
+        "5.860",
+        a,
+      ]),
+    ];
+    for (const [field, weight, amount] of rejected) {
+      const q = await quoteLine(weight, amount);
+      expect(q.ok, `${weight} / ${amount}`).toBe(false);
+      expect(
+        q.errors.map((e) => e.field),
+        `${weight} / ${amount}`,
+      ).toContain(field);
+    }
+    for (const amount of ["20030", "20,030", "20,030.00"]) {
+      const q = await quoteLine("5.860", amount);
+      expect(q, amount).toMatchObject({ ok: true, errors: [], total_weight: "5.860", total_amount: "20030.00" });
+    }
+  });
 
   // F15 — routes/buy.ts readJson (c.req.json()) ไม่ดู Content-Type → body JSON ที่ส่งเป็น text/plain (ชนิดที่ฟอร์ม HTML ข้ามเว็บ
   // ส่งได้โดยไม่มี preflight) ถูกรับเหมือน application/json และบันทึกบิลได้จริง · ด่าน Origin (lib/origin.ts) ยังกันข้ามเว็บอยู่

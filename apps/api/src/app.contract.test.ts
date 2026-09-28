@@ -14,6 +14,7 @@ import {
 import { and, count, eq, isNull, max } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app";
+import { UNUSABLE_CHARS_MSG } from "./lib/text";
 import { expectApiError, expectMoneyAsStrings, expectNoInternals } from "./test/assertions";
 import { type TestApp, type TestUser, databaseAvailable, startTestApp } from "./test/harness";
 import { expectNoNationalId, nationalIdsIn } from "./test/pii";
@@ -27,7 +28,7 @@ import { cardFormat, syntheticNationalId, testName } from "./test/synthetic";
  * โดนตรวจทุกข้อข้างล่างทันทีโดยไม่ต้องแก้ไฟล์นี้ — ลืม requireSession · ลืมกัน CSRF · id ผิดรูปแล้ว 500 · error หลุด
  * ร่องรอยภายใน · หลุดเลขบัตร · เงินเป็น float · เปิด CORS · ผู้ใช้ไม่มีสาขาได้ข้อมูล · body ผิดรูปแล้ว 500 = แดง
  * ข้อยกเว้นทุกข้ออยู่ใน allowlist ด้านล่างพร้อมเหตุผล · ช่องโหว่ที่รู้แล้วมี it.fails ของตัวเองหนึ่งข้อต่อ finding
- * (F4 · F7 · F8 · F9 · F13) — แก้แล้ว it.fails จะแดง: เปลี่ยนเป็น it และลบค่าคงที่ของ finding นั้นออก
+ * (F4 · F7 · F8) — แก้แล้ว it.fails จะแดง: เปลี่ยนเป็น it และลบค่าคงที่ของ finding นั้นออก (F9 · F13 แก้แล้ว — ตรึงเป็น it)
  *
  * มาตรฐาน: OWASP ASVS 4.0.3 (V3.3 · V4.1 · V4.2 · V5.1 · V7.4.1 · V8.2.1 · V8.3 · V13.2 · V14.5.3) และ 5.0 ·
  * OWASP API Security Top 10 2023 (API1 · API2 · API3 · API5 · API8 · API9) · RFC 9110 §9.2.1 (safe methods) ·
@@ -807,41 +808,47 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
       });
     }
 
-    // F9 — NUL byte (U+0000) ในข้อความที่ส่งเข้ามาไปถึง Postgres ซึ่งปฏิเสธ (22021 invalid byte sequence for encoding "UTF8": 0x00)
-    // → 500 ทั้งค้นลูกค้าและบันทึกลูกค้า · เครื่องอ่านบัตรบางรุ่นเติม NUL ท้ายช่องได้ · id ใน path ไม่โดน (ตรวจ uuid ก่อนถึง DB)
-    // ที่ถูก: 400 ชี้ช่อง (หรือตัด NUL ทิ้งก่อนบันทึก) · แก้: ปฏิเสธ/ตัด \u0000 ใน zod schema ของข้อความ (ListQuery.q · CustomerInput)
-    it.fails("F9 — ข้อความที่มี NUL byte (U+0000) ต้องไม่ทำให้ 500 (ค้นลูกค้า · เพิ่มลูกค้า · แก้ลูกค้า)", async () => {
-      await expectNot5xx(await hit("/api/customers?q=a%00b", { cookie: cookies.super }), "GET /api/customers?q=a%00b");
+    // F9 · F13 — แก้แล้วใน dev (PR #53 · fix(api): reject malformed UTF-16 in free-text input): อักขระควบคุม (เช่น NUL)
+    // และ surrogate ที่ไม่มีคู่ในช่องข้อความอิสระ → 400 ชี้ช่อง ก่อนถึง Postgres (เดิม 22021 → 500 · เป็น it.fails สองตัว)
+    const unusable = (field: string) => ({ error: UNUSABLE_CHARS_MSG, field });
+
+    it("F9 (แก้แล้ว) — ลูกค้า: NUL byte ในคำค้น · ชื่อ · ที่อยู่ → 400 ชี้ช่อง · ไม่มีอะไรถูกบันทึก", async () => {
+      const cookie = cookies.super;
+      const before = await sideEffects();
+      const search = await hit("/api/customers?q=a%00b", { cookie });
+      expect(await expectApiError(search, 400, "GET /api/customers?q=a%00b")).toEqual(unusable("q"));
       const created = customerForm(syntheticNationalId(), "มี NUL");
       created.set("name_th", `${testName("มี")}\u0000NUL`);
-      const post = await hit("/api/customers", { method: "POST", cookie: cookies.super, body: created });
-      await expectNot5xx(post, "POST /api/customers (name_th มี NUL)");
+      const post = await hit("/api/customers", { method: "POST", cookie, body: created });
+      expect(await expectApiError(post, 400, "POST /api/customers (name_th มี NUL)")).toEqual(unusable("name_th"));
       const updated = customerForm(ID_NO_PHOTO, "ลูกค้าไม่มีรูป");
       updated.set("address", "1 ถ.ทดสอบ\u0000");
-      const put = await hit(`/api/customers/${custNoPhoto}`, { method: "PUT", cookie: cookies.super, body: updated });
-      await expectNot5xx(put, "PUT /api/customers/:id (address มี NUL)");
+      const put = await hit(`/api/customers/${custNoPhoto}`, { method: "PUT", cookie, body: updated });
+      expect(await expectApiError(put, 400, "PUT /api/customers/:id (address มี NUL)")).toEqual(unusable("address"));
+      expect(await sideEffects()).toEqual(before);
     });
 
-    // F13 — แบบเดียวกับ F9 แต่ที่ /api/buy (โค้ดคนละชุด): apps/api/src/services/buy.ts ListQuery.q/.metal ไปถึง ilike/eq ของ
-    // Postgres และ SaveBody.detail · payments[].bank (optionalText) ไปถึง INSERT → 22021 → 500 ทั้งค้นบิลและบันทึกบิล
-    // ที่ถูก: 400 ชี้ช่อง หรือตัด NUL ทิ้ง · แก้: ปฏิเสธ \u0000 ใน decimalText/optionalText/ListQuery ของ services/buy.ts
-    it.fails(
-      "F13 — /api/buy: NUL byte (U+0000) ในคำค้น · ตัวกรองโลหะ · detail · ชื่อธนาคาร ต้องไม่ทำให้ 500",
-      async () => {
-        const cookie = cookies.super;
-        for (const path of ["/api/buy?q=a%00b", "/api/buy?metal=%00"]) {
-          await expectNot5xx(await hit(path, { cookie }), `GET ${path}`);
-        }
-        const bills: [string, Record<string, unknown>][] = [
-          ["detail มี NUL", { detail: "ทดสอบ\u0000" }],
-          ["ชื่อธนาคารมี NUL", { payments: [{ method: "transfer", bank: "ทดสอบ\u0000", amount: "20030" }] }],
-        ];
-        for (const [label, over] of bills) {
-          const body = { ...billBody(), idempotency_key: `nul-${randomUUID()}`, ...over };
-          await expectNot5xx(await hit("/api/buy", { method: "POST", cookie, body }), `POST /api/buy (${label})`);
-        }
-      },
-    );
+    it("F13 (แก้แล้ว) — /api/buy: NUL byte ในคำค้น · ตัวกรองโลหะ · detail · ชื่อธนาคาร → 400 ชี้ช่อง · ไม่มีอะไรถูกบันทึก", async () => {
+      const cookie = cookies.super;
+      const before = await sideEffects();
+      const reads: [string, string][] = [
+        ["/api/buy?q=a%00b", "q"],
+        ["/api/buy?metal=%00", "metal"],
+      ];
+      for (const [path, field] of reads) {
+        expect(await expectApiError(await hit(path, { cookie }), 400, `GET ${path}`)).toEqual(unusable(field));
+      }
+      const bills: [string, Record<string, unknown>][] = [
+        ["detail", { detail: "ทดสอบ\u0000" }],
+        ["payments.0.bank", { payments: [{ method: "transfer", bank: "ทดสอบ\u0000", amount: "20030" }] }],
+      ];
+      for (const [field, over] of bills) {
+        const body = { ...billBody(), idempotency_key: `nul-${randomUUID()}`, ...over };
+        const res = await hit("/api/buy", { method: "POST", cookie, body });
+        expect(await expectApiError(res, 400, `POST /api/buy (${field} มี NUL)`)).toEqual(unusable(field));
+      }
+      expect(await sideEffects()).toEqual(before);
+    });
   });
 
   describe("path/method ที่ไม่มี", () => {

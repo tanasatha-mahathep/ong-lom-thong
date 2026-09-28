@@ -568,35 +568,48 @@ describe.skipIf(!available)("สัญญา API ราคาทอง: สิ�
     },
   );
 
-  // F6 — root cause: packages/core/src/money.ts:8-12 D() ส่งข้อความให้ new Decimal() ตรง ๆ ซึ่งรับไวยากรณ์เต็มของ
-  // decimal.js (0x/0b/0o · e-notation · "_" คั่นหลัก) และ :11 ลบ "," ทุกตำแหน่ง → parseDecimal (:19-28) →
-  // quoteGoldPrice (apps/api/src/services/goldPrice.ts:39) ยอมรับ เช่น "0x10908" = 67,848 (ASVS V5.1.3/V5.1.4)
-  // ผลข้างเคียง (API4): e-notation สั้น ๆ ขยายเป็นตัวเลขยาวมากตอน toFixed — "1e10000" (7 ไบต์) ได้คำตอบ ~30 KB ·
-  // "1e1000000" (9 ไบต์) ได้ 3 MB และกิน CPU ~1 วินาที (decimal.js 10.6) → request เดียวหยุด event loop ของทั้งร้านได้
-  // แก้: trim แล้วตรวจรูปแบบเข้มก่อน D() — /^(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$/ · ผิดรูปตอบข้อความเดิม
-  // "ราคาทองแท่งขายออกต้องเป็นตัวเลขมากกว่า 0" · ทศนิยมเกิน 2 ปล่อยให้ด่านเดิมตอบ (เทสต์เดิมข้างบนจึงไม่พัง)
-  it.fails(
-    "F6 — POST /quote ปฏิเสธตัวเลขรูปแบบที่ไม่ใช่เงิน (hex · binary · octal · e-notation · _ · , ผิดตำแหน่ง) → 400 ชี้ช่อง bar_sell",
-    async () => {
-      onDay(DAY.guard);
-      const inputs = [
-        "0x10908",
-        "0b1", // = 1 · "0o17" = 15 — ตอนนี้ถูกปฏิเสธด้วยเหตุอื่น (ต่ำกว่าส่วนต่าง 200) ไม่ใช่เพราะรูปแบบ
-        "0o17",
-        "6.785e4",
-        "1_000",
-        "6,78,50",
-        "0b10000100100001010", // = 67,850 ในฐานสอง — ผ่านอยู่ตอนนี้
-        "0o204412", // = 67,850 ในฐานแปด — ผ่านอยู่ตอนนี้
-        "1e10000", // 7 ไบต์ → ตัวเลข 10,001 หลัก ×3 ช่องใน response (API4)
-      ];
-      const seen: { input: string; status: number; field: string | null }[] = [];
-      for (const input of inputs) {
-        seen.push({ input, ...(await outcome(await quote(cookies.staff, { bar_sell: input }))) });
-      }
-      expect(seen).toEqual(inputs.map((input) => ({ input, status: 400, field: "bar_sell" })));
-    },
-  );
+  // F6 — แก้แล้วใน dev (PR #53 · fix(core): strict parseDecimal): เงินที่ผู้ใช้พิมพ์รับเฉพาะตัวเลขล้วน (มีทศนิยมได้) หรือคั่นหลักพัน
+  // ถูกต้อง — hex/binary/octal · e-notation · "_" · คอมมาผิดตำแหน่ง · เครื่องหมาย · ช่องว่างกลางตัวเลข ถูกปฏิเสธ
+  // เดิมเป็น it.fails ("0x10908" = 67,848 · "1e1000000" ขยายเป็นคำตอบ 3 MB) · ตอนนี้ตรึงพฤติกรรมที่ถูกไว้ทั้ง quote และ PUT
+  it("F6 (แก้แล้ว) — bar_sell รับเฉพาะตัวเลขล้วนหรือคั่นหลักพันถูกต้อง: รูปแบบอื่น 400 ชี้ bar_sell ทั้ง quote และ PUT · ไม่เขียนอะไร", async () => {
+    onDay(DAY.guard);
+    const rejected = [
+      "0x10908", // hex = 67,848
+      "0b10000100100001010", // binary = 67,850
+      "0o204412", // octal = 67,850
+      "6.785e4", // e-notation
+      "1e10000", // e-notation ที่ขยายเป็นหมื่นหลัก (API4)
+      "1_000",
+      "6,78,50", // คอมมาผิดตำแหน่ง
+      "20,03",
+      "0,123", // น่าจะหมายถึง 0.123 ไม่ใช่ 123
+      ".5",
+      "5.",
+      "+67850",
+      "67 850", // ช่องว่างกลางตัวเลข
+    ];
+    const before = await writes();
+    const bad = { error: "ราคาทองแท่งขายออกต้องเป็นตัวเลขมากกว่า 0", field: "bar_sell" };
+    for (const bar_sell of rejected) {
+      expect(await expectApiError(await quote(cookies.staff, { bar_sell }), 400, `quote ${bar_sell}`)).toEqual(bad);
+      const res = await put(cookies.manager, { bar_sell, confirm_typo: true });
+      expect(await expectApiError(res, 400, `PUT ${bar_sell}`)).toEqual(bad);
+    }
+    expect(await writes()).toEqual(before);
+
+    const accepted: [string, string][] = [
+      ["67850", "67850.00"],
+      ["67850.5", "67850.50"],
+      ["67,850", "67850.00"], // คั่นหลักพันถูกต้อง
+      ["67,850.50", "67850.50"],
+      [" 67850 ", "67850.00"], // ช่องว่างหัวท้ายถูกตัด
+    ];
+    for (const [bar_sell, normalised] of accepted) {
+      const res = await quote(cookies.staff, { bar_sell });
+      expect(res.status, bar_sell).toBe(200);
+      expect(((await res.json()) as { bar_sell: string }).bar_sell, bar_sell).toBe(normalised);
+    }
+  });
 
   // F11 — root cause: apps/api/src/services/goldPrice.ts:94-98 setCentralPrice อ่าน before ด้วย SELECT … FOR UPDATE
   // ซึ่งล็อกแถวที่ยังไม่มีไม่ได้ (ราคาแรกของวัน) → PUT สองตัวพร้อมกัน (กดบันทึกซ้ำ · สองคนตั้งพร้อมกัน) เห็น before = null
