@@ -1,0 +1,5 @@
+# Playwright output — uploaded as CI artifacts, never committed
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
