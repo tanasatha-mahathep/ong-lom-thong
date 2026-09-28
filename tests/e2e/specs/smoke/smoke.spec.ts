@@ -26,7 +26,7 @@ test.describe("SPA shell — the api serves apps/web on the same origin", () => 
     expect(res.headers()["content-type"]).toContain("text/html");
     const html = await res.text();
     expect(html).toMatch(/<html[^>]*\blang="th"/);
-    expect(html).toContain('<div id="root"></div>');
+    expect(html).toMatch(/<div id="root"[^>]*>/); // the mount point, whatever a later build pre-renders into it
 
     // every script/stylesheet the shell references must come back as what it claims to be
     const assets = [...html.matchAll(/<(?:script[^>]*\ssrc|link[^>]*\shref)="(\/assets\/[^"]+)"/g)].map((m) => m[1]);
@@ -56,7 +56,7 @@ test.describe("SPA shell — the api serves apps/web on the same origin", () => 
 });
 
 test.describe("access control — fail closed without a session (spec §10 · ASVS V4)", () => {
-  for (const path of ["/api/me", "/api/customers", "/api/metals", "/api/gold-price/today"]) {
+  for (const path of ["/api/me", "/api/customers", "/api/metals", "/api/gold-price/today", "/api/buy"]) {
     test(`GET ${path} without a session is 401`, async ({ site }) => {
       expect((await expectApiError(await site.get(path), 401)).error).toBe("unauthorized");
     });
@@ -71,6 +71,8 @@ test.describe("access control — fail closed without a session (spec §10 · AS
 test.describe("CSRF — writes from another origin are refused before any handler (spec §10)", () => {
   const writes = [
     ["POST", "/api/customers"],
+    ["POST", "/api/buy"],
+    ["POST", "/api/buy/quote"],
     ["PUT", "/api/gold-price/today"],
     ["POST", "/api/me/branch"],
     ["POST", "/api/auth/sign-in/email"],
