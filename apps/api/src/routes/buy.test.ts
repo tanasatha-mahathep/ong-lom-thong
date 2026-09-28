@@ -302,10 +302,12 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     [{ detail: "สร้อย\u0000ขาด" }, "detail"],
     [{ detail: "bell\u0007" }, "detail"],
     [{ payments: [{ method: "transfer", bank: "KBANK\u0001", amount: "20030" }] }, "payments.0.bank"],
-  ])("อักขระควบคุมในข้อความ %j → 400 ชี้ %s", async (over, field) => {
+    [{ detail: "สร้อย\uD800ขาด" }, "detail"], // surrogate เดี่ยว (UTF-16 ไม่สมบูรณ์)
+    [{ date: "2026-09-30", time: "16:30", backdate_reason: "ระบบล่ม\uDC00คีย์ใบเขียนมือ" }, "backdate_reason"],
+  ])("อักขระที่ใช้ไม่ได้ในข้อความ %j → 400 ชี้ %s", async (over, field) => {
     const res = await save(bill(over));
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "มีอักขระที่ใช้ไม่ได้ (อักขระควบคุม)", field });
+    expect(await res.json()).toEqual({ error: "มีอักขระที่ใช้ไม่ได้", field });
   });
 
   it("tab · ขึ้นบรรทัดใหม่ ในรายละเอียดใช้ได้ (ผ่านการตรวจ ไปติดที่ quote แทน)", async () => {

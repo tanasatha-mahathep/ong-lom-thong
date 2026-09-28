@@ -203,7 +203,7 @@ describe.skipIf(!available)("ลูกค้า (Siam ID · R12 · R13) — /api
   ])("อักขระควบคุม %j → 400 ชี้ %s ไม่บันทึก", async (fields, field) => {
     const res = await post(form(fields));
     expect(res.status).toBe(400);
-    expect(await res.json()).toEqual({ error: "มีอักขระที่ใช้ไม่ได้ (อักขระควบคุม)", field });
+    expect(await res.json()).toEqual({ error: "มีอักขระที่ใช้ไม่ได้", field });
     expect(await t.db.select().from(customer).where(eq(customer.nationalId, ID_B))).toHaveLength(0);
   });
 

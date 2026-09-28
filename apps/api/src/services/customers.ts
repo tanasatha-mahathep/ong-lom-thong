@@ -5,7 +5,7 @@ import { and, desc, eq, ilike, like, ne, or, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { MAX_PHOTO_BYTES, sniffImage } from "../lib/image";
 import type { Storage } from "../lib/storage";
-import { CONTROL_CHARS_MSG, noControlChars } from "../lib/text";
+import { UNUSABLE_CHARS_MSG, isCleanText } from "../lib/text";
 
 export class CustomerInputError extends Error {
   constructor(
@@ -23,7 +23,7 @@ const optionalText = (max: number) =>
     .string()
     .trim()
     .max(max, `ยาวเกิน ${max} ตัวอักษร`)
-    .refine(noControlChars, CONTROL_CHARS_MSG)
+    .refine(isCleanText, UNUSABLE_CHARS_MSG)
     .optional()
     .transform((v) => (v ? v : null));
 
@@ -38,7 +38,7 @@ export const CustomerInput = z.object({
     .trim()
     .min(1, "กรุณากรอกชื่อ-นามสกุล")
     .max(200)
-    .refine(noControlChars, CONTROL_CHARS_MSG),
+    .refine(isCleanText, UNUSABLE_CHARS_MSG),
   name_en: optionalText(200),
   birthday_text: optionalText(50),
   religion: optionalText(50),
