@@ -7,6 +7,8 @@ import {
   House,
   type LucideIcon,
   ReceiptText,
+  Store,
+  UserCog,
   Users,
 } from "lucide-react";
 import type { Role } from "@/lib/queries";
@@ -32,6 +34,12 @@ export interface NavGroup {
 const BILL_CREATORS: readonly Role[] = ["staff", "manager", "admin"];
 /** ตั้งราคาทองวันนี้ — PUT /api/gold-price/today รับเฉพาะ manager/admin */
 const GOLD_PRICE_SETTERS: readonly Role[] = ["manager", "admin"];
+/** รายงานยอดซื้อ/สต็อก — พนักงานหน้าร้านไม่เห็นกลุ่มรายงาน */
+const REPORT_READERS: readonly Role[] = ["manager", "accounting", "admin"];
+/** ส่งบัญชีรายเดือน — POST /api/reports/export (spec §5) */
+const EXPORTERS: readonly Role[] = ["accounting", "admin"];
+/** จัดการสาขาและผู้ใช้ (หลายสาขา — เฟส 1) */
+const ADMINS: readonly Role[] = ["admin"];
 
 const NAV: readonly NavGroup[] = [
   {
@@ -45,14 +53,18 @@ const NAV: readonly NavGroup[] = [
   {
     title: "รายงาน",
     items: [
-      { title: "ยอดซื้อ", to: "/reports/purchase", icon: ChartColumn },
-      { title: "สต็อก", to: "/reports/stock", icon: Boxes },
-      { title: "ส่งบัญชีรายเดือน", to: "/reports/export", icon: FileArchive, roles: ["accounting", "admin"] },
+      { title: "ยอดซื้อ", to: "/reports/purchase", icon: ChartColumn, roles: REPORT_READERS },
+      { title: "สต็อก", to: "/reports/stock", icon: Boxes, roles: REPORT_READERS },
+      { title: "ส่งบัญชีรายเดือน", to: "/reports/export", icon: FileArchive, roles: EXPORTERS },
     ],
   },
   {
     title: "ตั้งค่า",
-    items: [{ title: "ราคาทองวันนี้", to: "/settings/gold-price", icon: Coins, roles: GOLD_PRICE_SETTERS }],
+    items: [
+      { title: "ราคาทองวันนี้", to: "/settings/gold-price", icon: Coins, roles: GOLD_PRICE_SETTERS },
+      { title: "สาขา", to: "/settings/branches", icon: Store, roles: ADMINS },
+      { title: "ผู้ใช้", to: "/settings/users", icon: UserCog, roles: ADMINS },
+    ],
   },
 ];
 

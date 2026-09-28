@@ -9,16 +9,31 @@ const titles = (role: Role) => navFor(role).flatMap((group) => group.items.map((
 
 describe("เมนูตาม role (spec §10)", () => {
   it.each<[Role, string[]]>([
-    ["staff", ["หน้าแรก", "ซื้อเข้า", "ค้นบิล", "ลูกค้า", "ยอดซื้อ", "สต็อก"]],
+    ["staff", ["หน้าแรก", "ซื้อเข้า", "ค้นบิล", "ลูกค้า"]],
     ["manager", ["หน้าแรก", "ซื้อเข้า", "ค้นบิล", "ลูกค้า", "ยอดซื้อ", "สต็อก", "ราคาทองวันนี้"]],
     ["accounting", ["หน้าแรก", "ค้นบิล", "ลูกค้า", "ยอดซื้อ", "สต็อก", "ส่งบัญชีรายเดือน"]],
-    ["admin", ["หน้าแรก", "ซื้อเข้า", "ค้นบิล", "ลูกค้า", "ยอดซื้อ", "สต็อก", "ส่งบัญชีรายเดือน", "ราคาทองวันนี้"]],
+    [
+      "admin",
+      [
+        "หน้าแรก",
+        "ซื้อเข้า",
+        "ค้นบิล",
+        "ลูกค้า",
+        "ยอดซื้อ",
+        "สต็อก",
+        "ส่งบัญชีรายเดือน",
+        "ราคาทองวันนี้",
+        "สาขา",
+        "ผู้ใช้",
+      ],
+    ],
   ])("%s เห็นเฉพาะเมนูที่ทำได้", (role, expected) => {
     expect(titles(role)).toEqual(expected);
   });
 
-  it("กลุ่มที่ไม่เหลือเมนูถูกซ่อนทั้งกลุ่ม", () => {
-    expect(navFor("staff").map((group) => group.title)).toEqual([undefined, "รายงาน"]);
+  it("กลุ่มที่ไม่เหลือเมนูถูกซ่อนทั้งกลุ่ม — พนักงานไม่เห็นรายงานและตั้งค่า", () => {
+    expect(navFor("staff").map((group) => group.title)).toEqual([undefined]);
+    expect(navFor("accounting").map((group) => group.title)).toEqual([undefined, "รายงาน"]);
   });
 });
 
@@ -47,6 +62,14 @@ describe("sidebar ของแอป", () => {
     expect(within(nav).queryByRole("link", { name: "ราคาทองวันนี้" })).not.toBeInTheDocument();
   });
 
+  it("ผู้ดูแลระบบจัดการสาขาและผู้ใช้ได้", async () => {
+    renderShell("admin");
+    const nav = await screen.findByRole("navigation", { name: "เมนูหลัก" });
+
+    expect(within(nav).getByRole("link", { name: "สาขา" })).toHaveAttribute("href", "/settings/branches");
+    expect(within(nav).getByRole("link", { name: "ผู้ใช้" })).toHaveAttribute("href", "/settings/users");
+  });
+
   it("ผู้จัดการมีปุ่มซื้อเข้า (Quick Create) + เมนูซื้อเข้า และตั้งราคาทองได้", async () => {
     renderShell("manager");
     const nav = await screen.findByRole("navigation", { name: "เมนูหลัก" });
@@ -56,6 +79,7 @@ describe("sidebar ของแอป", () => {
     for (const link of buyLinks) expect(link).toHaveAttribute("href", "/buy");
     expect(within(nav).getByRole("link", { name: "ราคาทองวันนี้" })).toHaveAttribute("href", "/settings/gold-price");
     expect(within(nav).queryByRole("link", { name: "ส่งบัญชีรายเดือน" })).not.toBeInTheDocument();
+    expect(within(nav).queryByRole("link", { name: "สาขา" })).not.toBeInTheDocument();
   });
 
   it("หัวหน้าแสดงราคาทองวันนี้ 3 ค่าจากข้อความของ API", async () => {

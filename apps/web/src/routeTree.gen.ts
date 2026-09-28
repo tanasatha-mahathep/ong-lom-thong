@@ -21,7 +21,9 @@ import { Route as AppCustomersNewRouteImport } from './routes/_app/customers/new
 import { Route as AppReportsExportRouteImport } from './routes/_app/reports/export'
 import { Route as AppReportsPurchaseRouteImport } from './routes/_app/reports/purchase'
 import { Route as AppReportsStockRouteImport } from './routes/_app/reports/stock'
+import { Route as AppSettingsBranchesRouteImport } from './routes/_app/settings/branches'
 import { Route as AppSettingsGoldPriceRouteImport } from './routes/_app/settings/gold-price'
+import { Route as AppSettingsUsersRouteImport } from './routes/_app/settings/users'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -82,9 +84,19 @@ const AppReportsStockRoute = AppReportsStockRouteImport.update({
   path: '/reports/stock',
   getParentRoute: () => AppRoute,
 } as any)
+const AppSettingsBranchesRoute = AppSettingsBranchesRouteImport.update({
+  id: '/settings/branches',
+  path: '/settings/branches',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSettingsGoldPriceRoute = AppSettingsGoldPriceRouteImport.update({
   id: '/settings/gold-price',
   path: '/settings/gold-price',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsUsersRoute = AppSettingsUsersRouteImport.update({
+  id: '/settings/users',
+  path: '/settings/users',
   getParentRoute: () => AppRoute,
 } as any)
 
@@ -98,7 +110,9 @@ export interface FileRoutesByFullPath {
   '/reports/export': typeof AppReportsExportRoute
   '/reports/purchase': typeof AppReportsPurchaseRoute
   '/reports/stock': typeof AppReportsStockRoute
+  '/settings/branches': typeof AppSettingsBranchesRoute
   '/settings/gold-price': typeof AppSettingsGoldPriceRoute
+  '/settings/users': typeof AppSettingsUsersRoute
   '/buy/': typeof AppBuyIndexRoute
   '/customers/': typeof AppCustomersIndexRoute
 }
@@ -112,7 +126,9 @@ export interface FileRoutesByTo {
   '/reports/export': typeof AppReportsExportRoute
   '/reports/purchase': typeof AppReportsPurchaseRoute
   '/reports/stock': typeof AppReportsStockRoute
+  '/settings/branches': typeof AppSettingsBranchesRoute
   '/settings/gold-price': typeof AppSettingsGoldPriceRoute
+  '/settings/users': typeof AppSettingsUsersRoute
   '/buy': typeof AppBuyIndexRoute
   '/customers': typeof AppCustomersIndexRoute
 }
@@ -128,7 +144,9 @@ export interface FileRoutesById {
   '/_app/reports/export': typeof AppReportsExportRoute
   '/_app/reports/purchase': typeof AppReportsPurchaseRoute
   '/_app/reports/stock': typeof AppReportsStockRoute
+  '/_app/settings/branches': typeof AppSettingsBranchesRoute
   '/_app/settings/gold-price': typeof AppSettingsGoldPriceRoute
+  '/_app/settings/users': typeof AppSettingsUsersRoute
   '/_app/buy/': typeof AppBuyIndexRoute
   '/_app/customers/': typeof AppCustomersIndexRoute
 }
@@ -144,7 +162,9 @@ export interface FileRouteTypes {
     | '/reports/export'
     | '/reports/purchase'
     | '/reports/stock'
+    | '/settings/branches'
     | '/settings/gold-price'
+    | '/settings/users'
     | '/buy/'
     | '/customers/'
   fileRoutesByTo: FileRoutesByTo
@@ -158,7 +178,9 @@ export interface FileRouteTypes {
     | '/reports/export'
     | '/reports/purchase'
     | '/reports/stock'
+    | '/settings/branches'
     | '/settings/gold-price'
+    | '/settings/users'
     | '/buy'
     | '/customers'
   id:
@@ -173,7 +195,9 @@ export interface FileRouteTypes {
     | '/_app/reports/export'
     | '/_app/reports/purchase'
     | '/_app/reports/stock'
+    | '/_app/settings/branches'
     | '/_app/settings/gold-price'
+    | '/_app/settings/users'
     | '/_app/buy/'
     | '/_app/customers/'
   fileRoutesById: FileRoutesById
@@ -269,11 +293,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppReportsStockRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/settings/branches': {
+      id: '/_app/settings/branches'
+      path: '/settings/branches'
+      fullPath: '/settings/branches'
+      preLoaderRoute: typeof AppSettingsBranchesRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/settings/gold-price': {
       id: '/_app/settings/gold-price'
       path: '/settings/gold-price'
       fullPath: '/settings/gold-price'
       preLoaderRoute: typeof AppSettingsGoldPriceRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/settings/users': {
+      id: '/_app/settings/users'
+      path: '/settings/users'
+      fullPath: '/settings/users'
+      preLoaderRoute: typeof AppSettingsUsersRouteImport
       parentRoute: typeof AppRoute
     }
   }
@@ -288,7 +326,9 @@ interface AppRouteChildren {
   AppReportsExportRoute: typeof AppReportsExportRoute
   AppReportsPurchaseRoute: typeof AppReportsPurchaseRoute
   AppReportsStockRoute: typeof AppReportsStockRoute
+  AppSettingsBranchesRoute: typeof AppSettingsBranchesRoute
   AppSettingsGoldPriceRoute: typeof AppSettingsGoldPriceRoute
+  AppSettingsUsersRoute: typeof AppSettingsUsersRoute
   AppBuyIndexRoute: typeof AppBuyIndexRoute
   AppCustomersIndexRoute: typeof AppCustomersIndexRoute
 }
@@ -302,7 +342,9 @@ const AppRouteChildren: AppRouteChildren = {
   AppReportsExportRoute: AppReportsExportRoute,
   AppReportsPurchaseRoute: AppReportsPurchaseRoute,
   AppReportsStockRoute: AppReportsStockRoute,
+  AppSettingsBranchesRoute: AppSettingsBranchesRoute,
   AppSettingsGoldPriceRoute: AppSettingsGoldPriceRoute,
+  AppSettingsUsersRoute: AppSettingsUsersRoute,
   AppBuyIndexRoute: AppBuyIndexRoute,
   AppCustomersIndexRoute: AppCustomersIndexRoute,
 }
