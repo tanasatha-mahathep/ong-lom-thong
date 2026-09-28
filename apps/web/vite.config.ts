@@ -18,5 +18,19 @@ export default defineConfig({
     strictPort: true,
     proxy: { "/api": `http://localhost:${apiPort}` },
   },
-  build: { outDir: "dist", emptyOutDir: true },
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // แยก library ออกจากโค้ดแอป — deploy ใหม่แล้ว browser ยังใช้ cache ของ library เดิมได้
+        manualChunks(id) {
+          if (!id.includes("/node_modules/")) return undefined;
+          if (/\/node_modules\/(react|react-dom|scheduler)\//.test(id)) return "react";
+          if (id.includes("/node_modules/@tanstack/")) return "tanstack";
+          return "vendor";
+        },
+      },
+    },
+  },
 });
