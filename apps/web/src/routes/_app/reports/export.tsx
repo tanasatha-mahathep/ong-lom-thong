@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { PagePlaceholder } from "@/components/page-placeholder";
+import { ExportPage } from "@/features/reports/export-page";
 
 export const Route = createFileRoute("/_app/reports/export")({
-  staticData: { title: "ส่งบัญชีรายเดือน", crumbs: [{ title: "รายงาน" }] },
-  component: PagePlaceholder,
+  staticData: { title: "export", crumbs: [{ title: "reports" }] },
+  component: ExportPage,
 });

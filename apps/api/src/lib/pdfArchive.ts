@@ -20,6 +20,9 @@ export interface ArchiveKeyInput {
 const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/;
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
+/** ใช้เป็นส่วนของ path ได้ไหม (กฎเดียวกับ key ใน bucket) — ชื่อไฟล์ใน zip ส่งบัญชีรายเดือนต้องผ่านกฎนี้ด้วย */
+export const isArchiveSegment = (value: string): boolean => SEGMENT.test(value);
+
 function archiveKey(prefix: string, { branchCode, date, docNo }: ArchiveKeyInput, suffix = ""): string {
   if (!SEGMENT.test(branchCode)) throw new RangeError(`รหัสสาขาใช้เป็น key ไม่ได้: ${JSON.stringify(branchCode)}`);
   if (!SEGMENT.test(docNo)) throw new RangeError(`เลขที่เอกสารใช้เป็น key ไม่ได้: ${JSON.stringify(docNo)}`);

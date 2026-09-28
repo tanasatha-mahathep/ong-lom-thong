@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { ArrowLeftRight, EllipsisVertical, LogOut, UserRound } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
   DropdownMenu,
@@ -17,11 +18,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
 import { errorMessage } from "@/lib/api";
-import { type Me, ROLE_LABEL } from "@/lib/queries";
+import { type Me, canSwitchBranch, meQueryOptions } from "@/lib/queries";
 import { signOut, switchBranch } from "@/lib/session";
 
 /** เมนูผู้ใช้ท้าย sidebar — สลับสาขา (มีสิทธิ์มากกว่า 1 สาขา) · ออกจากระบบ */
 export function NavUser({ me }: { me: Me }) {
+  const { t } = useTranslation("shell");
   const { isMobile } = useSidebar();
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -29,11 +31,14 @@ export function NavUser({ me }: { me: Me }) {
   const switchMutation = useMutation({
     mutationFn: switchBranch,
     onSuccess: async (branch) => {
-      // ข้อมูลทุกหน้าผูกกับสาขา — โหลดใหม่ทั้งหมด
-      await queryClient.invalidateQueries();
-      toast.success(`สลับสาขาแล้ว — ${branch.name}`);
+      // ข้อมูลทุกหน้าผูกกับสาขา — reset (ไม่ใช่ invalidate) ให้ข้อมูลของสาขาเดิมหายทันที
+      // ไม่ค้างโชว์ใต้หัวสาขาใหม่ระหว่างโหลด · me อัปเดตเองก่อน แล้วค่อยถามเซิร์ฟเวอร์ยืนยัน
+      queryClient.setQueryData(meQueryOptions.queryKey, (old) => (old ? { ...old, branch } : old));
+      await queryClient.resetQueries({ predicate: (query) => query.queryKey[0] !== meQueryOptions.queryKey[0] });
+      void queryClient.invalidateQueries({ queryKey: meQueryOptions.queryKey });
+      toast.success(t("userMenu.switched", { name: branch.name }));
     },
-    onError: (error) => toast.error(`สลับสาขาไม่สำเร็จ — ${errorMessage(error)}`),
+    onError: (error) => toast.error(t("userMenu.switchFailed", { reason: errorMessage(error) })),
   });
 
   const signOutMutation = useMutation({
@@ -43,7 +48,7 @@ export function NavUser({ me }: { me: Me }) {
       // ล้างหลังออกจากหน้าในแอปแล้ว — ข้อมูลลูกค้า/บิลไม่ค้างในเครื่องที่ใช้ร่วมกัน
       queryClient.clear();
     },
-    onError: (error) => toast.error(`ออกจากระบบไม่สำเร็จ — ${errorMessage(error)}`),
+    onError: (error) => toast.error(t("userMenu.signOutFailed", { reason: errorMessage(error) })),
   });
 
   return (
@@ -74,14 +79,14 @@ export function NavUser({ me }: { me: Me }) {
             <DropdownMenuLabel className="grid gap-0.5 font-normal leading-snug">
               <span className="truncate font-medium">{me.user.name}</span>
               <span className="truncate text-xs text-muted-foreground">{me.user.email}</span>
-              <span className="text-xs text-muted-foreground">{ROLE_LABEL[me.role]}</span>
+              <span className="text-xs text-muted-foreground">{t(`roles.${me.role}`, { ns: "common" })}</span>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            {me.branches.length > 1 && (
+            {canSwitchBranch(me) && (
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger disabled={switchMutation.isPending}>
                   <ArrowLeftRight aria-hidden="true" />
-                  สลับสาขา
+                  {t("userMenu.switchBranch")}
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent>
                   <DropdownMenuRadioGroup
@@ -94,7 +99,9 @@ export function NavUser({ me }: { me: Me }) {
                       <DropdownMenuRadioItem key={branch.id} value={branch.id}>
                         <span className="grid leading-snug">
                           <span>{branch.name}</span>
-                          <span className="text-xs text-muted-foreground tabular-nums">รหัสสาขา {branch.code}</span>
+                          <span className="text-xs text-muted-foreground tabular-nums">
+                            {t("branchCode", { ns: "common", code: branch.code })}
+                          </span>
                         </span>
                       </DropdownMenuRadioItem>
                     ))}
@@ -104,7 +111,7 @@ export function NavUser({ me }: { me: Me }) {
             )}
             <DropdownMenuItem disabled={signOutMutation.isPending} onSelect={() => signOutMutation.mutate()}>
               <LogOut aria-hidden="true" />
-              ออกจากระบบ
+              {t("userMenu.signOut")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

@@ -21,6 +21,9 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    // เบราว์เซอร์ขั้นต่ำ: Tailwind 4 ต้องการ Chrome/Edge 111 · Firefox 128 · Safari 16.4
+    // ซึ่งรองรับ Intl.NumberFormat ที่รับข้อความทศนิยม (format เงินไม่ผ่าน float) ด้วย
+    target: ["chrome111", "edge111", "firefox128", "safari16.4"],
     rollupOptions: {
       output: {
         // แยก library ออกจากโค้ดแอป — deploy ใหม่แล้ว browser ยังใช้ cache ของ library เดิมได้

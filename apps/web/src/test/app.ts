@@ -37,7 +37,10 @@ interface ApiCall {
 }
 type Handler = (call: ApiCall) => Response | Promise<Response>;
 
-/** แทน fetch ด้วย API ปลอม — key = "METHOD /api/path" · ไม่มี handler = 404 */
+/**
+ * แทน fetch ด้วย API ปลอม — key = "METHOD /api/path" · ไม่มี handler = 404
+ * key ที่มี query string ต้องตรงทั้ง URL · ไม่ตรง = ใช้ key ที่ไม่มี query (อ่าน query จาก `call.path` เอง)
+ */
 export function fakeApi(routes: Record<string, Handler>) {
   const calls: ApiCall[] = [];
   vi.stubGlobal(
@@ -47,13 +50,17 @@ export function fakeApi(routes: Record<string, Handler>) {
       const body: unknown = typeof init?.body === "string" ? JSON.parse(init.body) : init?.body;
       const call = { method: init?.method ?? "GET", path, body };
       calls.push(call);
-      const handler = routes[`${call.method} ${path}`];
+      const handler = routes[`${call.method} ${path}`] ?? routes[`${call.method} ${path.split("?")[0] ?? path}`];
       return Promise.resolve(handler ? handler(call) : json({ error: "not found" }, 404));
     }),
   );
   return {
     calls,
-    callsTo: (method: string, path: string) => calls.filter((c) => c.method === method && c.path === path),
+    /** path ไม่มี "?" = นับทุก query ของ path นั้น */
+    callsTo: (method: string, path: string) =>
+      calls.filter(
+        (c) => c.method === method && (c.path === path || (!path.includes("?") && c.path.startsWith(`${path}?`))),
+      ),
   };
 }
 

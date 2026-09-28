@@ -26,7 +26,7 @@ const SearchSchema = z.object({
 export const Route = createFileRoute("/_app/customers/")({
   validateSearch: SearchSchema,
   search: { middlewares: [stripSearchParams({ q: "", page: 1 })] },
-  staticData: { title: "ลูกค้า" },
+  staticData: { title: "customers" },
   component: CustomersPage,
 });
 
@@ -113,7 +113,7 @@ function CustomersPage() {
         page={search.page}
         hasMore={list.data?.has_more ?? false}
         onPageChange={(page) => void navigate({ search: (prev) => ({ ...prev, page }) })}
-        onRowActivate={(customer) => void navigate({ to: "/customers/$id", params: { id: customer.id } })}
+        onRowClick={(customer) => void navigate({ to: "/customers/$id", params: { id: customer.id } })}
         isLoading={list.isPending}
         emptyMessage={q ? t("list.emptySearch", { q }) : t("list.empty")}
       />
