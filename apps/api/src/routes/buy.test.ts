@@ -13,7 +13,8 @@ import {
   stockMovement,
 } from "@ong/db";
 import { type SQL, and, asc, eq, ne, sql } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { format } from "node:util";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { type TestApp, databaseAvailable, startTestApp } from "../test/harness";
 
 const available = await databaseAvailable();
@@ -983,6 +984,29 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       );
     } finally {
       await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
+    }
+  });
+
+  it("query ที่ล้มไม่พาข้อมูลลูกค้าลง log — เห็นแค่ SQL + code ของ Postgres (PDPA)", async () => {
+    const logged: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      logged.push(format(...args));
+    });
+    // บังคับให้ insert หัวบิลล้ม — params ของ query นั้นมี snapshot ลูกค้าทั้งก้อน
+    await t.db.execute(sql`alter table buy_receipt add constraint test_reject_all check (false) not valid`);
+    try {
+      const res = await save(bill());
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({ error: "internal error" });
+    } finally {
+      await t.db.execute(sql`alter table buy_receipt drop constraint test_reject_all`);
+      spy.mockRestore();
+    }
+    const text = logged.join("\n");
+    expect(text).toContain('insert into "buy_receipt"');
+    expect(text).toContain("23514");
+    for (const pii of [ID_A, "0812345678", "นายทดสอบ ซื้อทอง", "Mr. Test Buyer", "photos/a/card.png"]) {
+      expect(text).not.toContain(pii);
     }
   });
 
