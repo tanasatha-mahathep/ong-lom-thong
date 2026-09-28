@@ -9,10 +9,12 @@
 #   1. image config: non-root USER, no secret-looking ENV, HEALTHCHECK (info), size   (CIS Docker 4.1/4.6/4.10)
 #   2. private network + throwaway Postgres 18 (same digest as docker-compose.yml, no published port)
 #   3. Railway pre-deploy: `node dist/migrate.js` (production), then the non-production command
-#      `migrate && seed` twice — every run exits 0 and leaves identical migration/seed row counts
-#   4. NODE_ENV=production with the .env.example placeholder secret must refuse to boot (fail closed)
-#   5. boot with production-like env: random 48-char secret, PORT injected like Railway does, S3 and
-#      Gotenberg on unresolvable *.invalid hosts (proves boot needs neither); hardened runtime
+#      `migrate && seed` twice — every run exits 0 and the second leaves the seeded rows byte-identical
+#   4. NODE_ENV=production must refuse to boot (fail closed) with the .env.example auth secret, the
+#      example Gotenberg password, or a tax ID whose check digit is wrong — and say which variable
+#   5. boot with production-like synthetic env: random 48-char secrets, PORT injected like Railway does,
+#      a synthetic company header (name "ทดสอบ …", tax ID with a valid check digit), S3 and Gotenberg on
+#      unresolvable *.invalid hosts (proves boot and /healthz need neither); hardened runtime
 #      (--read-only, --cap-drop ALL, no-new-privileges)                             (CIS Docker 5.3/5.12/5.25)
 #   6. HTTP: /healthz and /api/healthz ok:true · / and SPA deep links serve the image's index.html ·
 #      assets served · /api/me 401 without a session · state-changing requests with a foreign or
@@ -48,8 +50,14 @@ STOP_TIMEOUT="${STOP_TIMEOUT:-10}"
 APP_PORT=8080
 PUBLIC_URL="http://localhost:${SMOKE_PORT}"
 BASE_URL="http://127.0.0.1:${SMOKE_PORT}"
-# the placeholder shipped in .env.example — production must refuse it
+# example values shipped in .env.example / docker-compose.yml — production must refuse them
 PLACEHOLDER_SECRET="local-dev-only-secret-change-me-0123456789"
+EXAMPLE_GOTENBERG_PASSWORD="ongongong"
+# synthetic company header (test data rules: name starts with ทดสอบ, never the shop's real details)
+COMPANY_NAME="ทดสอบ หลอมทองสมมติ"
+COMPANY_ADDRESS="99/9 ถนนทดสอบ ตำบลทดสอบ อำเภอเมือง จังหวัดทดสอบ 99999"
+COMPANY_TEL="0999999999"
+SYNTHETIC_TAX_PREFIX="123456789012" # obviously fake; the 13th digit is computed below
 
 RUN_ID="$(date +%s)-$$"
 NET="ong-smoke-net-${RUN_ID}"
@@ -119,9 +127,17 @@ run_image() { # name command... — one-off container on the private network wit
 
 psql_q() { docker exec "$PG" psql -X -A -t -q -v ON_ERROR_STOP=1 -U ong -d ong -c "$1"; }
 
-db_snapshot() { # migrations applied · branches · metals · gold price settings
-  psql_q "select (select count(*) from drizzle.__drizzle_migrations) || ' ' || (select count(*) from branch)
-    || ' ' || (select count(*) from metal) || ' ' || (select count(*) from gold_price_setting)"
+db_snapshot() { # "<migrations applied> <seeded rows> <md5 of every seeded row, all columns>"
+  psql_q "select (select count(*) from drizzle.__drizzle_migrations) || ' ' || count(*) || ' '
+    || left(md5(coalesce(string_agg(r, '|' order by r), '')), 12) from (
+      select b::text as r from branch b union all select m::text from metal m
+      union all select g::text from gold_price_setting g) seeded"
+}
+
+thai_check_digit() { # 12 digits → 13th digit, the mod-11 rule of isValidNationalId() in @ong/core
+  local digits=$1 sum=0 i
+  for ((i = 0; i < 12; i++)); do sum=$((sum + ${digits:i:1} * (13 - i))); done
+  echo $(((11 - sum % 11) % 10))
 }
 
 HTTP_STATUS=000
@@ -172,7 +188,7 @@ summary() { # printed on every exit, pass or fail
   [ -s "$RESULTS" ] || return 0
   echo
   echo "image smoke — ${IMAGE} (${IMAGE_ID:-no image id}, ${SIZE_MB:-?} MB)"
-  awk -F '\t' '{ printf "  %-5s %-46s %s\n", $1, $2, $3 }' "$RESULTS"
+  awk -F '\t' '{ printf "  %-5s %-52s %s\n", $1, $2, $3 }' "$RESULTS"
   [ -n "${GITHUB_STEP_SUMMARY:-}" ] || return 0
   {
     echo "### Image smoke — \`${IMAGE}\`"
@@ -270,22 +286,27 @@ run_image predeploy1 /bin/sh -c "$PREDEPLOY" || die "pre-deploy (migrate && seed
 first="$(db_snapshot)"
 run_image predeploy2 /bin/sh -c "$PREDEPLOY" || die "pre-deploy (migrate && seed) failed on the second run"
 second="$(db_snapshot)"
-# snapshot = migrations branches metals gold_price_settings
-if [ "${first%% *}" = "$expected_migrations" ] && [ "$first" = "$second" ]; then
-  record PASS "migrate + seed are idempotent" "counts (migrations branches metals settings) ${first} → ${second}"
+read -r first_migrations first_rows _ <<<"$first"
+if [ "$first_migrations" = "$expected_migrations" ] && [ "$first_rows" -gt 0 ] && [ "$first" = "$second" ]; then
+  record PASS "migrate + seed are idempotent" "migrations rows md5: ${first} → ${second} (unchanged)"
 else
-  record FAIL "migrate + seed are idempotent" "counts ${after_migrate} → ${first} → ${second}"
+  record FAIL "migrate + seed are idempotent" "migrations rows md5: ${after_migrate} → ${first} → ${second}"
 fi
 
-# ---------- 4. production refuses the placeholder secret ----------
+# ---------- 4. production refuses unsafe settings ----------
 
-step "NODE_ENV=production with the .env.example placeholder secret must not boot"
+step "NODE_ENV=production must refuse example secrets and a mistyped tax ID"
+AUTH_SECRET="${SMOKE_AUTH_SECRET:-$(openssl rand -base64 36)}" # 36 random bytes → 48 characters
+GOTENBERG_PASSWORD="$(openssl rand -hex 24)"
+TAX_CHECK="$(thai_check_digit "$SYNTHETIC_TAX_PREFIX")"
+TAX_ID="${SYNTHETIC_TAX_PREFIX}${TAX_CHECK}"
+BAD_TAX_ID="${SYNTHETIC_TAX_PREFIX}$(((TAX_CHECK + 1) % 10))"
 APP_ENV=(
   -e NODE_ENV=production
   -e PORT="$APP_PORT"
   -e DATABASE_URL="$DATABASE_URL"
   -e BETTER_AUTH_URL="$PUBLIC_URL"
-  # RFC 6761 .invalid never resolves: boot must not depend on object storage or the PDF service
+  # RFC 6761 .invalid never resolves: boot and /healthz must not depend on object storage or the PDF service
   -e S3_ENDPOINT=https://ong-smoke-s3.invalid
   -e S3_REGION=auto
   -e S3_BUCKET=ong-smoke
@@ -294,29 +315,48 @@ APP_ENV=(
   -e S3_FORCE_PATH_STYLE=false
   -e GOTENBERG_URL=http://ong-smoke-gotenberg.invalid:3000
   -e GOTENBERG_USERNAME=ong
-  -e GOTENBERG_PASSWORD="$(openssl rand -hex 24)"
+  -e COMPANY_NAME="$COMPANY_NAME"
+  -e COMPANY_ADDRESS="$COMPANY_ADDRESS"
+  -e COMPANY_TEL="$COMPANY_TEL"
+  # COMPANY_FAX unset, as on Railway (the receipt prints "-")
 )
-bad="ong-smoke-badenv-${RUN_ID}"
-docker run -d --name "$bad" --label "$LABEL" --network "$NET" "${HARDEN[@]}" "${APP_ENV[@]}" \
-  -e BETTER_AUTH_SECRET="$PLACEHOLDER_SECRET" "$IMAGE" >/dev/null
-if wait_until "placeholder-secret container exited" 30 container_exited "$bad"; then
-  bad_code="$(docker inspect -f '{{.State.ExitCode}}' "$bad")"
-  if [ "$bad_code" != 0 ] && docker logs "$bad" 2>&1 | grep -q 'invalid environment'; then
-    record PASS "production refuses the placeholder secret" "exit ${bad_code}: invalid environment"
+
+start_api() { # name auth_secret gotenberg_password tax_id [docker run args...]
+  local name=$1 secret=$2 password=$3 tax_id=$4
+  shift 4
+  docker run -d --name "$name" --label "$LABEL" --network "$NET" "${HARDEN[@]}" "${APP_ENV[@]}" \
+    -e BETTER_AUTH_SECRET="$secret" -e GOTENBERG_PASSWORD="$password" -e COMPANY_TAX_ID="$tax_id" \
+    "$@" "$IMAGE" >/dev/null
+}
+
+refuses() { # check variable auth_secret gotenberg_password tax_id — must exit non-zero naming the variable
+  local check=$1 variable=$2 name="ong-smoke-badenv-${RUN_ID}" code logs
+  start_api "$name" "$3" "$4" "$5"
+  if wait_until "${variable} container exited" 30 container_exited "$name"; then
+    code="$(docker inspect -f '{{.State.ExitCode}}' "$name")"
+    logs="$(docker logs "$name" 2>&1)"
+    if [ "$code" != 0 ] && grep -q "invalid environment.*${variable}" <<<"$logs"; then
+      record PASS "$check" "exit ${code}, invalid environment names ${variable}"
+    else
+      record FAIL "$check" "exit ${code}: $(tail -n 3 <<<"$logs" | tr '\n' ' ')"
+    fi
   else
-    record FAIL "production refuses the placeholder secret" "exit ${bad_code}: $(docker logs "$bad" 2>&1 | tail -n 3 | tr '\n' ' ')"
+    record FAIL "$check" "still running after 30 s"
   fi
-else
-  record FAIL "production refuses the placeholder secret" "still running after 30 s"
-fi
-docker rm -f "$bad" >/dev/null
+  docker rm -f "$name" >/dev/null
+}
+
+refuses "production refuses the example auth secret" BETTER_AUTH_SECRET \
+  "$PLACEHOLDER_SECRET" "$GOTENBERG_PASSWORD" "$TAX_ID"
+refuses "production refuses the example Gotenberg password" GOTENBERG_PASSWORD \
+  "$AUTH_SECRET" "$EXAMPLE_GOTENBERG_PASSWORD" "$TAX_ID"
+refuses "a tax ID with a wrong check digit is refused" COMPANY_TAX_ID \
+  "$AUTH_SECRET" "$GOTENBERG_PASSWORD" "$BAD_TAX_ID"
 
 # ---------- 5. boot ----------
 
 step "boot ${IMAGE} with NODE_ENV=production on 127.0.0.1:${SMOKE_PORT} (PORT=${APP_PORT} inside)"
-AUTH_SECRET="${SMOKE_AUTH_SECRET:-$(openssl rand -base64 36)}" # 36 random bytes → 48 characters
-docker run -d --name "$API" --label "$LABEL" --network "$NET" "${HARDEN[@]}" "${APP_ENV[@]}" \
-  -e BETTER_AUTH_SECRET="$AUTH_SECRET" -p "127.0.0.1:${SMOKE_PORT}:${APP_PORT}" "$IMAGE" >/dev/null
+start_api "$API" "$AUTH_SECRET" "$GOTENBERG_PASSWORD" "$TAX_ID" -p "127.0.0.1:${SMOKE_PORT}:${APP_PORT}"
 
 healthy() {
   container_running "$API" || return 2
@@ -332,7 +372,8 @@ until healthy; do
   fi
   sleep 0.5
 done
-record PASS "boots in production mode" "/healthz ok after $((SECONDS - boot_start)) s; S3 + Gotenberg unreachable"
+record PASS "boots in production mode" \
+  "/healthz ok after $((SECONDS - boot_start)) s; tax ID ${TAX_ID}; S3 and Gotenberg unresolvable (not needed)"
 
 # ---------- 6. HTTP behaviour ----------
 
