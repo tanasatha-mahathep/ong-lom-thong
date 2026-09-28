@@ -3,6 +3,11 @@ packages:
   - packages/*
   - tests/*
 
+# เวอร์ชันเดียวทั้ง repo — package ที่ใช้อ้างด้วย "catalog:" (tests/e2e · apps/web) → browser build เดียว · Renovate อัปที่เดียว
+catalog:
+  "@axe-core/playwright": 4.13.0
+  "@playwright/test": 1.63.0
+
 onlyBuiltDependencies:
   - esbuild
 

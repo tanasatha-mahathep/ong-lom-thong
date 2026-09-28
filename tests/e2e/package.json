@@ -18,9 +18,9 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@axe-core/playwright": "4.13.0",
+    "@axe-core/playwright": "catalog:",
     "@ong/core": "workspace:*",
-    "@playwright/test": "1.63.0",
+    "@playwright/test": "catalog:",
     "@types/node": "^22",
     "pdf-lib": "1.17.1",
     "typescript": "^5.9",
