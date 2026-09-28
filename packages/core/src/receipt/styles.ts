@@ -74,7 +74,8 @@ export const DOCUMENT_CSS = `html, body { margin: 0; padding: 0; background: #ff
  */
 export function fontFaceCss(fontBaseUrl: string): string {
   if (/["'`\\()<>\s]/.test(fontBaseUrl)) {
-    throw new Error(`fontBaseUrl มีอักขระที่ใส่ใน CSS url() ไม่ได้: ${fontBaseUrl}`);
+    // ค่าตั้งของระบบ ไม่ใช่ข้อมูลบิล — จึงไม่ใช่ ReceiptDataError (แก้ config แล้ว retry ได้)
+    throw new TypeError(`fontBaseUrl มีอักขระที่ใส่ใน CSS url() ไม่ได้: ${fontBaseUrl}`);
   }
   const url = (file: string) =>
     fontBaseUrl === "" ? file : fontBaseUrl.endsWith("/") ? `${fontBaseUrl}${file}` : `${fontBaseUrl}/${file}`;

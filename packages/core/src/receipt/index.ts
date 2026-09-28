@@ -3,3 +3,5 @@ export { Receipt } from "./Receipt";
 export { IdCardCopy } from "./IdCardCopy";
 export { renderReceiptHtml, renderIdCardHtml } from "./render";
 export type { ReceiptData, IdCardCopyData, RenderHtmlOptions } from "./types";
+// ข้อมูลเอกสารผิด = ความล้มเหลวถาวร (งาน PDF ไม่ต้อง retry) — class เดียวกับที่ export จาก @ong/core
+export { ReceiptDataError } from "../errors";

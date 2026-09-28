@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { IdCardCopy, Receipt, renderIdCardHtml, renderReceiptHtml, type ReceiptData } from "./index";
+import { IdCardCopy, Receipt, ReceiptDataError, renderIdCardHtml, renderReceiptHtml, type ReceiptData } from "./index";
 
 // ข้อมูลร้านจากหน้าตั้งค่าบริษัทของระบบเดิม (raw/company.html) · ลูกค้าเป็นข้อมูลสมมติ (เลขบัตร checksum ถูก)
 const company = {
@@ -131,17 +131,14 @@ describe("renderReceiptHtml — ใบรับซื้อของเก่า
     expect(html).not.toMatch(/0\.3000000|0\.30000000000000004|e[+-]\d/);
   });
 
-  it("ไม่มีป้ายสาขาเมื่อไม่มีรหัส · ชื่อว่างใช้ 'ลูกค้าทั่วไป' · ช่องว่างไม่พิมพ์ null", () => {
+  it("ชื่อว่างใช้ 'ลูกค้าทั่วไป' · ช่องว่างไม่พิมพ์ null/undefined", () => {
     const html = renderReceiptHtml(
       rc6909({
-        branch: { name: "สาขา", taxBranchCode: null },
         customer: { nameTh: " ", address: null, nationalId: "1670101304032" },
         company: { ...company, fax: null },
         detail: null,
       }),
     );
-    expect(html).toContain("จังหวัดภูเก็ต 83000<br/>");
-    expect(html).not.toContain("(สำนักงานใหญ่)");
     expect(html).toContain("ชื่อผู้ขาย : ลูกค้าทั่วไป");
     expect(html).toContain("ที่อยู่ : <br/>");
     expect(html).toContain("โทรสาร. -");
@@ -188,16 +185,55 @@ describe("renderReceiptHtml — ใบรับซื้อของเก่า
     expect(html).toContain("RC&lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt;");
   });
 
-  it("Σรายการ หรือ Σชำระ ไม่เท่ายอดบิล → throw (ไม่เก็บ PDF ที่ตัวเลขขัดกัน)", () => {
-    expect(() => renderReceiptHtml(rc6909({ totalAmount: "20030.01" }))).toThrow(/รวมรายการ/);
-    expect(() =>
-      renderReceiptHtml(rc6909({ payments: [{ label: "เงินสด", bank: null, amount: "20000.00" }] })),
-    ).toThrow(/รวมชำระ/);
+  it("Σรายการ หรือ Σชำระ ไม่เท่ายอดบิล → ReceiptDataError (ไม่เก็บ PDF ที่ตัวเลขขัดกัน)", () => {
+    const linesOff = rc6909({ totalAmount: "20030.01" });
+    const paidOff = rc6909({ payments: [{ label: "เงินสด", bank: null, amount: "20000.00" }] });
+    expect(() => renderReceiptHtml(linesOff)).toThrow(ReceiptDataError);
+    expect(() => renderReceiptHtml(linesOff)).toThrow(/รวมรายการ 20030.00 ไม่เท่ายอดบิล 20030.01/);
+    expect(() => renderReceiptHtml(paidOff)).toThrow(/รวมชำระ 20000.00 ไม่เท่ายอดบิล 20030.00/);
   });
 
-  it("ข้อมูลเสีย (วันที่ผิด · รหัสสาขาไม่ใช่ 5 หลัก) → throw ไม่เดา", () => {
-    expect(() => renderReceiptHtml(rc6909({ date: "2/9/2569" }))).toThrow();
-    expect(() => renderReceiptHtml(rc6909({ branch: { name: "x", taxBranchCode: "1" } }))).toThrow();
+  it("<Receipt/> บนเว็บ/พิมพ์ก็ตรวจยอดเหมือน PDF — ยอดไม่ตรงไม่แสดงใบ", () => {
+    const mismatch = rc6909({ payments: [{ label: "เงินสด", bank: null, amount: "20000.00" }] });
+    expect(() => renderToStaticMarkup(<Receipt data={mismatch} />)).toThrow(ReceiptDataError);
+    expect(() => renderToStaticMarkup(<Receipt data={rc6909({ totalAmount: "20030.01" })} />)).toThrow(/รวมรายการ/);
+  });
+
+  it("PDF ไม่มีรหัสสาขาของสรรพากร → ReceiptDataError (fail-closed ห้ามพิมพ์รหัสชั่วคราว)", () => {
+    for (const taxBranchCode of [null, "", "  "]) {
+      const noCode = rc6909({ branch: { name: "สาขา 2", taxBranchCode } });
+      expect(() => renderReceiptHtml(noCode)).toThrow(ReceiptDataError);
+      expect(() => renderReceiptHtml(noCode)).toThrow(/สาขา 2.*tax_branch_code/);
+    }
+  });
+
+  it("หน้าเว็บ (<Receipt/>) ไม่มีรหัสสาขา → แสดงได้แต่ไม่มีป้ายสาขา", () => {
+    const html = renderToStaticMarkup(<Receipt data={rc6909({ branch: { name: "สาขา 2", taxBranchCode: null } })} />);
+    expect(html).toContain("จังหวัดภูเก็ต 83000<br/>");
+    expect(html).not.toContain("(สำนักงานใหญ่)");
+    expect(html).not.toContain("(สาขาที่");
+  });
+
+  it("หน้าเว็บพิมพ์เลขบัตรตามที่ส่งมา — เว็บส่งเลขมาสก์ (R13) · PDF ส่งเลขเต็ม", () => {
+    const masked = rc6909({ customer: { ...rc6909().customer, nationalId: "1 XXXX XXXXX 03 2" } });
+    const html = renderToStaticMarkup(<Receipt data={masked} />);
+    expect(html).toContain("เลขประจำตัวผู้เสียภาษี : 1 XXXX XXXXX 03 2");
+    expect(html).not.toContain("1670101304032");
+  });
+
+  it("ข้อมูลเสียทุกแบบ → ReceiptDataError ทั้ง PDF และหน้าเว็บ (งาน PDF หยุด retry ได้)", () => {
+    const bad: ReceiptData[] = [
+      rc6909({ date: "2/9/2569" }),
+      rc6909({ date: "2026-09-02T10:15:00Z" }),
+      rc6909({ branch: { name: "x", taxBranchCode: "1" } }),
+      rc6909({ totalAmount: "abc" }),
+      rc6909({ lines: [{ metalName: "ทอง", weightG: "0", amount: "20030.00" }] }),
+      rc6909({ lines: [], totalAmount: "0.00", payments: [] }),
+    ];
+    for (const data of bad) {
+      expect(() => renderReceiptHtml(data)).toThrow(ReceiptDataError);
+      expect(() => renderToStaticMarkup(<Receipt data={data} />)).toThrow(ReceiptDataError);
+    }
   });
 
   it("ฟอนต์ Sarabun: ค่าเริ่มต้น /fonts · '' = relative สำหรับ Gotenberg · URL เต็มได้", () => {
@@ -208,7 +244,10 @@ describe("renderReceiptHtml — ใบรับซื้อของเก่า
     expect(renderReceiptHtml(rc6909(), { fontBaseUrl: "https://cdn.example/f/" })).toContain(
       'url("https://cdn.example/f/Sarabun-Bold.ttf")',
     );
-    expect(() => renderReceiptHtml(rc6909(), { fontBaseUrl: '/f");}</style><script>' })).toThrow();
+    // ค่าตั้งของระบบ ไม่ใช่ข้อมูลบิล → ไม่ใช่ ReceiptDataError (แก้ config แล้ว retry ได้)
+    const badFont = () => renderReceiptHtml(rc6909(), { fontBaseUrl: '/f");}</style><script>' });
+    expect(badFont).toThrow(TypeError);
+    expect(badFont).not.toThrow(ReceiptDataError);
   });
 
   it("<Receipt/> บนเว็บคือ markup ชุดเดียวกับใน PDF", () => {
@@ -235,8 +274,10 @@ describe("renderIdCardHtml — สำเนาบัตรประชาชน 
     expect(html).toContain('url("Sarabun-Regular.ttf")');
   });
 
-  it("ไม่มีรูปบัตร → throw (ไม่สร้างสำเนาบัตรเปล่า)", () => {
+  it("ไม่มีรูปบัตร / วันที่ผิด → ReceiptDataError (ไม่สร้างสำเนาบัตรเปล่า)", () => {
+    expect(() => renderIdCardHtml({ ...idcard, photoSrc: " " })).toThrow(ReceiptDataError);
     expect(() => renderIdCardHtml({ ...idcard, photoSrc: " " })).toThrow(/ไม่มีรูปบัตร/);
+    expect(() => renderIdCardHtml({ ...idcard, date: "2026-09-02T00:00:00Z" })).toThrow(ReceiptDataError);
   });
 
   it("รับรูปแบบ data: URI ได้", () => {

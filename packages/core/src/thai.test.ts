@@ -1,5 +1,6 @@
 import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
+import { ReceiptDataError } from "./errors";
 import { bahtText, taxBranchLabel, thaiDate, thaiDateShort } from "./thai";
 
 describe("bahtText — จำนวนเงินเป็นตัวอักษร", () => {
@@ -54,9 +55,16 @@ describe("bahtText — จำนวนเงินเป็นตัวอัก
     expect(bahtText(new Decimal("20030"))).toBe("สองหมื่นสามสิบบาทถ้วน");
   });
 
-  it.each(["", "abc", "12x", "NaN", "Infinity"])("ไม่ใช่ตัวเลข (%s) → throw ไม่คืนข้อความว่าง", (bad) => {
-    expect(() => bahtText(bad)).toThrow();
+  it.each(["", "abc", "12x", "NaN", "Infinity"])("ไม่ใช่ตัวเลข (%s) → ReceiptDataError ไม่คืนข้อความว่าง", (bad) => {
+    expect(() => bahtText(bad)).toThrow(ReceiptDataError);
   });
+
+  it.each(["1000000000000", "999999999999.995", "-1000000000000"])(
+    "เกิน numeric(14,2) (%s) → ReceiptDataError",
+    (big) => {
+      expect(() => bahtText(big)).toThrow(ReceiptDataError);
+    },
+  );
 });
 
 describe("วันที่ พ.ศ.", () => {
@@ -72,8 +80,10 @@ describe("วันที่ พ.ศ.", () => {
     expect(thaiDate("2026-12-31")).toBe("31 ธันวาคม 2569");
   });
 
-  it("ISO datetime ใช้ส่วนวันที่ตามที่เขียน ไม่เลื่อนเขตเวลา", () => {
-    expect(thaiDate("2026-09-28T23:30:00+07:00")).toBe("28 กันยายน 2569");
+  it("ขอบช่วงปี ค.ศ. 2000–2200 · 29 ก.พ. ปีอธิกสุรทิน", () => {
+    expect(thaiDate("2000-01-01")).toBe("1 มกราคม 2543");
+    expect(thaiDate("2200-12-31")).toBe("31 ธันวาคม 2743");
+    expect(thaiDateShort("2028-02-29")).toBe("29 ก.พ. 2571");
   });
 
   it("แบบย่อ", () => {
@@ -81,8 +91,24 @@ describe("วันที่ พ.ศ.", () => {
     expect(thaiDateShort("2026-05-10")).toBe("10 พ.ค. 2569");
   });
 
-  it.each(["", "2/9/2569", "2026-9-2", "2026-02-30", "2026-13-01", "วันนี้"])("ไม่ใช่วันจริง (%s) → throw", (bad) => {
-    expect(() => thaiDate(bad)).toThrow();
+  it.each([
+    ["", "ว่าง"],
+    ["2/9/2569", "รูปแบบไทย"],
+    ["2026-9-2", "ไม่เติมศูนย์"],
+    ["2026-02-30", "ไม่มีวันนี้"],
+    ["2026-02-29", "ไม่ใช่ปีอธิกสุรทิน"],
+    ["2026-13-01", "เดือน 13"],
+    ["2026-09-28T23:30:00+07:00", "มีเวลา — ต้องส่งวันทำการที่ตัดแล้ว"],
+    ["2026-09-02T00:00:00.000Z", "ISO datetime"],
+    [" 2026-09-02", "ช่องว่างนำ"],
+    ["2026-09-02 ", "ช่องว่างท้าย"],
+    ["2569-09-02", "ปี พ.ศ. ใส่ผิดช่อง"],
+    ["1999-12-31", "ก่อนปี 2000"],
+    ["2201-01-01", "หลังปี 2200"],
+    ["วันนี้", "ข้อความ"],
+  ])("ไม่รับ %s (%s) → ReceiptDataError", (bad) => {
+    expect(() => thaiDate(bad)).toThrow(ReceiptDataError);
+    expect(() => thaiDateShort(bad)).toThrow(ReceiptDataError);
   });
 });
 
@@ -102,7 +128,7 @@ describe("taxBranchLabel — ป้ายสาขาตามสรรพาก
     expect(taxBranchLabel("  ")).toBeNull();
   });
 
-  it.each(["1", "0001", "000001", "A0001"])("ไม่ใช่ 5 หลัก (%s) → throw ไม่เดา", (bad) => {
-    expect(() => taxBranchLabel(bad)).toThrow();
+  it.each(["1", "0001", "000001", "A0001"])("ไม่ใช่ 5 หลัก (%s) → ReceiptDataError ไม่เดา", (bad) => {
+    expect(() => taxBranchLabel(bad)).toThrow(ReceiptDataError);
   });
 });

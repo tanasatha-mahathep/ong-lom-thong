@@ -104,12 +104,13 @@ export const MAX_LINE_AMOUNT = "99999999.99";
 
 /**
  * ราคาเฉลี่ย/กรัม (ระบบเดิม "ราคาเฉลี่ย/กรัม" = ยอดรวม ÷ น้ำหนักรวม) ปัดครึ่งขึ้น 2 ตำแหน่ง — แสดงเท่านั้น
- * น้ำหนักรวม 0 = "0.00" · ใช้ทั้งใน quoteBuy และตอนแสดงบิลที่บันทึกแล้ว (สูตรเดียว)
+ * น้ำหนักรวม 0 = "0.00" · ใช้ทั้งใน quoteBuy และตอนแสดงบิลที่บันทึกแล้ว
+ * สูตรคือ pricePerGram() ตัวเดียวกับราคา/กรัมต่อแถวและราคาต่อหน่วยบนใบรับซื้อ — ห้ามเขียนการหารซ้ำที่นี่
  */
 export function avgPricePerG(totalAmount: Numeric, totalWeight: Numeric): string {
   const w = D(totalWeight);
   if (w.lte(0)) return fmtMoney(ZERO);
-  return fmtMoney(halfUp(D(totalAmount).div(w), 2));
+  return fmtMoney(pricePerGram(D(totalAmount), w));
 }
 
 /**

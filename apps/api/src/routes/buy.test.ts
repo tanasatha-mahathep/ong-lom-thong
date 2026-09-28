@@ -681,7 +681,7 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       doc_no: "RC6910-0001",
       date: TODAY,
       time: "10:00",
-      branch: { id: t.branches["00000"], code: "00000", name: "สำนักงานใหญ่ (สาขา 1)", tax_branch_code: null },
+      branch: { id: t.branches["00000"], code: "00000", name: "สำนักงานใหญ่ (สาขา 1)", tax_branch_code: "00000" },
       customer: {
         id: custA,
         name_th: "นายทดสอบ ซื้อทอง",

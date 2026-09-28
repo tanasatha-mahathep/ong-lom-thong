@@ -1,6 +1,7 @@
 import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
-import { formatMoney, formatWeight } from "./money";
+import { ReceiptDataError } from "./errors";
+import { formatMoney, formatWeight, requireDecimal } from "./money";
 
 describe("formatMoney / formatWeight — ตัวเลขบนใบพิมพ์", () => {
   it.each([
@@ -33,8 +34,9 @@ describe("formatMoney / formatWeight — ตัวเลขบนใบพิม
     expect(formatMoney(new Decimal("0.1").plus("0.2"))).toBe("0.30");
   });
 
-  it.each(["", "abc", "Infinity", "NaN"])("ไม่ใช่ตัวเลข (%s) → throw", (bad) => {
-    expect(() => formatMoney(bad)).toThrow();
-    expect(() => formatWeight(bad)).toThrow();
+  it.each(["", " ", "abc", "Infinity", "NaN"])("ไม่ใช่ตัวเลข (%s) → ReceiptDataError", (bad) => {
+    expect(() => formatMoney(bad)).toThrow(ReceiptDataError);
+    expect(() => formatWeight(bad)).toThrow(ReceiptDataError);
+    expect(() => requireDecimal(bad, "ยอดบิล")).toThrow(/ยอดบิลไม่ใช่ตัวเลข/);
   });
 });

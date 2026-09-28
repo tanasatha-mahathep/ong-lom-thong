@@ -1,10 +1,12 @@
 import type Decimal from "decimal.js";
-import { D, halfUp } from "./money";
+import { ReceiptDataError } from "./errors";
+import { halfUp, requireDecimal } from "./money";
 
 /**
  * ข้อความไทยบนเอกสาร — จำนวนเงินเป็นตัวอักษร · วันที่ พ.ศ. · ป้ายสาขาตามสรรพากร
  * ทั้งหมดปรากฏบนใบรับซื้อจริงของร้าน (RC6909-0010) จึงต้องตรง ไม่ใช่ของตกแต่ง
  * ที่มา: Django core/baht_text.py · core/templatetags/thai.py · core/models.py Branch.tax_branch_label
+ * ข้อมูลที่ใช้ไม่ได้ = ReceiptDataError เสมอ (งาน PDF แยกออกว่าเป็นความล้มเหลวถาวร ไม่ retry)
  */
 
 const DIGIT = ["", "หนึ่ง", "สอง", "สาม", "สี่", "ห้า", "หก", "เจ็ด", "แปด", "เก้า"] as const;
@@ -35,16 +37,20 @@ function readInteger(digits: string): string {
   return `${readInteger(s.slice(0, -6))}ล้าน${/^0+$/.test(low) ? "" : readGroup(low)}`;
 }
 
+/** ยอดสูงสุดที่ DB เก็บได้ (numeric(14,2)) — เกินนี้ไม่ใช่ยอดบิลจริง */
+const MAX_BAHT_TEXT = "999999999999.99";
+
 /**
  * จำนวนเงินเป็นตัวอักษรแบบที่พิมพ์บนใบรับซื้อ (บรรทัด "ตัวอักษร")
  * ปัดครึ่งขึ้น 2 ตำแหน่งด้วย decimal.js ก่อนอ่าน — ห้ามผ่าน float
  * "20030.00" → "สองหมื่นสามสิบบาทถ้วน" (ใบจริง RC6909-0010) · "3418.09" → "สามพันสี่ร้อยสิบแปดบาทเก้าสตางค์"
- * @throws เมื่อไม่ใช่ตัวเลข — เอกสารภาษีต้องไม่ออกมาพร้อมช่องตัวอักษรว่าง
+ * @throws ReceiptDataError เมื่อไม่ใช่ตัวเลข หรือเกิน numeric(14,2) — เอกสารภาษีต้องไม่ออกมาพร้อมช่องตัวอักษรว่าง/ผิด
  */
 export function bahtText(amount: string | Decimal): string {
-  const value = D(amount);
-  if (!value.isFinite()) throw new RangeError(`bahtText: ไม่ใช่จำนวนเงิน: ${String(amount)}`);
-  const rounded = halfUp(value, 2);
+  const rounded = halfUp(requireDecimal(amount, "จำนวนเงิน"), 2);
+  if (rounded.abs().gt(MAX_BAHT_TEXT)) {
+    throw new ReceiptDataError(`จำนวนเงินเกิน 999,999,999,999.99 (numeric(14,2)): "${String(amount)}"`);
+  }
   const [baht = "0", satang = "00"] = rounded.abs().toFixed(2).split(".");
   const text = satang === "00" ? `${readInteger(baht)}บาทถ้วน` : `${readInteger(baht)}บาท${readInteger(satang)}สตางค์`;
   return rounded.isNegative() && !rounded.isZero() ? `ลบ${text}` : text;
@@ -79,17 +85,23 @@ const MONTH_ABBR = [
   "ธ.ค.",
 ] as const;
 
-/** "YYYY-MM-DD" (หรือ ISO ที่ขึ้นต้นแบบนั้น) → ปี/เดือน/วัน ตามที่เขียน — ไม่แปลงเขตเวลา · วันไม่มีจริง = throw */
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * รับเฉพาะ "YYYY-MM-DD" ปี ค.ศ. 2000–2200 ที่เป็นวันจริงในปฏิทิน — อย่างอื่น (มีเวลา/ช่องว่าง · ปี พ.ศ. · 30 ก.พ.) = throw
+ * ไม่แปลงเขตเวลา: วันที่บนบิลคือวันทำการตามเวลาไทยที่บันทึกไว้แล้ว (businessDate)
+ */
 function parseIsoDate(iso: string): { y: number; m: number; d: number } {
-  const match = /^(\d{4})-(\d{2})-(\d{2})(?:$|T)/.exec(iso.trim());
-  const y = Number(match?.[1]);
-  const m = Number(match?.[2]);
-  const d = Number(match?.[3]);
-  const dt = new Date(Date.UTC(y, m - 1, d));
-  if (!match || dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) {
-    throw new RangeError(`วันที่ต้องเป็น ISO ค.ศ. YYYY-MM-DD: ${iso}`);
+  const match = ISO_DATE.exec(iso);
+  if (match) {
+    const y = Number(match[1]);
+    const m = Number(match[2]);
+    const d = Number(match[3]);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    const real = dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+    if (y >= 2000 && y <= 2200 && real) return { y, m, d };
   }
-  return { y, m, d };
+  throw new ReceiptDataError(`วันที่ต้องเป็น ค.ศ. YYYY-MM-DD ปี 2000–2200 และเป็นวันจริง: "${String(iso)}"`);
 }
 
 /** วันที่แบบเต็มบนใบรับซื้อ: "2026-09-02" → "2 กันยายน 2569" */
@@ -107,11 +119,11 @@ export function thaiDateShort(iso: string): string {
 /**
  * ป้ายสาขาที่ต้องพิมพ์ต่อท้ายที่อยู่ผู้ออกเอกสาร (ระเบียบสรรพากร · ระบบเดิมพิมพ์ "(สำนักงานใหญ่)")
  * "00000" → "สำนักงานใหญ่" · "00001" → "สาขาที่ 00001" · ว่าง/null → null (ไม่พิมพ์)
- * @throws เมื่อไม่ใช่ตัวเลข 5 หลัก — ไม่เดาเลขสาขาบนเอกสารภาษี
+ * @throws ReceiptDataError เมื่อไม่ใช่ตัวเลข 5 หลัก — ไม่เดาเลขสาขาบนเอกสารภาษี
  */
 export function taxBranchLabel(code: string | null | undefined): string | null {
   const c = code?.trim() ?? "";
   if (c === "") return null;
-  if (!/^\d{5}$/.test(c)) throw new RangeError(`รหัสสาขาต้องเป็นตัวเลข 5 หลัก: "${c}"`);
+  if (!/^\d{5}$/.test(c)) throw new ReceiptDataError(`รหัสสาขาต้องเป็นตัวเลข 5 หลัก: "${c}"`);
   return c === "00000" ? "สำนักงานใหญ่" : `สาขาที่ ${c}`;
 }
