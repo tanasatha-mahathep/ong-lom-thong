@@ -9,50 +9,309 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppRouteImport } from './routes/_app'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as AppIndexRouteImport } from './routes/_app/index'
+import { Route as AppBillsRouteImport } from './routes/_app/bills'
+import { Route as AppBuyIndexRouteImport } from './routes/_app/buy/index'
+import { Route as AppBuyIdRouteImport } from './routes/_app/buy/$id'
+import { Route as AppCustomersIndexRouteImport } from './routes/_app/customers/index'
+import { Route as AppCustomersIdRouteImport } from './routes/_app/customers/$id'
+import { Route as AppCustomersNewRouteImport } from './routes/_app/customers/new'
+import { Route as AppReportsExportRouteImport } from './routes/_app/reports/export'
+import { Route as AppReportsPurchaseRouteImport } from './routes/_app/reports/purchase'
+import { Route as AppReportsStockRouteImport } from './routes/_app/reports/stock'
+import { Route as AppSettingsGoldPriceRouteImport } from './routes/_app/settings/gold-price'
 
-const IndexRoute = IndexRouteImport.update({
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppIndexRoute = AppIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBillsRoute = AppBillsRouteImport.update({
+  id: '/bills',
+  path: '/bills',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBuyIndexRoute = AppBuyIndexRouteImport.update({
+  id: '/buy/',
+  path: '/buy/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBuyIdRoute = AppBuyIdRouteImport.update({
+  id: '/buy/$id',
+  path: '/buy/$id',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCustomersIndexRoute = AppCustomersIndexRouteImport.update({
+  id: '/customers/',
+  path: '/customers/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCustomersIdRoute = AppCustomersIdRouteImport.update({
+  id: '/customers/$id',
+  path: '/customers/$id',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppCustomersNewRoute = AppCustomersNewRouteImport.update({
+  id: '/customers/new',
+  path: '/customers/new',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppReportsExportRoute = AppReportsExportRouteImport.update({
+  id: '/reports/export',
+  path: '/reports/export',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppReportsPurchaseRoute = AppReportsPurchaseRouteImport.update({
+  id: '/reports/purchase',
+  path: '/reports/purchase',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppReportsStockRoute = AppReportsStockRouteImport.update({
+  id: '/reports/stock',
+  path: '/reports/stock',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsGoldPriceRoute = AppSettingsGoldPriceRouteImport.update({
+  id: '/settings/gold-price',
+  path: '/settings/gold-price',
+  getParentRoute: () => AppRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
+  '/': typeof AppIndexRoute
+  '/login': typeof LoginRoute
+  '/bills': typeof AppBillsRoute
+  '/buy/$id': typeof AppBuyIdRoute
+  '/customers/$id': typeof AppCustomersIdRoute
+  '/customers/new': typeof AppCustomersNewRoute
+  '/reports/export': typeof AppReportsExportRoute
+  '/reports/purchase': typeof AppReportsPurchaseRoute
+  '/reports/stock': typeof AppReportsStockRoute
+  '/settings/gold-price': typeof AppSettingsGoldPriceRoute
+  '/buy/': typeof AppBuyIndexRoute
+  '/customers/': typeof AppCustomersIndexRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
+  '/login': typeof LoginRoute
+  '/bills': typeof AppBillsRoute
+  '/': typeof AppIndexRoute
+  '/buy/$id': typeof AppBuyIdRoute
+  '/customers/$id': typeof AppCustomersIdRoute
+  '/customers/new': typeof AppCustomersNewRoute
+  '/reports/export': typeof AppReportsExportRoute
+  '/reports/purchase': typeof AppReportsPurchaseRoute
+  '/reports/stock': typeof AppReportsStockRoute
+  '/settings/gold-price': typeof AppSettingsGoldPriceRoute
+  '/buy': typeof AppBuyIndexRoute
+  '/customers': typeof AppCustomersIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
+  '/_app': typeof AppRouteWithChildren
+  '/login': typeof LoginRoute
+  '/_app/bills': typeof AppBillsRoute
+  '/_app/': typeof AppIndexRoute
+  '/_app/buy/$id': typeof AppBuyIdRoute
+  '/_app/customers/$id': typeof AppCustomersIdRoute
+  '/_app/customers/new': typeof AppCustomersNewRoute
+  '/_app/reports/export': typeof AppReportsExportRoute
+  '/_app/reports/purchase': typeof AppReportsPurchaseRoute
+  '/_app/reports/stock': typeof AppReportsStockRoute
+  '/_app/settings/gold-price': typeof AppSettingsGoldPriceRoute
+  '/_app/buy/': typeof AppBuyIndexRoute
+  '/_app/customers/': typeof AppCustomersIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/bills'
+    | '/buy/$id'
+    | '/customers/$id'
+    | '/customers/new'
+    | '/reports/export'
+    | '/reports/purchase'
+    | '/reports/stock'
+    | '/settings/gold-price'
+    | '/buy/'
+    | '/customers/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/login'
+    | '/bills'
+    | '/'
+    | '/buy/$id'
+    | '/customers/$id'
+    | '/customers/new'
+    | '/reports/export'
+    | '/reports/purchase'
+    | '/reports/stock'
+    | '/settings/gold-price'
+    | '/buy'
+    | '/customers'
+  id:
+    | '__root__'
+    | '/_app'
+    | '/login'
+    | '/_app/bills'
+    | '/_app/'
+    | '/_app/buy/$id'
+    | '/_app/customers/$id'
+    | '/_app/customers/new'
+    | '/_app/reports/export'
+    | '/_app/reports/purchase'
+    | '/_app/reports/stock'
+    | '/_app/settings/gold-price'
+    | '/_app/buy/'
+    | '/_app/customers/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
+  AppRoute: typeof AppRouteWithChildren
+  LoginRoute: typeof LoginRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
+    '/_app': {
+      id: '/_app'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/': {
+      id: '/_app/'
       path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AppIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/bills': {
+      id: '/_app/bills'
+      path: '/bills'
+      fullPath: '/bills'
+      preLoaderRoute: typeof AppBillsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/buy/': {
+      id: '/_app/buy/'
+      path: '/buy'
+      fullPath: '/buy/'
+      preLoaderRoute: typeof AppBuyIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/buy/$id': {
+      id: '/_app/buy/$id'
+      path: '/buy/$id'
+      fullPath: '/buy/$id'
+      preLoaderRoute: typeof AppBuyIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/customers/': {
+      id: '/_app/customers/'
+      path: '/customers'
+      fullPath: '/customers/'
+      preLoaderRoute: typeof AppCustomersIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/customers/$id': {
+      id: '/_app/customers/$id'
+      path: '/customers/$id'
+      fullPath: '/customers/$id'
+      preLoaderRoute: typeof AppCustomersIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/customers/new': {
+      id: '/_app/customers/new'
+      path: '/customers/new'
+      fullPath: '/customers/new'
+      preLoaderRoute: typeof AppCustomersNewRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/reports/export': {
+      id: '/_app/reports/export'
+      path: '/reports/export'
+      fullPath: '/reports/export'
+      preLoaderRoute: typeof AppReportsExportRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/reports/purchase': {
+      id: '/_app/reports/purchase'
+      path: '/reports/purchase'
+      fullPath: '/reports/purchase'
+      preLoaderRoute: typeof AppReportsPurchaseRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/reports/stock': {
+      id: '/_app/reports/stock'
+      path: '/reports/stock'
+      fullPath: '/reports/stock'
+      preLoaderRoute: typeof AppReportsStockRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/settings/gold-price': {
+      id: '/_app/settings/gold-price'
+      path: '/settings/gold-price'
+      fullPath: '/settings/gold-price'
+      preLoaderRoute: typeof AppSettingsGoldPriceRouteImport
+      parentRoute: typeof AppRoute
     }
   }
 }
 
+interface AppRouteChildren {
+  AppBillsRoute: typeof AppBillsRoute
+  AppIndexRoute: typeof AppIndexRoute
+  AppBuyIdRoute: typeof AppBuyIdRoute
+  AppCustomersIdRoute: typeof AppCustomersIdRoute
+  AppCustomersNewRoute: typeof AppCustomersNewRoute
+  AppReportsExportRoute: typeof AppReportsExportRoute
+  AppReportsPurchaseRoute: typeof AppReportsPurchaseRoute
+  AppReportsStockRoute: typeof AppReportsStockRoute
+  AppSettingsGoldPriceRoute: typeof AppSettingsGoldPriceRoute
+  AppBuyIndexRoute: typeof AppBuyIndexRoute
+  AppCustomersIndexRoute: typeof AppCustomersIndexRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppBillsRoute: AppBillsRoute,
+  AppIndexRoute: AppIndexRoute,
+  AppBuyIdRoute: AppBuyIdRoute,
+  AppCustomersIdRoute: AppCustomersIdRoute,
+  AppCustomersNewRoute: AppCustomersNewRoute,
+  AppReportsExportRoute: AppReportsExportRoute,
+  AppReportsPurchaseRoute: AppReportsPurchaseRoute,
+  AppReportsStockRoute: AppReportsStockRoute,
+  AppSettingsGoldPriceRoute: AppSettingsGoldPriceRoute,
+  AppBuyIndexRoute: AppBuyIndexRoute,
+  AppCustomersIndexRoute: AppCustomersIndexRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
+  AppRoute: AppRouteWithChildren,
+  LoginRoute: LoginRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
