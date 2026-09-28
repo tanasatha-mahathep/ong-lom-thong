@@ -2,9 +2,10 @@ import { randomBytes } from "node:crypto";
 import { defineConfig, devices } from "@playwright/test";
 import { target } from "./lib/target";
 
-// One id per run, shared by the runner and every worker (workers inherit the runner's env):
-// it goes into every account and customer this run creates, so reruns never collide.
-process.env.E2E_RUN_ID ??= `${new Date().toISOString().replace(/\D/g, "").slice(2, 12)}${randomBytes(2).toString("hex")}`;
+// One id per run, shared by the runner and every worker (workers inherit the runner's env): it goes into
+// every account and customer this run creates, so reruns never collide. The dash keeps digit runs short —
+// a 13-digit run in a response means an unmasked national ID to the masking checks.
+process.env.E2E_RUN_ID ??= `${new Date().toISOString().replace(/\D/g, "").slice(2, 12)}-${randomBytes(2).toString("hex")}`;
 
 const CI = !!process.env.CI;
 
