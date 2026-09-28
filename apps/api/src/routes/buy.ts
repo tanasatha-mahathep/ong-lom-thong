@@ -1,9 +1,10 @@
-import { businessTime } from "@ong/core";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { z } from "zod";
-import { type AppEnv, apiError, requireAnyBranch, requireRole, requireSession } from "../lib/context";
-import { forUser } from "../lib/scope";
+import { type AppEnv, apiError, requireAnyHistoryBranch, requireRole, requireSession } from "../lib/context";
+import { forUserHistory } from "../lib/scope";
+import { companyFromEnv, receiptForScreen } from "../services/receiptPdf";
+import { buyPdfRoutes } from "./buyPdf";
 import {
   BuyError,
   ListQuery,
@@ -40,11 +41,12 @@ const filledOnly = (query: Record<string, string>) =>
  * เขียนได้เฉพาะสาขาที่กำลังทำงาน · อ่านเฉพาะสาขาที่มีสิทธิ์ (fail-closed · 404 ไม่บอกว่ามีอยู่)
  */
 export const buyRoutes = new Hono<AppEnv>()
-  .use(requireSession, requireAnyBranch)
+  // อ่าน = forUserHistory (accounting/admin เห็นสาขาที่ปิดแล้ว) · เขียน = prepareBuy ตรวจสาขาที่ทำงานที่ยังเปิดอยู่
+  .use(requireSession, requireAnyHistoryBranch)
   .get("/", async (c) => {
     const query = ListQuery.safeParse(filledOnly(c.req.query()));
     if (!query.success) return c.json(invalid(query.error), 400);
-    const readable = await forUser(c.var.db, c.var.viewer);
+    const readable = await forUserHistory(c.var.db, c.var.viewer);
     const { items, hasMore, totals } = await listBuys(c.var.db, readable, query.data);
     c.header("Cache-Control", "no-store");
     return c.json({ items, page: query.data.page, has_more: hasMore, totals });
@@ -65,15 +67,16 @@ export const buyRoutes = new Hono<AppEnv>()
   .post("/", requireRole("staff", "manager", "admin"), jsonLimit, async (c) => {
     const body = SaveBody.safeParse(await readJson(c));
     if (!body.success) return c.json(invalid(body.error), 400);
-    const now = c.var.now();
     try {
       const { replay, receipt } = await saveBuy(
         c.var.db,
         c.var.viewer,
         body.data,
-        now,
-        body.data.time ?? businessTime(now),
+        c.var.now(),
+        companyFromEnv(c.var.env),
       );
+      // PDF เก็บถาวรสร้างเบื้องหลัง — ตอบทันทีด้วย pdf_status "pending" ไม่รอ Gotenberg (spec §9.2)
+      if (!replay) c.var.pdf.enqueue(receipt.id);
       return c.json(receipt, replay ? 200 : 201);
     } catch (e) {
       if (e instanceof BuyError) return c.json({ ...apiError(e.message, e.field), ...e.extra }, e.status);
@@ -81,9 +84,12 @@ export const buyRoutes = new Hono<AppEnv>()
     }
   })
   .get("/:id", async (c) => {
-    const readable = await forUser(c.var.db, c.var.viewer);
+    const readable = await forUserHistory(c.var.db, c.var.viewer);
     const bill = await getBuy(c.var.db, readable, c.req.param("id"));
     if (!bill) return c.json(apiError("not found"), 404);
     c.header("Cache-Control", "no-store");
-    return c.json(bill);
-  });
+    // receipt = ข้อมูลใบเดียวกับที่ใช้สร้าง PDF (เลขบัตรมาสก์) — จอกับไฟล์ไม่เพี้ยนกัน
+    return c.json({ ...bill, receipt: await receiptForScreen(c.var.db, c.var.env, bill.id) });
+  })
+  // ไฟล์ PDF · สำเนาบัตร · retry · ยกเลิกบิล — อยู่ใต้ middleware ชุดเดียวกัน (login + สาขา)
+  .route("/", buyPdfRoutes);

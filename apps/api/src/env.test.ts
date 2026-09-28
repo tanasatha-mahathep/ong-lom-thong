@@ -46,6 +46,9 @@ describe("loadEnv — Gotenberg + หัวใบรับซื้อ", () => {
     expect(env.COMPANY_FAX).toBeUndefined();
     expect(loadEnv({ ...EXAMPLE, COMPANY_FAX: undefined }).COMPANY_FAX).toBeUndefined();
     expect(loadEnv({ ...EXAMPLE, COMPANY_FAX: " 076-000000 " }).COMPANY_FAX).toBe("076-000000");
+    // ลายน้ำ: ไม่ตั้ง/ว่าง = ไม่มี (production) · มีค่า = ตัดช่องว่าง
+    expect(loadEnv(EXAMPLE).RECEIPT_WATERMARK).toBeUndefined();
+    expect(loadEnv({ ...EXAMPLE, RECEIPT_WATERMARK: " ตัวอย่าง " }).RECEIPT_WATERMARK).toBe("ตัวอย่าง");
   });
 
   it("ขาดค่าที่ต้องพิมพ์บนใบ → ไม่ start", () => {
@@ -72,6 +75,21 @@ describe("loadEnv — Gotenberg + หัวใบรับซื้อ", () => {
     expect(loadEnv({ ...EXAMPLE, GOTENBERG_URL: "http://gotenberg.railway.internal:3000" }).GOTENBERG_URL).toBe(
       "http://gotenberg.railway.internal:3000",
     );
+  });
+
+  it("GOTENBERG_URL ห้ามมี user/password ในตัว (หลุดไปกับ error ของ fetch ได้) · username ตัดช่องว่าง", () => {
+    const message = problem({ ...EXAMPLE, GOTENBERG_URL: "http://ong:TOPSECRET@gotenberg:3000" }) ?? "";
+    expect(message).toContain("GOTENBERG_URL");
+    expect(message).not.toContain("TOPSECRET");
+    expect(loadEnv({ ...EXAMPLE, GOTENBERG_USERNAME: "  ong  " }).GOTENBERG_USERNAME).toBe("ong");
+    expect(problem({ ...EXAMPLE, GOTENBERG_USERNAME: "   " })).toContain("GOTENBERG_USERNAME");
+  });
+
+  it("production: รหัสผ่าน Gotenberg ต้องยาว ≥ 32 ตัวอักษร (เครื่อง dev ไม่บังคับ)", () => {
+    expect(problem({ ...PRODUCTION, GOTENBERG_PASSWORD: "short-but-not-an-example" })).toMatch(
+      /GOTENBERG_PASSWORD: ต้องยาวอย่างน้อย 32/,
+    );
+    expect(problem({ ...EXAMPLE, GOTENBERG_PASSWORD: "short" })).toBeNull();
   });
 
   it("production ปฏิเสธรหัสผ่าน Gotenberg ตัวอย่าง (เหมือน BETTER_AUTH_SECRET)", () => {
