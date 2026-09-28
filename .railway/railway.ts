@@ -17,6 +17,17 @@ const APP_SERVICE = "Office";
 const PDF_SERVICE = "PDF (Gotenberg)";
 const BUCKET = "Media";
 /**
+ * หัวใบรับซื้อ — ข้อมูลกิจการที่พิมพ์บนใบทุกใบ (ไม่ใช่ค่าลับ) · ค่าจากหน้า "ข้อมูลบริษัท" ของระบบเดิม
+ * ใช้ค่าเดียวกันทุก environment · แอปตรวจรูปแบบตอน start (เลขผู้เสียภาษี 13 หลัก + หลักตรวจสอบ)
+ * ไม่มีโทรสาร → ไม่ประกาศ COMPANY_FAX (ใบพิมพ์ "-")
+ */
+const COMPANY = {
+  COMPANY_NAME: "โอเอ็นจี หลอมทอง",
+  COMPANY_ADDRESS: "156/7 ถนนพังงา ตำบลตลาดใหญ่ อำเภอเมืองภูเก็ต จังหวัดภูเก็ต 83000",
+  COMPANY_TEL: "0654249514",
+  COMPANY_TAX_ID: "3839900461751",
+};
+/**
  * Railway environment → git branch ที่ deploy (flow: dev → testing → staging → main)
  * สร้าง environment บน Railway เฉพาะที่ต้องใช้ — มีในตารางนี้ไม่ได้แปลว่าถูกสร้าง
  */
@@ -124,6 +135,8 @@ export default defineRailway((ctx) => {
       BETTER_AUTH_SECRET: secret("BETTER_AUTH_SECRET"),
       // domain *.up.railway.app สร้างด้วย `railway domain -s api` (IaC ไม่จัดการ generated domain)
       BETTER_AUTH_URL: "https://${{RAILWAY_PUBLIC_DOMAIN}}",
+
+      ...COMPANY,
     },
   });
 
