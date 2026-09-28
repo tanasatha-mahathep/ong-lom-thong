@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { configure, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GOLD_PRICE, fakeApi, json, makeMe, renderApp } from "@/test/app";
@@ -10,6 +10,10 @@ const shell = {
   "GET /api/gold-price/today": () => json(GOLD_PRICE),
 };
 const png = () => new Response(PNG_1X1, { headers: { "Content-Type": "image/png" } });
+
+// ทุกเทสต์ในไฟล์นี้โหลดทั้งแอป (router + route chunk) — เครื่องที่รันเทสต์ขนานหนัก ๆ ใช้เกิน 3 วินาทีได้
+// เพดานเท่านั้น: find* คืนทันทีที่เจอ เทสต์ที่ผ่านจึงไม่ช้าลง
+configure({ asyncUtilTimeout: 10_000 });
 
 beforeEach(() => {
   Object.assign(URL, { createObjectURL: vi.fn(() => "blob:photo"), revokeObjectURL: vi.fn() });
