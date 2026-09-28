@@ -29,6 +29,13 @@ x-api-env: &api-env
   COMPANY_FAX: ""
   COMPANY_TAX_ID: "0000000000001"
 
+# probe every second while a service starts (so `up --wait` returns as soon as it can), then every 10 s
+x-health: &health
+  interval: 10s
+  start_period: 120s
+  start_interval: 1s
+  retries: 3
+
 x-api-build: &api-build
   context: ../../..
   dockerfile: apps/api/Dockerfile
@@ -44,9 +51,8 @@ services:
       - pgdata:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ong -d ong"]
-      interval: 2s
+      <<: *health
       timeout: 3s
-      retries: 30
 
   # S3-compatible bucket — RustFS pinned like the root docker-compose.yml (minio/minio left Docker Hub)
   s3:
@@ -60,9 +66,8 @@ services:
       - s3data:/data # runs as uid 10001 — a fresh named volume inherits /data's owner from the image
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9000/health/ready"]
-      interval: 2s
+      <<: *health
       timeout: 3s
-      retries: 30
 
   # create the private bucket, then exit — BucketAlreadyOwnedByYou/BucketAlreadyExists also count as done
   s3-init:
@@ -97,10 +102,8 @@ services:
       - "127.0.0.1:23000:3000" # pdf project talks to Gotenberg directly
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/health"] # /health needs no auth
-      interval: 3s
+      <<: *health
       timeout: 5s
-      retries: 40
-      start_period: 10s
 
   # Railway pre-deploy of every non-production environment: migrate, then seed the reference data
   migrate:
@@ -133,10 +136,8 @@ services:
         - node
         - -e
         - "fetch('http://127.0.0.1:8787/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
-      interval: 2s
+      <<: *health
       timeout: 5s
-      retries: 30
-      start_period: 5s
 
 volumes:
   pgdata:
