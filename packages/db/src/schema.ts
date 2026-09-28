@@ -27,14 +27,31 @@ const updatedAt = () => tz("updated_at").notNull().defaultNow();
 export const ROLES = ["staff", "manager", "accounting", "admin"] as const;
 export type Role = (typeof ROLES)[number];
 
-export const branch = pgTable("branch", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  code: text("code").notNull().unique(),
-  name: text("name").notNull(),
-  taxBranchCode: text("tax_branch_code"),
-  isActive: boolean("is_active").notNull().default(true),
-  createdAt: createdAt(),
-});
+/** สาขา — ฟิลด์ตามโมเดล Branch ของ Django ที่ใช้งานจริงมาแล้ว */
+export const branch = pgTable(
+  "branch",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** รหัสภายใน — อยู่ใน key ของไฟล์ PDF จึงห้ามแก้หลังมีบิล */
+    code: text("code").notNull().unique(),
+    name: text("name").notNull(),
+    shortName: text("short_name"),
+    /** รหัสสาขา 5 หลักของกรมสรรพากร ("00000" = สำนักงานใหญ่) — พิมพ์บนหัวใบทุกใบ · null = ออก PDF ไม่ได้ */
+    taxBranchCode: text("tax_branch_code"),
+    /** ที่อยู่/โทรที่พิมพ์บนหัวใบของสาขานี้ · null = ใช้ของบริษัท (COMPANY_*) */
+    address: text("address"),
+    tel: text("tel"),
+    /** อักษรนำเลขเอกสาร เช่น "PT" → PT-RC6910-0001 · null = ไม่ใส่ */
+    docPrefix: text("doc_prefix"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check("branch_tax_branch_code_format", sql`${t.taxBranchCode} IS NULL OR ${t.taxBranchCode} ~ '^[0-9]{5}$'`),
+    check("branch_doc_prefix_format", sql`${t.docPrefix} IS NULL OR ${t.docPrefix} ~ '^[A-Z]{1,4}$'`),
+  ],
+);
 
 // ---------- better-auth core tables (ชื่อ field ต้องตรงกับที่ better-auth คาด) ----------
 
@@ -192,6 +209,18 @@ export const docSequence = pgTable(
  * ข้อมูลลูกค้า ณ ตอนเปิดบิล (R15) — PDF ทุกฉบับของบิล (รวมฉบับยกเลิกที่สร้างทีหลังหลายวัน) ต้องออกมาเหมือนตอนขาย
  * แม้ลูกค้าถูกแก้ภายหลัง · ชื่อ key ตามคอลัมน์ของ customer · เลขบัตรเต็มอยู่ที่นี่เพื่อ PDF — api ต้องมาสก์ทุกที่ (R13)
  */
+/** หัวใบ ณ ตอนบันทึกบิล (R15) — PDF/ใบยกเลิกที่สร้างทีหลังต้องได้หัวเดิม แม้ที่อยู่/ชื่อสาขาเปลี่ยน */
+export interface CompanySnapshot {
+  name: string;
+  address: string | null;
+  tel: string | null;
+  fax: string | null;
+  tax_id: string | null;
+  branch_name: string;
+  branch_code: string;
+  tax_branch_code: string | null;
+}
+
 export interface CustomerSnapshot {
   national_id: string;
   name_th: string;
@@ -221,6 +250,8 @@ export const buyReceipt = pgTable(
       .notNull()
       .references(() => customer.id),
     customerSnapshot: jsonb("customer_snapshot").$type<CustomerSnapshot>().notNull(),
+    /** null ได้เฉพาะบิลที่บันทึกก่อนมีคอลัมน์นี้ */
+    companySnapshot: jsonb("company_snapshot").$type<CompanySnapshot>(),
     /** ราคาทองแท่งขายออก ณ วันเปิดบิล (ระบบเดิม sold_out) — ติดบิล ไม่ใช้คำนวณ */
     goldPriceSnapshot: money("gold_price_snapshot").notNull(),
     detail: text("detail"),
