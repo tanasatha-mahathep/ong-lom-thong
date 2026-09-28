@@ -311,6 +311,25 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     expect(await receiptCount()).toBe(0);
   });
 
+  it('ช่องว่าง = ไม่ได้กรอก: customer_id "" → quote 200 ok:false (ไม่ใช่ 400) · POST 409', async () => {
+    for (const customer_id of ["", "  ", null]) {
+      const q = await quote(bill({ customer_id }));
+      expect(q.status).toBe(200);
+      expect(((await q.json()) as QuoteRes).errors[0]).toEqual({ field: "customer_id", message: BUY_MSG.noCustomer });
+    }
+    // time "" ก็ไม่ใช่ 400 — ไปติด quote (ไม่มีลูกค้า) = 409
+    const res = await save(bill({ customer_id: "", time: "" }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ field: "customer_id" });
+  });
+
+  it('ช่องว่าง = ไม่ได้กรอก: date "" / null → วันนี้', async () => {
+    for (const date of ["", null]) {
+      const q = (await (await quote(bill({ date }))).json()) as QuoteRes;
+      expect(q).toMatchObject({ ok: true, date: TODAY });
+    }
+  });
+
   it("body ไม่ใช่ JSON / ไม่ใช่ object = 400", async () => {
     const raw = await t.app.request("/api/buy/quote", {
       method: "POST",

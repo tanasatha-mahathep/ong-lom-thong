@@ -100,6 +100,10 @@ const isoDate = (label: string) =>
     .date(`${label}ต้องเป็นรูปแบบ YYYY-MM-DD`)
     .refine((d) => d >= "2000-01-01", `${label}ต้องตั้งแต่ปี ค.ศ. 2000 (พ.ศ. 2543)`);
 
+/** ช่องที่ฟอร์มส่งมาว่าง ("" · ช่องว่างล้วน · null) = ไม่ได้กรอก — quote ตอบ ok:false ต่อช่อง ไม่ใช่ 400 */
+const blankAsAbsent = <T extends z.ZodType>(schema: T) =>
+  z.preprocess((v) => (v === null || (typeof v === "string" && v.trim() === "") ? undefined : v), schema.optional());
+
 const LineBody = z.object({
   // โลหะที่ไม่รู้จักตรวจใน prepareBuy (ตอบเป็น error ของแถว ไม่ใช่ 400)
   metal_id: z.string({ error: "กรุณาเลือกประเภทโลหะ" }).max(64, "metal_id ไม่ถูกต้อง"),
@@ -117,8 +121,8 @@ const PaymentBody = z.object({
 /** payload ของ POST /buy/quote — POST /buy ใช้ตัวนี้ + ช่องของหัวบิล (SaveBody) */
 export const QuoteBody = z.object(
   {
-    date: isoDate("วันที่").optional(),
-    customer_id: z.uuid("customer_id ไม่ถูกต้อง").nullish(),
+    date: blankAsAbsent(isoDate("วันที่")),
+    customer_id: blankAsAbsent(z.uuid("customer_id ไม่ถูกต้อง")),
     lines: z.array(LineBody, { error: "ต้องส่ง lines เป็นรายการ" }).max(50, "รายการในบิลเกิน 50 แถว — แยกเป็นหลายบิล"),
     payments: z
       .array(PaymentBody, { error: "ต้องส่ง payments เป็นรายการ" })
@@ -134,7 +138,7 @@ const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9_-]{16,128}$/;
 
 export const SaveBody = QuoteBody.extend({
-  time: z.string({ error: "เวลาต้องเป็นรูปแบบ HH:MM" }).regex(TIME, "เวลาต้องเป็นรูปแบบ HH:MM").optional(),
+  time: blankAsAbsent(z.string({ error: "เวลาต้องเป็นรูปแบบ HH:MM" }).regex(TIME, "เวลาต้องเป็นรูปแบบ HH:MM")),
   detail: optionalText(2000, "รายละเอียด"),
   full_tax: z.boolean({ error: "full_tax ต้องเป็น true หรือ false" }).default(false),
   idempotency_key: z
