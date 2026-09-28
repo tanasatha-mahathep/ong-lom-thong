@@ -15,13 +15,13 @@ const EnvSchema = z
     DATABASE_URL: z.url(),
     BETTER_AUTH_SECRET: z.string().min(32, "ต้องยาวอย่างน้อย 32 ตัวอักษร (openssl rand -base64 32)"),
     BETTER_AUTH_URL: z.url(),
-    // S3-compatible bucket (local = MinIO · Railway = bucket Media) — private
+    // S3-compatible bucket (local = RustFS · Railway = bucket Media) — private
     S3_ENDPOINT: z.url(),
     S3_REGION: z.string().min(1),
     S3_BUCKET: z.string().min(1),
     S3_ACCESS_KEY: z.string().min(1),
     S3_SECRET_KEY: z.string().min(1),
-    // Railway bucket ใช้ virtual-hosted style (false) · MinIO ต้อง path style (true)
+    // Railway bucket ใช้ virtual-hosted style (false) · RustFS ต้อง path style (true)
     S3_FORCE_PATH_STYLE: z
       .enum(["true", "false"])
       .default("false")

@@ -1,1 +1,3 @@
-pnpm exec lint-staged --concurrent false
+# --no-stash: git stash เป็นของทั้ง repo (ทุก worktree/session ใช้ stack เดียวกัน) — backup ของ lint-staged
+# เคยถูก worktree อื่น `git stash pop` ไปแล้ว · การซ่อน unstaged ของไฟล์ที่ stage บางส่วนยังทำงานเหมือนเดิม
+pnpm exec lint-staged --concurrent false --no-stash
