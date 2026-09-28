@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveGoldPrice, typoWarning } from "./goldPrice";
+import { DEFAULT_GOLD_SETTING, deriveGoldPrice, typoWarning } from "./goldPrice";
 
 describe("deriveGoldPrice — สูตรจากระบบเดิม ยืนยันกับกระดานราคาจริง", () => {
   it("27 ก.ย. 2569: 67,850 → รับซื้อ 67,650 → รูปพรรณ 64,268", () => {
@@ -47,5 +47,23 @@ describe("typoWarning — ด่านกันพิมพ์ผิด", () => 
   });
   it("เกณฑ์ปรับได้", () => {
     expect(typoWarning("67850", "69000", "1")).not.toBeNull();
+  });
+});
+
+describe("deriveGoldPrice — ค่าตั้งจาก DB ที่ผิด ต้องหยุด", () => {
+  it.each([
+    [{ diff: "NaN", jewelryDiscount: "0.95" }],
+    [{ diff: "Infinity", jewelryDiscount: "0.95" }],
+    [{ diff: "-1", jewelryDiscount: "0.95" }],
+    [{ diff: "200", jewelryDiscount: "NaN" }],
+    [{ diff: "200", jewelryDiscount: "0" }],
+    [{ diff: "200", jewelryDiscount: "1.5" }],
+  ])("%j", (bad) => {
+    expect(() => deriveGoldPrice("67850", { ...DEFAULT_GOLD_SETTING, ...bad })).toThrow(RangeError);
+  });
+
+  it("ค่าปกติยังได้ 67,850 → 67,650 → 64,268", () => {
+    const q = deriveGoldPrice("67850", DEFAULT_GOLD_SETTING);
+    expect([q.barBuy.toFixed(2), q.jewelryBuy.toFixed(0)]).toEqual(["67650.00", "64268"]);
   });
 });

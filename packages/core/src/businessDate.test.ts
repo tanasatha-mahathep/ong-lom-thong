@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { businessDate, businessTime } from "./businessDate";
 
 describe("businessDate — วันตามเวลาไทย ไม่ใช่ UTC", () => {
@@ -29,5 +29,33 @@ describe("businessTime — เวลาไทย HH:MM (24 ชม.)", () => {
 
   it("เปลี่ยนเขตเวลาได้", () => {
     expect(businessTime(new Date("2026-09-27T18:30:00Z"), "UTC")).toBe("18:30");
+  });
+});
+
+describe("Intl ที่คืนส่วนไม่ครบ — หยุด ไม่คืนค่าผิดรูปเงียบ ๆ", () => {
+  const partsWithout = (missing: string) =>
+    vi.spyOn(Intl, "DateTimeFormat").mockImplementation(function () {
+      return {
+        formatToParts: () =>
+          [
+            { type: "year", value: "2026" },
+            { type: "month", value: "09" },
+            { type: "day", value: "28" },
+            { type: "hour", value: "10" },
+            { type: "minute", value: "05" },
+          ].filter((p) => p.type !== missing),
+      } as unknown as Intl.DateTimeFormat;
+    });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each(["year", "month", "day"])("businessDate ไม่มี %s = throw", (missing) => {
+    partsWithout(missing);
+    expect(() => businessDate(new Date())).toThrow(/businessDate/);
+  });
+
+  it.each(["hour", "minute"])("businessTime ไม่มี %s = throw", (missing) => {
+    partsWithout(missing);
+    expect(() => businessTime(new Date())).toThrow(/businessTime/);
   });
 });
