@@ -34,9 +34,10 @@ const jsonLimit = bodyLimit({
   onError: (c) => c.json(apiError("ข้อมูลใหญ่เกินไป"), 413),
 });
 
-/** 400 ชี้ช่องแรกที่ผิด เช่น "allowed_branch_ids.0" · body ไม่ใช่ object = ข้อความเดียวกันทุก endpoint */
+/** 400 ชี้ช่องแรกที่ผิด เช่น "allowed_branch_ids.0" · ช่องที่ไม่รู้จักชี้ชื่อช่องนั้น · body ไม่ใช่ object = ข้อความเดียวกัน */
 const invalid = (e: z.ZodError) => {
   const issue = e.issues[0];
+  if (issue?.code === "unrecognized_keys") return apiError(`ไม่รู้จักช่อง ${issue.keys.join(", ")}`, issue.keys[0]);
   const field = issue?.path.map(String).join(".");
   return field ? apiError(issue?.message ?? "ข้อมูลไม่ถูกต้อง", field) : apiError(NOT_JSON);
 };

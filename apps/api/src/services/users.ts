@@ -87,7 +87,8 @@ const password = z
 /** ไม่ส่ง / ว่าง / null = ให้ระบบสุ่ม (แสดงครั้งเดียวใน response) */
 const optionalPassword = z.preprocess((v) => (v === "" || v === null ? undefined : v), password.optional());
 
-export const UserCreate = z.object({
+/** ช่องที่ไม่รู้จัก (เช่น canViewAll แบบ camelCase) = 400 ไม่ใช่เงียบ ๆ ไม่ทำอะไร — ทุก body ของผู้ดูแล */
+export const UserCreate = z.strictObject({
   email,
   name,
   role,
@@ -99,7 +100,7 @@ export const UserCreate = z.object({
 export type UserCreate = z.infer<typeof UserCreate>;
 
 /** ช่องที่ไม่ส่ง = คงค่าเดิม · email แก้ไม่ได้ (ส่งค่าเดิมมาได้) · รหัสผ่านไปที่ reset-password */
-export const UserUpdate = z.object({
+export const UserUpdate = z.strictObject({
   email: z.unknown().optional(),
   password: z.unknown().optional(),
   name: name.optional(),
@@ -111,7 +112,7 @@ export const UserUpdate = z.object({
 });
 export type UserUpdate = z.infer<typeof UserUpdate>;
 
-export const ResetPassword = z.object({ password: optionalPassword });
+export const ResetPassword = z.strictObject({ password: optionalPassword });
 
 export const UserListQuery = z.object({
   q: z.string().trim().max(100, "คำค้นยาวเกิน 100 ตัวอักษร").optional(),

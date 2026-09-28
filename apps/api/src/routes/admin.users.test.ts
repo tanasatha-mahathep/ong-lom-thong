@@ -304,6 +304,23 @@ describe.skipIf(!available)("ผู้ดูแล: ผู้ใช้ — /api/
     expect(await userCount()).toBe(6);
   });
 
+  it("ช่องที่ไม่รู้จัก (เช่น camelCase) = 400 ทั้งสร้าง/แก้/รีเซ็ต · ไม่มีอะไรเปลี่ยน", async () => {
+    const target = ids.staff ?? "";
+    const edited = await put(target, { canViewAll: true });
+    expect(edited.status).toBe(400);
+    expect(await edited.json()).toEqual({ error: "ไม่รู้จักช่อง canViewAll", field: "canViewAll" });
+    const added = await post({ email: "x@ong.test", name: "x", role: "staff", is_active: false });
+    expect(added.status).toBe(400);
+    expect(await added.json()).toEqual({ error: "ไม่รู้จักช่อง is_active", field: "is_active" });
+    const reset1 = await reset(target, { newPassword: "Staff-New-Pass-01" });
+    expect(reset1.status).toBe(400);
+    expect(await reset1.json()).toEqual({ error: "ไม่รู้จักช่อง newPassword", field: "newPassword" });
+    const [row] = await t.db.select().from(user).where(eq(user.id, target));
+    expect(row?.canViewAll).toBe(false);
+    expect(await userCount()).toBe(6);
+    expect(await signIn("staff@ong.test", PW)).toBe(200);
+  });
+
   // ---------- รายการ ----------
 
   it("รายการผู้ใช้: ไม่มีรหัสผ่าน/hash · ไม่ cache", async () => {

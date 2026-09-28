@@ -63,7 +63,8 @@ const fields = {
   is_active: z.boolean({ error: BRANCH_MSG.isActive }),
 };
 
-export const BranchCreate = z.object({
+/** ช่องที่ไม่รู้จัก (เช่น isActive แบบ camelCase) = 400 ไม่ใช่เงียบ ๆ ไม่ทำอะไร — ทั้งเพิ่มและแก้ */
+export const BranchCreate = z.strictObject({
   code: z.string({ error: BRANCH_MSG.code }).trim().regex(FIVE_DIGITS, BRANCH_MSG.code),
   name: fields.name,
   short_name: fields.short_name.optional(),
@@ -77,7 +78,7 @@ export const BranchCreate = z.object({
 export type BranchCreate = z.infer<typeof BranchCreate>;
 
 /** แก้ได้ทุกช่องยกเว้น code · ช่องที่ไม่ส่ง = คงค่าเดิม · code ที่ส่งมาต้องเท่าค่าเดิม (ฟอร์มส่งทั้งก้อนได้) */
-export const BranchUpdate = z.object({
+export const BranchUpdate = z.strictObject({
   code: z.unknown().optional(),
   name: fields.name.optional(),
   short_name: fields.short_name.optional(),

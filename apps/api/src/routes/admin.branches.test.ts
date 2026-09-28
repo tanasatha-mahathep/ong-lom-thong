@@ -225,6 +225,19 @@ describe.skipIf(!available)("ผู้ดูแล: สาขา — /api/admin/
     expect(await res.json()).toEqual({ error, field });
   });
 
+  it("ช่องที่ไม่รู้จัก (เช่น camelCase) = 400 ชี้ชื่อช่อง ไม่ใช่เงียบ ๆ ไม่ทำอะไร", async () => {
+    const id = t.branches["00001"] ?? "";
+    const edited = await update(id, { isActive: false });
+    expect(edited.status).toBe(400);
+    expect(await edited.json()).toEqual({ error: "ไม่รู้จักช่อง isActive", field: "isActive" });
+    const added = await create({ code: "00009", name: "x", has_bills: false });
+    expect(added.status).toBe(400);
+    expect(await added.json()).toEqual({ error: "ไม่รู้จักช่อง has_bills", field: "has_bills" });
+    const [row] = await t.db.select().from(branch).where(eq(branch.id, id));
+    expect(row?.isActive).toBe(true);
+    expect(await branchCount()).toBe(3);
+  });
+
   it("แก้สาขาที่ไม่มี / id ผิดรูป = 404", async () => {
     expect((await update(NO_UUID, { name: "x" })).status).toBe(404);
     expect((await update("00001", { name: "x" })).status).toBe(404);
