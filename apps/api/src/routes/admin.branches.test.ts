@@ -1,6 +1,7 @@
 import { auditLog, branch, customer } from "@ong/db";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { UNUSABLE_CHARS_MSG } from "../lib/text";
 import { BRANCH_MSG } from "../services/branches";
 import { type TestApp, databaseAvailable, startTestApp } from "../test/harness";
 import { openTransaction, waitForLockWait } from "../test/locks";
@@ -185,6 +186,8 @@ describe.skipIf(!available)("ผู้ดูแล: สาขา — /api/admin/
     [{ code: 1, name: "ตัวเลข JSON" }, "code", BRANCH_MSG.code],
     [{ code: "00009" }, "name", BRANCH_MSG.name],
     [{ code: "00009", name: "   " }, "name", BRANCH_MSG.name],
+    [{ code: "00009", name: "สาขา\u0000ปลอม" }, "name", UNUSABLE_CHARS_MSG],
+    [{ code: "00009", name: "x", address: "\ud800" }, "address", UNUSABLE_CHARS_MSG],
     [{ code: "00009", name: "x", tax_branch_code: "123" }, "tax_branch_code", BRANCH_MSG.taxCode],
     [{ code: "00009", name: "x", tax_branch_code: 12345 }, "tax_branch_code", BRANCH_MSG.taxCode],
     [{ code: "00009", name: "x", doc_prefix: "pt" }, "doc_prefix", BRANCH_MSG.docPrefix],

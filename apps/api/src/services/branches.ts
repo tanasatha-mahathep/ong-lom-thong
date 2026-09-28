@@ -3,6 +3,7 @@ import { type Db, type Role, auditLog, branch, buyReceipt, docSequence, user } f
 import { and, asc, eq, getTableColumns, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { uniqueViolation } from "../lib/pg";
+import { UNUSABLE_CHARS_MSG, isCleanText } from "../lib/text";
 import { AdminError, type Executor, changedFields, notFound } from "./adminCommon";
 
 const FIVE_DIGITS = /^\d{5}$/;
@@ -31,7 +32,9 @@ const text = (label: string, max: number, required?: string) =>
   z
     .string({ error: (i) => (i.input === undefined && required ? required : `${label}ต้องเป็นข้อความ`) })
     .trim()
-    .max(max, `${label}ยาวเกิน ${max} ตัวอักษร`);
+    .max(max, `${label}ยาวเกิน ${max} ตัวอักษร`)
+    // ชื่อ/ที่อยู่สาขาพิมพ์บนหัวใบ — อักขระควบคุม/UTF-16 เสีย = 400 ไม่ใช่ 500 จาก Postgres
+    .refine(isCleanText, UNUSABLE_CHARS_MSG);
 
 /** ช่องไม่บังคับ — ว่าง / null = ไม่มีค่า (ล้างค่าเดิมเมื่อแก้) */
 const clearable = (label: string, max: number) =>

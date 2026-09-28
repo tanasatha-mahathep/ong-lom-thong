@@ -1,6 +1,7 @@
 import { account, auditLog, branch, customer, goldPrice, metal, session, user } from "@ong/db";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { UNUSABLE_CHARS_MSG } from "../lib/text";
 import { AdminError } from "../services/adminCommon";
 import { USER_MSG, updateUserAccount } from "../services/users";
 import { type TestApp, databaseAvailable, startTestApp } from "../test/harness";
@@ -254,6 +255,7 @@ describe.skipIf(!available)("ผู้ดูแล: ผู้ใช้ — /api/
     [{ email: "not-an-email", name: "x", role: "staff" }, "email", USER_MSG.email],
     [{ email: "x@ong.test", role: "staff" }, "name", USER_MSG.name],
     [{ email: "x@ong.test", name: "  ", role: "staff" }, "name", USER_MSG.name],
+    [{ email: "x@ong.test", name: "x\u0000y", role: "staff" }, "name", UNUSABLE_CHARS_MSG],
     [{ email: "x@ong.test", name: "x" }, "role", USER_MSG.role],
     [{ email: "x@ong.test", name: "x", role: "owner" }, "role", USER_MSG.role],
     [{ email: "x@ong.test", name: "x", role: "staff", branch_id: "00001" }, "branch_id", USER_MSG.branchId],
@@ -358,6 +360,7 @@ describe.skipIf(!available)("ผู้ดูแล: ผู้ใช้ — /api/
       ["role=owner", "role"],
       ["active=yes", "active"],
       ["branch_id=00001", "branch_id"],
+      ["q=%00", "q"],
     ]) {
       const res = await t.request(`/api/admin/users?${qs}`, { cookie: cookies.admin });
       expect(res.status).toBe(400);

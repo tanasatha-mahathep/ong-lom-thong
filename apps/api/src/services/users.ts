@@ -4,6 +4,7 @@ import { type SQL, and, asc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { type Auth, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "../auth";
 import { uniqueViolation, withoutQueryValues } from "../lib/pg";
+import { UNUSABLE_CHARS_MSG, isCleanText } from "../lib/text";
 import type { BranchRef } from "../lib/scope";
 import { AdminError, type Executor, changedFields, notFound } from "./adminCommon";
 import { escapeLike } from "./customers";
@@ -73,7 +74,8 @@ const name = z
   .string({ error: (i) => (i.input === undefined ? USER_MSG.name : "ชื่อต้องเป็นข้อความ") })
   .trim()
   .min(1, USER_MSG.name)
-  .max(100, "ชื่อยาวเกิน 100 ตัวอักษร");
+  .max(100, "ชื่อยาวเกิน 100 ตัวอักษร")
+  .refine(isCleanText, UNUSABLE_CHARS_MSG);
 const role = z.enum(ROLES, { error: USER_MSG.role });
 const branchId = z.uuid({ error: USER_MSG.branchId }).nullable();
 const allowedIds = z
@@ -115,7 +117,7 @@ export type UserUpdate = z.infer<typeof UserUpdate>;
 export const ResetPassword = z.strictObject({ password: optionalPassword });
 
 export const UserListQuery = z.object({
-  q: z.string().trim().max(100, "คำค้นยาวเกิน 100 ตัวอักษร").optional(),
+  q: z.string().trim().max(100, "คำค้นยาวเกิน 100 ตัวอักษร").refine(isCleanText, UNUSABLE_CHARS_MSG).optional(),
   branch_id: z.uuid({ error: "branch_id ไม่ถูกต้อง" }).optional(),
   role: role.optional(),
   active: z
