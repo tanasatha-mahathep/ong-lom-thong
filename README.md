@@ -9,7 +9,7 @@ TypeScript ล้วน · Vite + TanStack (web) · Hono (api) · Drizzle + Post
 `make` (หรือ `make help`) แสดงคำสั่งทั้งหมด — ห่อ pnpm · docker compose · railway · gh ไว้ที่เดียว และโหลด `.env` ให้คำสั่งที่ต้องใช้
 
 ```bash
-make setup               # install · .env · postgres/gotenberg/minio · migrate · seed
+make setup               # install · .env · postgres/gotenberg/s3 (RustFS) · migrate · seed
 make dev                 # web http://localhost:5173 (proxy /api → api :8787)
 make check               # lint · format · typecheck · test · build — ชุดเดียวกับ CI
 ```

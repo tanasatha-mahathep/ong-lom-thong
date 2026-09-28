@@ -23,7 +23,14 @@ interface Detail {
   has_photo: boolean;
 }
 interface ListBody {
-  items: { id: string; national_id_masked: string; name_th: string; mobile: string | null; card_status: string }[];
+  items: {
+    id: string;
+    national_id_masked: string;
+    name_th: string;
+    mobile: string | null;
+    address: string | null;
+    card_status: string;
+  }[];
   page: number;
   has_more: boolean;
 }
@@ -140,6 +147,7 @@ describe.skipIf(!available)("ลูกค้า (Siam ID · R12 · R13) — /api
         national_id_masked: "1 XXXX XXXXX 45 8",
         name_th: "นายทดสอบ ระบบ",
         mobile: "0812345678",
+        address: "1 ถ.ทดสอบ ต.ในเมือง อ.เมือง จ.ขอนแก่น",
         card_status: "ok",
       },
     ]);

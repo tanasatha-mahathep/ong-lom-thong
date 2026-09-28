@@ -81,6 +81,22 @@ railway ssh --service Office -- sh -c 'node dist/create-user.js --email staff1@o
 
 `railway ssh` ต้องลงทะเบียน SSH key ก่อน (`railway ssh keys add`)
 
+## เลขที่ใบรับซื้อต่อจากระบบเดิม (PHP)
+
+ค่าเริ่มต้น: ระบบใหม่เริ่มนับ `RC<yy><mm>-0001` เอง แยกตามสาขาและเดือน (ปี พ.ศ. 2 หลัก + เดือน) — ยังรอเจ้าของตัดสิน (spec §12 ข้อ 11)
+ถ้าเลือกนับต่อจากระบบเดิม: ตั้งตัวนับของงวดนั้น **ก่อนเปิดบิลแรกของงวดในระบบใหม่** · `last_no` = เลข running ใบสุดท้ายของระบบเดิมในเดือนนั้น → ใบถัดไปได้ `last_no + 1`
+
+```sql
+-- railway connect Postgres (environment ที่ link อยู่) · ตัวอย่าง: สาขา 00000 · ต.ค. 2569 · ใบสุดท้ายของระบบเดิม = 123
+INSERT INTO doc_sequence (branch_id, prefix, period, last_no)
+SELECT id, 'RC', '6910', 123 FROM branch WHERE code = '00000';
+-- ตรวจ: ต้องได้ 1 แถว last_no = 123
+SELECT b.code, s.prefix, s.period, s.last_no FROM doc_sequence s JOIN branch b ON b.id = s.branch_id;
+```
+
+- `INSERT` ไม่มี `ON CONFLICT` โดยตั้งใจ — ถ้าขึ้น `duplicate key` แปลว่างวดนั้นออกเลขในระบบใหม่ไปแล้ว **ห้าม UPDATE `last_no` ย้อนหรือข้าม** (เลขชนกับบิลที่มีอยู่ = บันทึกไม่ได้ · เลขกระโดด = เอกสารภาษีขาดช่วง) ให้ปรึกษาบัญชีก่อน
+- ทำทีละสาขา/ทีละงวด · ตัวนับถูกแก้ผ่าน `next_doc_no()` ในทรานแซกชันของการบันทึกบิลเท่านั้น (บิลที่บันทึกไม่สำเร็จคืนเลข ไม่มีเลขหาย)
+
 ## หมุนค่าลับ
 
 export `RAILWAY_SET_*` ค่าใหม่แล้ว `pnpm railway:apply` — ไม่ export = `preserve()` คงค่าเดิม
