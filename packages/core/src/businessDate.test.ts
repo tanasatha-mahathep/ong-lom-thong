@@ -277,6 +277,17 @@ describe("fault injection — Intl.DateTimeFormat คืนชิ้นส่ว
     vi.restoreAllMocks();
     expect(businessDate(NOW)).toBe("2026-09-28");
   });
+
+  // ด่านใหม่ตรวจรูป YYYY-MM-DD ของผลเอง (BVA ความกว้างแต่ละช่อง) — ครบทุกชนิดแต่ความยาวผิดก็ต้องหยุด
+  it.each<[string, string, Intl.DateTimeFormatPart[]]>([
+    ["ปี 3 หลัก", "999-09-28", [{ type: "year", value: "999" }, DASH, MONTH, DASH, DAY]],
+    ["ปี 5 หลัก", "10000-09-28", [{ type: "year", value: "10000" }, DASH, MONTH, DASH, DAY]],
+    ["เดือน 1 หลัก", "2026-9-28", [YEAR, DASH, { type: "month", value: "9" }, DASH, DAY]],
+    ["วัน 3 หลัก", "2026-09-028", [YEAR, DASH, MONTH, DASH, { type: "day", value: "028" }]],
+  ])("%s → Error พร้อมค่า %j", (_label, malformed, parts) => {
+    injectParts(parts);
+    expect(() => businessDate(NOW)).toThrow(new Error(`businessDate: unexpected Intl output "${malformed}"`));
+  });
 });
 
 describe("businessTime — เวลาไทย HH:MM (24 ชม.)", () => {
@@ -530,6 +541,22 @@ describe("businessTime — fault injection: Intl.DateTimeFormat คืนชิ�
     // คืน Intl ของจริงแล้วต้องได้ค่าปกติทันที — ไม่มีผลเสียค้างอยู่ใน cache
     vi.restoreAllMocks();
     expect(businessTime(NOW)).toBe("10:05");
+  });
+
+  // ด่านใหม่ตรวจ HH:MM แบบ 24 ชม. (h23) — 24:00 คือ h24 ที่ Postgres รับได้แต่หมายถึงสิ้นวัน · ความกว้างผิดก็ต้องหยุด (BVA)
+  it("23:59 (ขอบบนที่รับ) → คืนค่าเดิม", () => {
+    injectParts([{ type: "hour", value: "23" }, COLON, { type: "minute", value: "59" }]);
+    expect(businessTime(NOW)).toBe("23:59");
+  });
+
+  it.each<[string, string, Intl.DateTimeFormatPart[]]>([
+    ["ชั่วโมง 24 (h24 แทน h23)", "24:00", [{ type: "hour", value: "24" }, COLON, { type: "minute", value: "00" }]],
+    ["นาที 60", "10:60", [HOUR, COLON, { type: "minute", value: "60" }]],
+    ["ชั่วโมง 1 หลัก", "9:05", [{ type: "hour", value: "9" }, COLON, MINUTE]],
+    ["นาที 1 หลัก", "10:5", [HOUR, COLON, { type: "minute", value: "5" }]],
+  ])("%s → Error พร้อมค่า %j", (_label, malformed, parts) => {
+    injectParts(parts);
+    expect(() => businessTime(NOW)).toThrow(new Error(`businessTime: unexpected Intl output "${malformed}"`));
   });
 });
 
