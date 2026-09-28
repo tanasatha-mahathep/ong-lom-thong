@@ -51,6 +51,10 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
     b0 = t.branches["00000"] ?? "";
     b1 = t.branches["00001"] ?? "";
     b2 = t.branches["00002"] ?? "";
+    // ขายได้เฉพาะสาขาที่มีรหัสสาขาของกรมสรรพากร (seed ตั้งให้แค่สำนักงานใหญ่) — รหัสสมมติสำหรับเทสต์
+    for (const code of ["00001", "00002"]) {
+      await t.db.update(branch).set({ taxBranchCode: code }).where(eq(branch.code, code));
+    }
     // เมื่อวาน: ราคากลาง 67,850 · สาขา 00001 ใช้ราคาของตัวเอง 70,000 · วันนี้: ราคากลาง 67,900
     await t.db.insert(goldPrice).values([
       { date: YESTERDAY, barSell: "67850", barBuy: "67650", jewelryBuy: "64268" },
