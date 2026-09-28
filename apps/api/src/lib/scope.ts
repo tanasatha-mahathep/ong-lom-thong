@@ -31,9 +31,31 @@ export async function forUser(db: Db, viewer: Viewer): Promise<BranchRef[]> {
     .from(branch)
     .where(eq(branch.isActive, true))
     .orderBy(asc(branch.code));
-  if (viewer.canViewAll) return active;
+  return grantedOf(viewer, active);
+}
+
+/** role ที่อ่านเอกสารของสาขาที่ปิดไปแล้วได้ — บัญชี/ผู้ดูแลต้องเปิดเอกสารภาษีย้อนหลัง (เก็บ ≥ 5 ปี) */
+const HISTORY_ROLES: readonly Role[] = ["accounting", "admin"];
+
+/**
+ * สาขาที่อ่าน "เอกสารย้อนหลัง" ได้ (บิล · รายการ/ยอดรวม · PDF · สำเนาบัตร) — เจ้าของกำหนด 28 ก.ย.:
+ * accounting/admin เห็นสาขาที่ถูกปิดแล้วด้วย (อ่านอย่างเดียว) · role อื่น = forUser (fail-closed ตามเดิม)
+ * การเขียน (quote · บันทึก · ยกเลิก · retry) ต้องใช้ forUser + currentBranch เสมอ — สาขาที่ปิดเขียนไม่ได้
+ */
+export async function forUserHistory(db: Db, viewer: Viewer): Promise<BranchRef[]> {
+  if (!HISTORY_ROLES.includes(viewer.role)) return forUser(db, viewer);
+  const all = await db
+    .select({ id: branch.id, code: branch.code, name: branch.name })
+    .from(branch)
+    .orderBy(asc(branch.code));
+  return grantedOf(viewer, all);
+}
+
+/** canViewAll = ทุกสาขาในรายการ · ไม่งั้นเฉพาะสาขาหลัก + สาขาที่อนุญาต */
+function grantedOf(viewer: Viewer, branches: BranchRef[]): BranchRef[] {
+  if (viewer.canViewAll) return branches;
   const granted = new Set([viewer.branchId, ...viewer.allowedBranchIds].filter((id): id is string => !!id));
-  return active.filter((b) => granted.has(b.id));
+  return branches.filter((b) => granted.has(b.id));
 }
 
 /** สาขาที่กำลังทำงาน ต้องยังอยู่ในสิทธิ์ ณ ตอนนี้ — สิทธิ์ถูกถอนระหว่าง session = null */
