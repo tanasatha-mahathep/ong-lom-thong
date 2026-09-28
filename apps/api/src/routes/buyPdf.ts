@@ -3,7 +3,7 @@ import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { type AppEnv, apiError, requireRole } from "../lib/context";
 import { sha256Hex } from "../lib/pdfArchive";
-import { type BranchRef, currentBranch, forUser } from "../lib/scope";
+import { type BranchRef, currentBranch, forUser, forUserHistory } from "../lib/scope";
 import { VoidBody, voidBuy } from "../services/buyVoid";
 import { getBuy } from "../services/buy";
 import { findReadableReceipt, missingFiles, receiptForScreen } from "../services/receiptPdf";
@@ -19,11 +19,8 @@ const jsonLimit = bodyLimit({ maxSize: 8 * 1024, onError: (c) => c.json(apiError
 const NOT_FOUND = apiError("not found");
 const NO_BRANCH = apiError("ยังไม่ได้เลือกสาขาที่ทำงาน", "branch");
 
-/**
- * สาขาที่อ่านไฟล์ได้ (GET pdf · idcard) — จุดเดียว: จะเปลี่ยนเป็น forUserHistory (รวมสาขาที่ปิดแล้ว
- * ให้ accounting/admin อ่านย้อนหลัง) เมื่อ fix/api-buy-hardening เข้า dev
- */
-const readableBranches = (c: Context<AppEnv>): Promise<BranchRef[]> => forUser(c.var.db, c.var.viewer);
+/** สาขาที่อ่านไฟล์ได้ (GET pdf · idcard · retry) — รวมสาขาที่ปิดแล้วให้ accounting/admin อ่านย้อนหลัง */
+const readableBranches = (c: Context<AppEnv>): Promise<BranchRef[]> => forUserHistory(c.var.db, c.var.viewer);
 
 /** ยกเลิกบิลได้เฉพาะบิลของสาขาที่กำลังทำงานและยังเปิดอยู่ — ไม่มีสาขาปัจจุบัน = null */
 async function workingBranch(c: Context<AppEnv>): Promise<BranchRef | null> {
