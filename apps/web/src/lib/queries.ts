@@ -12,8 +12,10 @@ export type Branch = z.infer<typeof BranchSchema>;
 const MeSchema = z.object({
   user: z.object({ id: z.string(), name: z.string(), email: z.string() }),
   role: z.enum(ROLES),
-  /** สาขาที่กำลังทำงาน — null = ยังไม่ได้เลือก หรือสิทธิ์ถูกถอน */
+  /** สาขาที่กำลังทำงาน — null = ยังไม่ได้เลือก หรือสิทธิ์ถูกถอน (ดู branch_closed แยกจากกรณีนี้) */
   branch: BranchSchema.nullable(),
+  /** ไม่ null เฉพาะตอน session ชี้สาขาที่ปิดไปแล้ว (ต่างจาก "ยังไม่ได้เลือกสาขา" ที่ branch เป็น null เฉย ๆ) */
+  branch_closed: BranchSchema.nullable().optional(),
   branches: z.array(BranchSchema),
   can_view_all: z.boolean(),
 });

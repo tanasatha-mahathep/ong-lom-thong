@@ -306,6 +306,17 @@ describe("/buy", () => {
     expect(api.callsTo("GET", "/api/metals")).toHaveLength(0);
   });
 
+  it("tells a closed working branch apart from never having picked one", async () => {
+    const { api } = setup({
+      me: { ...makeMe("staff"), branch: null, branch_closed: { id: "b-old", code: "00002", name: "สาขา 3" } },
+    });
+    expect(await screen.findByText(t("access.branchClosedTitle"))).toBeInTheDocument();
+    expect(screen.getByText(t("access.branchClosedBody", { name: "สาขา 3" }))).toBeInTheDocument();
+    expect(screen.queryByText(t("access.noBranchTitle"))).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(t("customer.idLabel"))).not.toBeInTheDocument();
+    expect(quotes(api)).toHaveLength(0);
+  });
+
   it("hides backdating from staff", async () => {
     setup();
     await waitFor(() => expect(idBox()).toHaveFocus());

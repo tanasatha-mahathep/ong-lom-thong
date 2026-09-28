@@ -4,7 +4,7 @@ import { Info, TriangleAlert } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
-import { type Me, useMe } from "@/lib/queries";
+import { type Branch, type Me, useMe } from "@/lib/queries";
 import { BillHeaderCard } from "./components/BillHeaderCard";
 import { CustomerCard } from "./components/CustomerCard";
 import { LinesCard } from "./components/LinesCard";
@@ -45,7 +45,7 @@ export function BuyPage() {
     return (
       <>
         <PageHeader />
-        <NoBranchAlert />
+        <NoBranchAlert branchClosed={me.branch_closed ?? null} />
       </>
     );
   }
@@ -53,13 +53,19 @@ export function BuyPage() {
   return <BuyForm me={me} />;
 }
 
-function NoBranchAlert() {
+/**
+ * branchClosed ไม่ null เฉพาะตอน session ชี้สาขาที่เพิ่งถูกปิด (ต่างจาก "ยังไม่ได้เลือกสาขา" ที่ยังไม่เคยเลือกเลย)
+ * ข้อความตรงกับที่ quote/save ตอบกลับตอน 403 field:"branch" (services/buy.ts) ให้ตรงกันทั้งหน้า
+ */
+function NoBranchAlert({ branchClosed }: { branchClosed: Branch | null }) {
   const { t } = useTranslation("buy");
   return (
     <Alert variant="destructive">
       <TriangleAlert aria-hidden="true" />
-      <AlertTitle>{t("access.noBranchTitle")}</AlertTitle>
-      <AlertDescription>{t("access.noBranchBody")}</AlertDescription>
+      <AlertTitle>{branchClosed ? t("access.branchClosedTitle") : t("access.noBranchTitle")}</AlertTitle>
+      <AlertDescription>
+        {branchClosed ? t("access.branchClosedBody", { name: branchClosed.name }) : t("access.noBranchBody")}
+      </AlertDescription>
     </Alert>
   );
 }
@@ -73,7 +79,7 @@ function BuyForm({ me }: { me: Me }) {
     // scroll-mb: ช่องที่โฟกัสต้องไม่ถูกแถบบันทึกด้านล่างบัง (WCAG 2.4.11)
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 [&_:is(input,textarea,button,a,[role=radio],[role=switch])]:scroll-mb-40">
       <PageHeader />
-      {c.noBranch && <NoBranchAlert />}
+      {c.noBranch && <NoBranchAlert branchClosed={c.me.branch_closed ?? null} />}
       <fieldset disabled={c.saving} className="m-0 flex min-w-0 flex-col gap-4 border-0 p-0">
         <legend className="sr-only">{t("page.form")}</legend>
         <BillHeaderCard c={c} />
