@@ -14,6 +14,9 @@ afterEach(() => {
   cleanup();
   // sonner เก็บ toast ไว้ใน store ระดับโมดูลและ replay ให้ Toaster ที่ mount ใหม่ — ปิดทิ้งไม่ให้ค้างไปเทสต์ถัดไป
   toast.dismiss();
+  // ธีม/ภาษาที่เทสต์ก่อนหน้าตั้งไว้ไม่ค้างมาเทสต์ถัดไป
+  localStorage.clear();
+  document.documentElement.classList.remove("dark");
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });

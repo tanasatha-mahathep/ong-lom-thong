@@ -1,13 +1,15 @@
 import { CircleCheckIcon, InfoIcon, Loader2Icon, OctagonXIcon, TriangleAlertIcon } from "lucide-react";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
+import { useTheme } from "@/lib/theme";
 import { useTranslation } from "react-i18next";
 
-// ไม่มีโหมดมืด — ตัด next-themes ออก ใช้ธีมสว่างเสมอ · ป้ายสำหรับ screen reader แปลด้วย i18n
+// ธีมตาม ThemeProvider (สว่าง/มืด/ตามระบบ) · ป้ายสำหรับ screen reader แปลด้วย i18n
 const Toaster = ({ ...props }: ToasterProps) => {
   const { t } = useTranslation("shell");
+  const { theme } = useTheme();
   return (
     <Sonner
-      theme="light"
+      theme={theme}
       className="toaster group"
       containerAriaLabel={t("notifications")}
       toastOptions={{ closeButtonAriaLabel: t("closeNotification") }}

@@ -88,10 +88,10 @@ function BoardCard({ label, value }: { label: string; value: string }) {
 function NoPriceAlert({ role }: { role: Role }) {
   const { t } = useTranslation("home");
   return (
-    <Alert className="border-amber-300 bg-amber-50 text-amber-950">
+    <Alert className="border-warning-border bg-warning text-warning-foreground">
       <TriangleAlert aria-hidden="true" />
       <AlertTitle>{t("goldPrice.notSet", { ns: "common" })}</AlertTitle>
-      <AlertDescription className="text-amber-950">
+      <AlertDescription className="text-warning-foreground">
         {canSetGoldPrice(role) ? (
           <>
             <p>{t("noPrice.canSet")}</p>

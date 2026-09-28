@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { Store, TriangleAlert } from "lucide-react";
 import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
@@ -59,6 +60,7 @@ export function SiteHeader() {
         <span className="sr-only">{t("currentBranch")}</span>
         {me.branch ? me.branch.name : t("noBranch", { ns: "common" })}
       </Badge>
+      <ThemeToggle />
       <div className="order-last w-full @6xl/header:order-none @6xl/header:w-auto">
         <GoldPriceToday role={me.role} />
       </div>
@@ -80,7 +82,7 @@ function GoldPriceToday({ role }: { role: Role }) {
         {t("goldPrice.notSet")}
       </>
     );
-    const className = "h-7 gap-1.5 border-amber-300 bg-amber-50 px-2.5 text-sm font-normal text-amber-900";
+    const className = "h-7 gap-1.5 border-warning-border bg-warning px-2.5 text-sm font-normal text-warning-foreground";
     return canSetGoldPrice(role) ? (
       <Badge asChild variant="outline" className={className}>
         <Link to="/settings/gold-price">{warning}</Link>

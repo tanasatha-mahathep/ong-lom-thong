@@ -282,7 +282,7 @@ function QuotePreview({
               <p className="text-sm text-destructive">{requestErrorMessage(error, "quote")}</p>
             ) : (
               warning && (
-                <p className="flex gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+                <p className="flex gap-2 rounded-md border border-warning-border bg-warning p-3 text-sm text-warning-foreground">
                   <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                   {warning}
                 </p>

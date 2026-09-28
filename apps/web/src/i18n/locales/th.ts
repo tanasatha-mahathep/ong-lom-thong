@@ -106,6 +106,12 @@ export default {
       switchFailed: "สลับสาขาไม่สำเร็จ — {{reason}}",
       signOutFailed: "ออกจากระบบไม่สำเร็จ — {{reason}}",
     },
+    theme: {
+      label: "เปลี่ยนธีม",
+      light: "สว่าง",
+      dark: "มืด",
+      system: "ตามระบบ",
+    },
     table: {
       empty: "ไม่พบข้อมูล",
       pager: "เปลี่ยนหน้า",

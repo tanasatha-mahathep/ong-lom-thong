@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { Outlet, createRootRouteWithContext } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { usePageMeta } from "@/hooks/use-page-meta";
 
@@ -19,9 +20,9 @@ function RootLayout() {
   }, [pageTitle, shopName]);
 
   return (
-    <>
+    <ThemeProvider>
       <Outlet />
       <Toaster />
-    </>
+    </ThemeProvider>
   );
 }
