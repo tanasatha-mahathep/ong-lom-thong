@@ -1,5 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { auditLog, branch, customer, goldPrice, session, user } from "@ong/db";
+import {
+  auditLog,
+  branch,
+  buyReceipt,
+  customer,
+  docSequence,
+  goldPrice,
+  metal,
+  session,
+  stockMovement,
+  user,
+} from "@ong/db";
 import { and, count, eq, isNull, max } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app";
@@ -16,7 +27,7 @@ import { cardFormat, syntheticNationalId, testName } from "./test/synthetic";
  * โดนตรวจทุกข้อข้างล่างทันทีโดยไม่ต้องแก้ไฟล์นี้ — ลืม requireSession · ลืมกัน CSRF · id ผิดรูปแล้ว 500 · error หลุด
  * ร่องรอยภายใน · หลุดเลขบัตร · เงินเป็น float · เปิด CORS · ผู้ใช้ไม่มีสาขาได้ข้อมูล · body ผิดรูปแล้ว 500 = แดง
  * ข้อยกเว้นทุกข้ออยู่ใน allowlist ด้านล่างพร้อมเหตุผล · ช่องโหว่ที่รู้แล้วมี it.fails ของตัวเองหนึ่งข้อต่อ finding
- * (F4 · F7 · F8 · F9) — แก้แล้ว it.fails จะแดง: เปลี่ยนเป็น it และลบค่าคงที่ของ finding นั้นออก
+ * (F4 · F7 · F8 · F9 · F13) — แก้แล้ว it.fails จะแดง: เปลี่ยนเป็น it และลบค่าคงที่ของ finding นั้นออก
  *
  * มาตรฐาน: OWASP ASVS 4.0.3 (V3.3 · V4.1 · V4.2 · V5.1 · V7.4.1 · V8.2.1 · V8.3 · V13.2 · V14.5.3) และ 5.0 ·
  * OWASP API Security Top 10 2023 (API1 · API2 · API3 · API5 · API8 · API9) · RFC 9110 §9.2.1 (safe methods) ·
@@ -97,6 +108,10 @@ const KNOWN_ROUTES = [
   "GET /api/customers/:id",
   "PUT /api/customers/:id",
   "GET /api/customers/:id/photo",
+  "GET /api/buy",
+  "POST /api/buy/quote",
+  "POST /api/buy",
+  "GET /api/buy/:id",
 ];
 
 /** id ผิดรูป — ต้องได้คำตอบเดียวกับ id ที่ไม่มีอยู่ (ไม่ 500 · ไม่เป็น oracle) */
@@ -165,6 +180,8 @@ let superId = "";
 let expiredSession: typeof session.$inferSelect | undefined;
 let custWithPhoto = "";
 let custNoPhoto = "";
+let receiptId = "";
+let goldId = "";
 let priceSetBody: unknown;
 
 // ---------- กลุ่ม endpoint ----------
@@ -254,6 +271,7 @@ function customerForm(nationalId: string, label: string, photo = false): FormDat
   const form = new FormData();
   form.append("national_id", nationalId);
   form.append("name_th", testName(label));
+  form.append("card_expire_text", "31/12/2574"); // บัตรยังไม่หมดอายุ — ใช้เปิดบิลได้ (R2)
   if (photo) form.append("photo", new File([PNG], "card.png", { type: "image/png" }));
   return form;
 }
@@ -276,9 +294,21 @@ function probeBody(key: string): unknown {
       return customerForm(ID_PROBE, "จาก probe", true);
     case "PUT /api/customers/:id":
       return customerForm(ID_WITH_PHOTO, "แก้จาก probe");
+    case "POST /api/buy/quote":
+      return billBody();
+    case "POST /api/buy":
+      return { ...billBody(), idempotency_key: `probe-${randomUUID()}` }; // key ใหม่ทุกครั้ง = ถ้าหลุดจะเขียนบิลใหม่จริง
     default:
       return {};
   }
+}
+/** บิลใบจริง 5.860 กรัม · 20,030 บาท ของลูกค้าที่มีรูป (บัตรยังไม่หมดอายุ) */
+function billBody() {
+  return {
+    customer_id: custWithPhoto,
+    lines: [{ metal_id: goldId, weight_g: "5.860", amount: "20030" }],
+    payments: [{ method: "cash", amount: "20030" }],
+  };
 }
 const bodyFor = (e: Endpoint) => (isStateChanging(e) ? probeBody(e.key) : undefined);
 
@@ -295,18 +325,23 @@ async function armExpired(): Promise<string> {
 /** สิ่งที่ request ที่ถูกปฏิเสธต้องไม่แตะ — จำนวนแถว + ค่าที่ถูกแก้ในที่ได้ */
 async function sideEffects() {
   const { db, storage } = harness();
-  const [[audits], [customers], [prices], central, [sessions], superSessions] = await Promise.all([
-    db.select({ n: count() }).from(auditLog),
-    db.select({ n: count(), lastUpdate: max(customer.updatedAt) }).from(customer),
-    db.select({ n: count() }).from(goldPrice),
-    db
-      .select({ barSell: goldPrice.barSell })
-      .from(goldPrice)
-      .where(and(isNull(goldPrice.branchId), eq(goldPrice.date, TODAY))),
-    db.select({ n: count() }).from(session),
-    db.select({ id: session.id, branch: session.currentBranchId }).from(session).where(eq(session.userId, superId)),
-  ]);
-  return { audits, customers, prices, central, sessions, superSessions, photos: storage.keys().length };
+  const [[audits], [customers], [prices], central, [sessions], superSessions, [receipts], [stock], sequences] =
+    await Promise.all([
+      db.select({ n: count() }).from(auditLog),
+      db.select({ n: count(), lastUpdate: max(customer.updatedAt) }).from(customer),
+      db.select({ n: count() }).from(goldPrice),
+      db
+        .select({ barSell: goldPrice.barSell })
+        .from(goldPrice)
+        .where(and(isNull(goldPrice.branchId), eq(goldPrice.date, TODAY))),
+      db.select({ n: count() }).from(session),
+      db.select({ id: session.id, branch: session.currentBranchId }).from(session).where(eq(session.userId, superId)),
+      db.select({ n: count() }).from(buyReceipt),
+      db.select({ n: count() }).from(stockMovement),
+      db.select().from(docSequence), // เลขที่เอกสาร (R9) ต้องไม่ถูกกินไปกับ request ที่ถูกปฏิเสธ
+    ]);
+  const photos = storage.keys().length;
+  return { audits, customers, prices, central, sessions, superSessions, receipts, stock, sequences, photos };
 }
 
 async function createCustomerAsSuper(nationalId: string, label: string, photo = false): Promise<string> {
@@ -324,14 +359,21 @@ interface Target {
   /** เลขบัตรของลูกค้าที่ path นี้ชี้ถึง (route ที่มี :id) */
   nationalId?: string;
 }
-/** request ของ GET sweep — :id = ลูกค้าจริงทุกคน · list = ไม่ค้น + ค้นด้วยเลขบัตรเต็ม · แบบหน้าบัตร · บางส่วน 5 หลัก */
+/** id จริงของแต่ละทรัพยากรที่ไฟล์นี้สร้างไว้ — เป็น fixture ไม่ใช่รายการ route (route ยังอ่านจาก router) */
+function fixturesFor(e: Endpoint): { id: string; nationalId: string }[] {
+  const customers = [
+    { id: custWithPhoto, nationalId: ID_WITH_PHOTO },
+    { id: custNoPhoto, nationalId: ID_NO_PHOTO },
+  ];
+  const receipts = [{ id: receiptId, nationalId: ID_WITH_PHOTO }];
+  if (e.path.startsWith("/api/customers/")) return customers;
+  if (e.path.startsWith("/api/buy/")) return receipts;
+  return [...customers, ...receipts]; // route ใหม่ที่ยังไม่มี fixture — ลองทุก id (ไม่ตรงก็ได้ 404 ซึ่งถูกตรวจเหมือนกัน)
+}
+
+/** request ของ GET sweep — :id = ทรัพยากรจริง · list = ไม่ค้น + ค้นด้วยเลขบัตรเต็ม · แบบหน้าบัตร · บางส่วน 5 หลัก */
 function getTargets(e: Endpoint): Target[] {
-  if (hasParams(e.path)) {
-    return [
-      { path: probePath(e, custWithPhoto), nationalId: ID_WITH_PHOTO },
-      { path: probePath(e, custNoPhoto), nationalId: ID_NO_PHOTO },
-    ];
-  }
+  if (hasParams(e.path)) return fixturesFor(e).map((f) => ({ path: probePath(e, f.id), nationalId: f.nationalId }));
   const base = probePath(e, "");
   const queries = [ID_WITH_PHOTO, cardFormat(ID_WITH_PHOTO, " "), ID_WITH_PHOTO.slice(4, 9)];
   return [{ path: base }, ...queries.map((q) => ({ path: `${base}?q=${encodeURIComponent(q)}` }))];
@@ -370,6 +412,16 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
     priceSetBody = await price.json();
     custWithPhoto = await createCustomerAsSuper(ID_WITH_PHOTO, "ลูกค้ามีรูป", true);
     custNoPhoto = await createCustomerAsSuper(ID_NO_PHOTO, "ลูกค้าไม่มีรูป");
+
+    // บิลจริงหนึ่งใบ (สาขา 00000 ของ super) — GET /api/buy และ /api/buy/:id ต้องมีข้อมูลให้ตรวจ ไม่ใช่ข้าม
+    const [gold] = await T.db.select({ id: metal.id }).from(metal).where(eq(metal.code, "gold"));
+    goldId = gold?.id ?? "";
+    const bill = await T.request("/api/buy", {
+      cookie: cookies.super,
+      body: { ...billBody(), idempotency_key: `contract-fixture-${randomUUID()}` },
+    });
+    if (bill.status !== 201) throw new Error(`เปิดบิลไม่สำเร็จ: ${bill.status} ${await bill.text()}`);
+    receiptId = ((await bill.json()) as { id: string }).id;
   });
 
   describe("ทะเบียน route (API9:2023 inventory · ASVS 4.0.3 V13.2.1)", () => {
@@ -769,6 +821,27 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
       const put = await hit(`/api/customers/${custNoPhoto}`, { method: "PUT", cookie: cookies.super, body: updated });
       await expectNot5xx(put, "PUT /api/customers/:id (address มี NUL)");
     });
+
+    // F13 — แบบเดียวกับ F9 แต่ที่ /api/buy (โค้ดคนละชุด): apps/api/src/services/buy.ts ListQuery.q/.metal ไปถึง ilike/eq ของ
+    // Postgres และ SaveBody.detail · payments[].bank (optionalText) ไปถึง INSERT → 22021 → 500 ทั้งค้นบิลและบันทึกบิล
+    // ที่ถูก: 400 ชี้ช่อง หรือตัด NUL ทิ้ง · แก้: ปฏิเสธ \u0000 ใน decimalText/optionalText/ListQuery ของ services/buy.ts
+    it.fails(
+      "F13 — /api/buy: NUL byte (U+0000) ในคำค้น · ตัวกรองโลหะ · detail · ชื่อธนาคาร ต้องไม่ทำให้ 500",
+      async () => {
+        const cookie = cookies.super;
+        for (const path of ["/api/buy?q=a%00b", "/api/buy?metal=%00"]) {
+          await expectNot5xx(await hit(path, { cookie }), `GET ${path}`);
+        }
+        const bills: [string, Record<string, unknown>][] = [
+          ["detail มี NUL", { detail: "ทดสอบ\u0000" }],
+          ["ชื่อธนาคารมี NUL", { payments: [{ method: "transfer", bank: "ทดสอบ\u0000", amount: "20030" }] }],
+        ];
+        for (const [label, over] of bills) {
+          const body = { ...billBody(), idempotency_key: `nul-${randomUUID()}`, ...over };
+          await expectNot5xx(await hit("/api/buy", { method: "POST", cookie, body }), `POST /api/buy (${label})`);
+        }
+      },
+    );
   });
 
   describe("path/method ที่ไม่มี", () => {
