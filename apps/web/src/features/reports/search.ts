@@ -21,6 +21,12 @@ export const PurchaseSearchSchema = z.object({
 });
 export type PurchaseSearch = z.infer<typeof PurchaseSearchSchema>;
 
+export const StockSearchSchema = z.object({
+  as_of: isoDate.optional().catch(undefined),
+  branch_id: id.optional().catch(undefined),
+});
+export type StockSearch = z.infer<typeof StockSearchSchema>;
+
 /** วันที่ 1 ของเดือนเดียวกัน — ค่าเริ่มต้นของรายงานยอดซื้อ (ระบบเดิมเปิดที่เดือนปัจจุบัน · เหมือน API) */
 export const monthStart = (iso: string) => `${iso.slice(0, 8)}01`;
 

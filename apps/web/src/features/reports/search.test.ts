@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { PurchaseSearchSchema, isoToThaiInput, lastMonth, parseDateInput, presetRange } from "./search";
+import {
+  PurchaseSearchSchema,
+  StockSearchSchema,
+  isoToThaiInput,
+  lastMonth,
+  parseDateInput,
+  presetRange,
+} from "./search";
 
 describe("ตัวกรองใน URL", () => {
   it("ค่าที่ถูกผ่านตรงตัว", () => {
@@ -12,6 +19,7 @@ describe("ตัวกรองใน URL", () => {
     expect(
       PurchaseSearchSchema.parse({ date_from: "2026-02-30", date_to: "29/09/2569", metal: 123, branch_id: "" }),
     ).toEqual({});
+    expect(StockSearchSchema.parse({ as_of: "1999-12-31", branch_id: { x: 1 } })).toEqual({});
   });
 });
 

@@ -52,11 +52,26 @@ const PurchaseReportSchema = z.object({
 });
 export type PurchaseReport = z.infer<typeof PurchaseReportSchema>;
 
+const StockMetalSchema = z.object({ metal_code: z.string(), name_th: z.string(), grams: decimalString });
+
+/** GET /api/reports/stock — กรัมคงเหลือต่อสาขาต่อโลหะ + รวมทุกสาขาต่อโลหะ (ไม่มีรวมข้ามโลหะ) */
+const StockReportSchema = z.object({
+  as_of: z.iso.date(),
+  by_branch: z.array(z.object({ branch: BranchSchema, by_metal: z.array(StockMetalSchema) })),
+  total: z.object({ by_metal: z.array(StockMetalSchema) }),
+});
+export type StockReport = z.infer<typeof StockReportSchema>;
+
 /** ตัวกรองที่ส่ง API — วันที่ครบเสมอ (ค่าเริ่มต้นคิดที่หน้า) · โลหะ/สาขาไม่ส่ง = ทั้งหมดที่มีสิทธิ์ */
 export interface PurchaseParams {
   date_from: string;
   date_to: string;
   metal?: string;
+  branch_id?: string;
+}
+
+export interface StockParams {
+  as_of: string;
   branch_id?: string;
 }
 
@@ -69,14 +84,28 @@ function purchaseQuery(p: PurchaseParams, format?: "csv"): string {
   return query.toString();
 }
 
+function stockQuery(p: StockParams, format?: "csv"): string {
+  const query = new URLSearchParams({ as_of: p.as_of });
+  if (p.branch_id) query.set("branch_id", p.branch_id);
+  if (format) query.set("format", format);
+  return query.toString();
+}
+
 /** ลิงก์ดาวน์โหลด CSV (UTF-8 + BOM) — origin เดียวกัน cookie session ไปเอง · ไม่มี public URL */
 export const purchaseCsvHref = (p: PurchaseParams) => `/api/reports/purchase?${purchaseQuery(p, "csv")}`;
+export const stockCsvHref = (p: StockParams) => `/api/reports/stock?${stockQuery(p, "csv")}`;
 
 export const purchaseReportQueryOptions = (p: PurchaseParams) =>
   queryOptions({
     queryKey: ["reports", "purchase", p],
     queryFn: ({ signal }) =>
       apiFetch(`/api/reports/purchase?${purchaseQuery(p)}`, { signal, schema: PurchaseReportSchema }),
+  });
+
+export const stockReportQueryOptions = (p: StockParams) =>
+  queryOptions({
+    queryKey: ["reports", "stock", p],
+    queryFn: ({ signal }) => apiFetch(`/api/reports/stock?${stockQuery(p)}`, { signal, schema: StockReportSchema }),
   });
 
 const MetalSchema = z.object({
