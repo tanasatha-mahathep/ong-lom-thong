@@ -30,7 +30,7 @@ import {
 } from "@ong/db";
 import { type SQL, and, asc, desc, eq, exists, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { type BranchRef, type Viewer, currentBranch, forUser } from "../lib/scope";
+import { type BranchRef, type Viewer, currentBranch, currentBranchClosed, forUser } from "../lib/scope";
 import { UNUSABLE_CHARS_MSG, isCleanText } from "../lib/text";
 import { escapeLike, findCustomer } from "./customers";
 import { type CompanyInfo, captureCompanySnapshot } from "./receiptPdf";
@@ -38,6 +38,8 @@ import { type TodayPrice, priceForBranch } from "./goldPrice";
 
 export const BUY_API_MSG = {
   noBranch: "ยังไม่ได้เลือกสาขาที่ทำงาน",
+  // currentBranchId ชี้สาขาที่ปิดไปแล้ว (แต่ยังอยู่ในสิทธิ์เดิม) — ต่างจาก noBranch เพื่อไม่ให้พนักงานเข้าใจผิดว่ายังไม่ได้เลือก
+  branchClosed: "สาขาที่เลือกไว้ถูกปิดแล้ว — กรุณาเลือกสาขาอื่น",
   noTaxBranchCode: "สาขานี้ยังไม่ได้ตั้งรหัสสาขาของกรมสรรพากร — ติดต่อผู้ดูแลระบบ",
   futureDate: "วันที่ต้องไม่เกินวันนี้",
   backdateRole: "เปิดบิลย้อนหลังได้เฉพาะผู้จัดการขึ้นไป",
@@ -175,7 +177,11 @@ const quoteLines = (body: QuoteBody) =>
 
 export async function prepareBuy(db: Db, viewer: Viewer, body: QuoteBody, now: Date): Promise<PreparedBuy> {
   const where = currentBranch(viewer, await forUser(db, viewer));
-  if (!where) throw new BuyError(BUY_API_MSG.noBranch, "branch", 403);
+  if (!where) {
+    // แยก "สาขาที่เลือกไว้ถูกปิดแล้ว" จาก "ยังไม่ได้เลือก" — fail-closed เดิม: ไม่มีสิทธิ์ (แม้ถูกปิด) = ข้อความเดิม
+    const closed = await currentBranchClosed(db, viewer);
+    throw new BuyError(closed ? BUY_API_MSG.branchClosed : BUY_API_MSG.noBranch, "branch", 403);
+  }
 
   const today = businessDate(now);
   // ย้อนหลังได้ (คีย์ใบเขียนมือหลังระบบล่ม · spec §11) — ราคาทองของวันนั้นต้องมี · อนาคตไม่ได้

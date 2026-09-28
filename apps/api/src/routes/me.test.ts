@@ -1,4 +1,4 @@
-import { branch, user } from "@ong/db";
+import { branch, session, user } from "@ong/db";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TestApp, databaseAvailable, startTestApp } from "../test/harness";
@@ -9,17 +9,19 @@ const PW = "correct-horse-battery";
 interface MeBody {
   role: string;
   branch: { id: string; code: string } | null;
+  branch_closed: { id: string; code: string; name: string } | null;
   branches: { id: string; code: string }[];
   can_view_all: boolean;
 }
 
 describe.skipIf(!available)("auth + /api/me — สาขา fail-closed", () => {
   let t: TestApp;
+  let staffId = "";
   const codesOf = (b: MeBody) => b.branches.map((x) => x.code);
 
   beforeAll(async () => {
     t = await startTestApp();
-    await t.createUser({ email: "staff@ong.test", password: PW, branch: "00000" });
+    staffId = (await t.createUser({ email: "staff@ong.test", password: PW, branch: "00000" })).id;
     await t.createUser({ email: "multi@ong.test", password: PW, branch: "00000", allow: ["00001"] });
     await t.createUser({ email: "boss@ong.test", password: PW, role: "admin", viewAll: true });
     await t.createUser({ email: "nobranch@ong.test", password: PW });
@@ -142,6 +144,34 @@ describe.skipIf(!available)("auth + /api/me — สาขา fail-closed", () =>
       expect(codesOf(body)).toEqual(["00000", "00001"]);
     } finally {
       await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
+    }
+  });
+
+  it("สาขาปัจจุบันถูกปิด: branch เป็น null แต่ branch_closed บอกสาขานั้น (ยังมีสิทธิ์เดิม)", async () => {
+    const cookie = await t.login("multi@ong.test", PW);
+    await t.request("/api/me/branch", { cookie, body: { branch_id: t.branches["00001"] } });
+    await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00001"));
+    try {
+      const { body } = await me(cookie);
+      expect(body.branch).toBeNull();
+      expect(body.branch_closed).toEqual({ id: t.branches["00001"], code: "00001", name: "สาขา 2" });
+      expect(codesOf(body)).toEqual(["00000"]);
+    } finally {
+      await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00001"));
+    }
+  });
+
+  it("currentBranchId ชี้สาขาที่ไม่เคยมีสิทธิ์แล้วถูกปิด — branch_closed เป็น null เหมือนกัน (ไม่รั่วชื่อสาขา)", async () => {
+    const cookie = await t.login("staff@ong.test", PW); // staff มีสิทธิ์แค่ 00000
+    await t.db.update(session).set({ currentBranchId: t.branches["00001"] }).where(eq(session.userId, staffId));
+    await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00001"));
+    try {
+      const { body } = await me(cookie);
+      expect(body.branch).toBeNull();
+      expect(body.branch_closed).toBeNull();
+      expect(codesOf(body)).toEqual(["00000"]);
+    } finally {
+      await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00001"));
     }
   });
 

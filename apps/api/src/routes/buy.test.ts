@@ -1079,13 +1079,19 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
         expect(((await d.json()) as DetailRes).branch.code).toBe("00002");
       }
       // เขียนไม่ได้: สาขาที่ทำงานต้องยังเปิดอยู่ · เลือกสาขาที่ปิดเป็นสาขาที่ทำงานไม่ได้
+      // ทั้งคู่มีสิทธิ์สาขานี้มาก่อน (acct2 = สาขาหลัก · boss = canViewAll) → ข้อความบอกว่า "ปิดแล้ว" ไม่ใช่ "ยังไม่ได้เลือก"
       for (const who of ["acct2", "boss"]) {
         const q = await quote(bill(), who);
         expect(q.status).toBe(403);
-        expect(await q.json()).toEqual({ error: "ยังไม่ได้เลือกสาขาที่ทำงาน", field: "branch" });
+        expect(await q.json()).toEqual({ error: "สาขาที่เลือกไว้ถูกปิดแล้ว — กรุณาเลือกสาขาอื่น", field: "branch" });
       }
-      expect((await save(bill(), "boss")).status).toBe(403);
-      expect((await save(bill(), "acct2")).status).toBe(403); // accounting อ่านอย่างเดียว
+      const savedBoss = await save(bill(), "boss");
+      expect(savedBoss.status).toBe(403);
+      expect(await savedBoss.json()).toEqual({
+        error: "สาขาที่เลือกไว้ถูกปิดแล้ว — กรุณาเลือกสาขาอื่น",
+        field: "branch",
+      });
+      expect((await save(bill(), "acct2")).status).toBe(403); // accounting อ่านอย่างเดียว — ติด role ก่อนถึงสาขา
       expect((await t.request("/api/me/branch", { cookie: cookies.boss, body: { branch_id: b2 } })).status).toBe(404);
       expect(await t.db.select().from(buyReceipt).where(eq(buyReceipt.branchId, b2))).toHaveLength(1);
     } finally {
@@ -1094,6 +1100,22 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
         .update(session)
         .set({ currentBranchId: null })
         .where(eq(session.userId, userIds.boss ?? ""));
+    }
+  });
+
+  it("scoping: currentBranchId ชี้สาขาที่ไม่เคยมีสิทธิ์แล้วถูกปิด — เหมือนยังไม่ได้เลือก ไม่ใช่ 'ปิดแล้ว' (ไม่รั่วว่าสาขานั้นมีอยู่)", async () => {
+    const mine = eq(session.userId, userIds.staff ?? "");
+    // staff มีสิทธิ์แค่ 00000 — จำลอง session ที่หลุดไปชี้สาขาอื่นที่ไม่เคยมีสิทธิ์ (ทำตรง ๆ ผ่าน DB เหมือนเทสต์ข้างบน)
+    await t.db.update(session).set({ currentBranchId: t.branches["00002"] }).where(mine);
+    await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
+    try {
+      for (const res of [await quote(bill(), "staff"), await save(bill(), "staff")]) {
+        expect(res.status).toBe(403);
+        expect(await res.json()).toEqual({ error: "ยังไม่ได้เลือกสาขาที่ทำงาน", field: "branch" });
+      }
+    } finally {
+      await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
+      await t.db.update(session).set({ currentBranchId: t.branches["00000"] }).where(mine);
     }
   });
 
