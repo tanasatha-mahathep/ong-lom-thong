@@ -123,6 +123,7 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       { who: "staff1", branch: "00001" },
       { who: "staff2", branch: "00002" },
       { who: "acct", branch: "00000", role: "accounting" as const },
+      { who: "mgr", branch: "00000", role: "manager" as const }, // บิลย้อนหลังได้เฉพาะผู้จัดการขึ้นไป
       { who: "boss", role: "admin" as const, viewAll: true }, // เห็นทุกสาขา แต่ยังไม่ได้เลือกสาขาที่ทำงาน
       { who: "nobranch" },
     ];
@@ -137,6 +138,7 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     await t.db.insert(goldPrice).values([
       { date: TODAY, barSell: "67850", barBuy: "67650", jewelryBuy: "64268" },
       { date: "2026-09-30", barSell: "67000", barBuy: "66800", jewelryBuy: "63460" },
+      { date: "2026-09-28", barSell: "66500", barBuy: "66300", jewelryBuy: "62985" }, // ย้อนหลัง 7 วันพอดี
       { branchId: t.branches["00001"], date: TODAY, barSell: "68000", barBuy: "67800", jewelryBuy: "64410" },
     ]);
 
@@ -350,16 +352,40 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
   });
 
   // override เป็นฟังก์ชัน — id ลูกค้า/โลหะ มีค่าหลัง beforeAll
-  const cases: [string, () => Record<string, unknown>, string, string][] = [
+  const REASON = { backdate_reason: "ระบบล่ม คีย์ใบเขียนมือ" };
+  // [ชื่อ · override · field · ข้อความ · ผู้ใช้ (ค่าเริ่มต้น staff)]
+  const cases: [string, () => Record<string, unknown>, string, string, string?][] = [
     ["ไม่มีลูกค้า (R1)", () => ({ customer_id: null }), "customer_id", BUY_MSG.noCustomer],
     ["ลูกค้าที่ไม่มีอยู่", () => ({ customer_id: NO_UUID }), "customer_id", BUY_MSG.noCustomer],
     ["บัตรหมดอายุ ณ วันที่บิล (R2)", () => ({ customer_id: custB }), "customer_id", "บัตรประชาชนหมดอายุแล้ว"],
     ["ไม่มีวันหมดอายุบัตร (R2)", () => ({ customer_id: custC }), "customer_id", "ยังไม่ได้กรอกวันที่บัตรหมดอายุ"],
     [
       "ไม่มีราคาทองของวันบิล (R7)",
-      () => ({ date: "2026-10-03" }),
+      () => ({ date: "2026-10-03", ...REASON }),
       "gold_price",
       "ยังไม่ได้ตั้งราคาทองของวันที่ 03/10/2569",
+      "mgr",
+    ],
+    [
+      "staff เปิดบิลย้อนหลัง",
+      () => ({ date: "2026-10-04", ...REASON }),
+      "date",
+      "เปิดบิลย้อนหลังได้เฉพาะผู้จัดการขึ้นไป",
+    ],
+    ["ย้อนหลังเกิน 7 วัน", () => ({ date: "2026-09-27", ...REASON }), "date", "ย้อนหลังได้ไม่เกิน 7 วัน", "mgr"],
+    [
+      "ย้อนหลังไม่มีเหตุผล",
+      () => ({ date: "2026-09-30" }),
+      "backdate_reason",
+      "กรุณาระบุเหตุผลที่บันทึกย้อนหลัง",
+      "mgr",
+    ],
+    [
+      "เหตุผลสั้นเกินไป",
+      () => ({ date: "2026-09-30", backdate_reason: " ล่ม " }),
+      "backdate_reason",
+      "เหตุผลที่บันทึกย้อนหลังต้องยาวอย่างน้อย 5 ตัวอักษร",
+      "mgr",
     ],
     [
       "ชำระไม่ครบ (R4)",
@@ -407,17 +433,17 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     ],
   ];
 
-  it.each(cases)("%s → quote ok:false · POST 409 ไม่บันทึก", async (_name, over, field, message) => {
+  it.each(cases)("%s → quote ok:false · POST 409 ไม่บันทึก", async (_name, over, field, message, who = "staff") => {
     const body = bill(over());
     const before = await receiptCount();
 
-    const q = await quote(body);
+    const q = await quote(body, who);
     expect(q.status).toBe(200);
     const qBody = (await q.json()) as QuoteRes;
     expect(qBody.ok).toBe(false);
     expect(qBody.errors[0]).toEqual({ field, message });
 
-    const res = await save(body);
+    const res = await save({ time: "09:00", ...body }, who);
     expect(res.status).toBe(409);
     // 409 แนบผล quote ทั้งก้อน (ตัวเดียวกับ /quote) ให้จอแสดง error ต่อช่องได้
     expect(await res.json()).toMatchObject({ error: message, field, ok: false, errors: qBody.errors });
@@ -425,8 +451,15 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
   });
 
   it("บัตรคิด ณ วันที่ของบิล: บัตรหมดอายุ 1 ต.ค. ใช้กับบิลย้อนหลัง 30 ก.ย. ได้", async () => {
-    const q = (await (await quote(bill({ customer_id: custB, date: "2026-09-30" }))).json()) as QuoteRes;
+    const res = await quote(bill({ customer_id: custB, date: "2026-09-30", ...REASON }), "mgr");
+    const q = (await res.json()) as QuoteRes;
     expect(q).toMatchObject({ ok: true, date: "2026-09-30", gold_price_snapshot: "67000.00" });
+  });
+
+  it("ย้อนหลัง 7 วันพอดีได้ (ผู้จัดการ + เหตุผล) · บิลวันนี้ไม่ต้องมีเหตุผล", async () => {
+    const q = (await (await quote(bill({ date: "2026-09-28", ...REASON }), "mgr")).json()) as QuoteRes;
+    expect(q).toMatchObject({ ok: true, date: "2026-09-28", gold_price_snapshot: "66500.00" });
+    expect(((await (await quote(bill())).json()) as QuoteRes).ok).toBe(true);
   });
 
   // ---------- บันทึก ----------
@@ -575,7 +608,7 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
   let backdatedId = "";
 
   it("บิลย้อนหลังข้ามเดือน → เลขงวดของวันบิล RC6909-0001 · ราคาของวันนั้น · สต็อกลงวันบิล · audit", async () => {
-    const res = await save(bill({ customer_id: custB, date: "2026-09-30", time: "16:30" }));
+    const res = await save(bill({ customer_id: custB, date: "2026-09-30", time: "16:30", ...REASON }), "mgr");
     expect(res.status).toBe(201);
     const saved = (await res.json()) as SavedRes;
     expect(saved.doc_no).toBe("RC6909-0001");
@@ -590,10 +623,16 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     const audits = await t.db.select().from(auditLog).where(eq(auditLog.rowId, saved.id));
     expect(audits).toHaveLength(1);
     expect(audits[0]).toMatchObject({
-      userId: userIds.staff,
+      userId: userIds.mgr,
       action: "buy.backdate",
       tableName: "buy_receipt",
-      diff: { doc_no: "RC6909-0001", date: "2026-09-30", time: "16:30", entered_on: TODAY },
+      diff: {
+        doc_no: "RC6909-0001",
+        date: "2026-09-30",
+        time: "16:30",
+        entered_on: TODAY,
+        reason: "ระบบล่ม คีย์ใบเขียนมือ",
+      },
     });
   });
 

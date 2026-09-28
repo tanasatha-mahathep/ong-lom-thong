@@ -16,6 +16,7 @@ import {
 import {
   type CustomerSnapshot,
   type Db,
+  type Role,
   auditLog,
   branch,
   buyLine,
@@ -36,12 +37,28 @@ import { type TodayPrice, priceForBranch } from "./goldPrice";
 export const BUY_API_MSG = {
   noBranch: "ยังไม่ได้เลือกสาขาที่ทำงาน",
   futureDate: "วันที่ต้องไม่เกินวันนี้",
+  backdateRole: "เปิดบิลย้อนหลังได้เฉพาะผู้จัดการขึ้นไป",
+  backdateWindow: "ย้อนหลังได้ไม่เกิน 7 วัน",
+  backdateReason: "กรุณาระบุเหตุผลที่บันทึกย้อนหลัง",
+  backdateReasonShort: "เหตุผลที่บันทึกย้อนหลังต้องยาวอย่างน้อย 5 ตัวอักษร",
   unknownMetal: "ไม่พบประเภทโลหะ",
   keyTaken: "idempotency_key นี้ถูกใช้แล้ว",
   keyReused: "idempotency_key นี้ใช้กับบิลอื่นแล้ว — สร้าง key ใหม่ต่อบิล",
   docNoTaken: "เลขที่เอกสารชนกับบิลที่มีอยู่แล้ว — แจ้งผู้ดูแลระบบตรวจตัวนับเลขที่ (doc_sequence)",
   noGoldPriceOn: (isoDate: string) => `ยังไม่ได้ตั้งราคาทองของวันที่ ${beDate(isoDate)}`,
 } as const;
+
+// บิลย้อนหลัง (คีย์ใบเขียนมือหลังระบบล่ม · spec §11) — เจ้าของกำหนด 28 ก.ย.: ผู้จัดการขึ้นไป · ไม่เกิน 7 วัน · ต้องมีเหตุผล
+const BACKDATE_ROLES: readonly Role[] = ["manager", "admin"];
+const BACKDATE_MAX_DAYS = 7;
+const BACKDATE_REASON_MIN = 5;
+
+/** วันที่ ISO เลื่อนไป n วันตามปฏิทิน */
+const shiftDate = (iso: string, days: number) => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
 
 /** "2026-09-30" → "30/09/2569" (วันที่แบบที่ร้านใช้ — ใช้ในข้อความเท่านั้น) */
 const beDate = (iso: string) => {
@@ -97,6 +114,8 @@ export const QuoteBody = z.object(
     payments: z
       .array(PaymentBody, { error: "ต้องส่ง payments เป็นรายการ" })
       .max(10, "วิธีชำระเงินเกิน 10 รายการต่อบิล"),
+    // บังคับเฉพาะบิลย้อนหลัง (ตรวจใน prepareBuy) · บิลวันนี้ไม่ใช้
+    backdate_reason: optionalText(500, "เหตุผลที่บันทึกย้อนหลัง"),
   },
   { error: "ต้องส่งข้อมูลเป็น JSON object" },
 );
@@ -162,7 +181,7 @@ export async function prepareBuy(db: Db, viewer: Viewer, body: QuoteBody, now: D
 
   const known = new Set(metals.map((m) => m.id));
   const errors: QuoteError[] = [
-    ...(date > today ? [{ field: "date", message: BUY_API_MSG.futureDate }] : []),
+    ...dateErrors(viewer, body, date, today),
     // ข้อความของ core พูดถึง "วันนี้" — บิลย้อนหลังบอกวันที่ที่ขาดราคาให้ชัด
     ...quote.errors.map((e) =>
       e.field === "gold_price" && date !== today ? { ...e, message: BUY_API_MSG.noGoldPriceOn(date) } : e,
@@ -172,6 +191,21 @@ export async function prepareBuy(db: Db, viewer: Viewer, body: QuoteBody, now: D
     ),
   ];
   return { branch: where, today, date, price, customer: customerRow, quote, errors, ok: errors.length === 0 };
+}
+
+/** วันที่ของบิล: อนาคตไม่ได้ · ย้อนหลังได้เฉพาะผู้จัดการขึ้นไป ไม่เกิน 7 วัน และต้องมีเหตุผล (ลง audit) */
+function dateErrors(viewer: Viewer, body: QuoteBody, date: string, today: string): QuoteError[] {
+  if (date > today) return [{ field: "date", message: BUY_API_MSG.futureDate }];
+  if (date === today) return [];
+  if (!BACKDATE_ROLES.includes(viewer.role)) return [{ field: "date", message: BUY_API_MSG.backdateRole }];
+  const errors: QuoteError[] = [];
+  if (date < shiftDate(today, -BACKDATE_MAX_DAYS)) errors.push({ field: "date", message: BUY_API_MSG.backdateWindow });
+  const reason = body.backdate_reason;
+  if (!reason) errors.push({ field: "backdate_reason", message: BUY_API_MSG.backdateReason });
+  else if (reason.length < BACKDATE_REASON_MIN) {
+    errors.push({ field: "backdate_reason", message: BUY_API_MSG.backdateReasonShort });
+  }
+  return errors;
 }
 
 /** ผลของ POST /buy/quote (และแนบกับ 409 ของ POST /buy) — เงิน/น้ำหนักเป็น string */
@@ -319,7 +353,7 @@ async function insertBuy(db: Db, viewer: Viewer, p: PreparedBuy, body: SaveBody,
         action: "buy.backdate",
         tableName: "buy_receipt",
         rowId: receipt.id,
-        diff: { doc_no: receipt.docNo, date: p.date, time, entered_on: p.today },
+        diff: { doc_no: receipt.docNo, date: p.date, time, entered_on: p.today, reason: body.backdate_reason },
       });
     }
     // Σชำระ = ยอดบิล ตรวจซ้ำตอน commit โดย deferred trigger check_receipt_paid (ตาข่ายชั้นสุดท้าย)
