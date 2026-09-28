@@ -30,6 +30,8 @@ const EnvSchema = z
     GOTENBERG_URL: z.url({ protocol: /^https?$/, error: "ต้องเป็น URL http(s)" }),
     GOTENBERG_USERNAME: z.string().min(1),
     GOTENBERG_PASSWORD: z.string().min(1),
+    // Sarabun ที่แนบไปกับทุกใบ — image ของ api มีที่ ./public/fonts (build ของ apps/web) · dev: ../web/public/fonts
+    PDF_FONT_DIR: z.string().trim().min(1).default("public/fonts"),
     // หัวใบรับซื้อ — ข้อมูลกิจการที่พิมพ์บนใบทุกใบ (ไม่ใช่ค่าลับ) · ค่าจริงจากหน้า "ข้อมูลบริษัท" ของระบบเดิม
     // ใบที่เก็บถาวรแก้ย้อนหลังไม่ได้ (R15) — ค่าผิดรูปแบบ = ไม่ start ดีกว่าพิมพ์ผิดลงเอกสารภาษี
     COMPANY_NAME: text(),

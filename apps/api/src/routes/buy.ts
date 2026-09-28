@@ -4,6 +4,8 @@ import { bodyLimit } from "hono/body-limit";
 import type { z } from "zod";
 import { type AppEnv, apiError, requireAnyBranch, requireRole, requireSession } from "../lib/context";
 import { forUser } from "../lib/scope";
+import { receiptForScreen } from "../services/receiptPdf";
+import { buyPdfRoutes } from "./buyPdf";
 import {
   BuyError,
   ListQuery,
@@ -74,6 +76,8 @@ export const buyRoutes = new Hono<AppEnv>()
         now,
         body.data.time ?? businessTime(now),
       );
+      // PDF เก็บถาวรสร้างเบื้องหลัง — ตอบทันทีด้วย pdf_status "pending" ไม่รอ Gotenberg (spec §9.2)
+      if (!replay) c.var.pdf.enqueue(receipt.id);
       return c.json(receipt, replay ? 200 : 201);
     } catch (e) {
       if (e instanceof BuyError) return c.json({ ...apiError(e.message, e.field), ...e.extra }, e.status);
@@ -85,5 +89,8 @@ export const buyRoutes = new Hono<AppEnv>()
     const bill = await getBuy(c.var.db, readable, c.req.param("id"));
     if (!bill) return c.json(apiError("not found"), 404);
     c.header("Cache-Control", "no-store");
-    return c.json(bill);
-  });
+    // receipt = ข้อมูลใบเดียวกับที่ใช้สร้าง PDF (เลขบัตรมาสก์) — จอกับไฟล์ไม่เพี้ยนกัน
+    return c.json({ ...bill, receipt: await receiptForScreen(c.var.db, c.var.env, bill.id) });
+  })
+  // ไฟล์ PDF · สำเนาบัตร · retry · ยกเลิกบิล — อยู่ใต้ middleware ชุดเดียวกัน (login + สาขา)
+  .route("/", buyPdfRoutes);

@@ -702,6 +702,8 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       created_by: { id: userIds.staff, name: "staff" },
       voided_at: null,
       void_reason: null,
+      // ข้อมูลใบเดียวกับ PDF (เลขบัตรมาสก์) — ตรวจละเอียดใน buyPdf.test.ts
+      receipt: expect.objectContaining({ docNo: "RC6910-0001", status: "active" }) as unknown,
     });
   });
 
