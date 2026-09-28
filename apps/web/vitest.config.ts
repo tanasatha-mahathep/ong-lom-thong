@@ -13,7 +13,7 @@ export default defineConfig({
     environment: "jsdom",
     include: ["src/**/*.test.{ts,tsx}"],
     setupFiles: ["./src/test/setup.ts"],
-    // เทสต์แรกของไฟล์โหลดทั้งแอป (route + component) — เผื่อเครื่องที่รันเทสต์ api ขนานอยู่
-    testTimeout: 15_000,
+    // เทสต์ทั้งแอปมี findBy หลายจุด (จุดละไม่เกิน 10 วินาที ดู src/test/setup.ts) — เผื่อเครื่องที่ load สูง
+    testTimeout: 30_000,
   },
 });

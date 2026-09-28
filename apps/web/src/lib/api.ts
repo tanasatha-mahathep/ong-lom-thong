@@ -25,13 +25,11 @@ export class ApiError extends Error {
   }
 }
 
-export interface ApiFetchOptions<T> extends Omit<RequestInit, "body" | "credentials"> {
+export interface ApiFetchOptions extends Omit<RequestInit, "body" | "credentials"> {
   /** ส่งเป็น JSON (ตั้ง Content-Type ให้) */
   json?: unknown;
   /** ส่งเป็น multipart — browser ใส่ boundary เอง */
   form?: FormData;
-  /** ตรวจรูปคำตอบ — ไม่ส่ง = ได้ unknown กลับไป ให้ผู้เรียก narrow เอง */
-  schema?: z.ZodType<T>;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -59,8 +57,10 @@ function toApiError(status: number, statusText: string, body: unknown): ApiError
   return new ApiError(status, statusText || `HTTP ${status}`, undefined, body);
 }
 
+type ApiPath = `/api/${string}`;
+
 /** fetch origin เดียวกันพร้อม cookie — ติดต่อไม่ได้ = ApiError status 0 */
-async function send(path: `/api/${string}`, init: Omit<RequestInit, "credentials">): Promise<Response> {
+async function send(path: ApiPath, init: Omit<RequestInit, "credentials">): Promise<Response> {
   try {
     return await fetch(path, { ...init, credentials: "same-origin" });
   } catch (e) {
@@ -72,9 +72,15 @@ async function send(path: `/api/${string}`, init: Omit<RequestInit, "credentials
 
 /**
  * fetch ไปที่ `/api/...` origin เดียวกับหน้าเว็บ — cookie session ของ better-auth ไปเอง (same-origin)
- * สำเร็จ = body ที่ parse แล้ว (ผ่าน schema ถ้าให้มา) · ไม่สำเร็จ = throw ApiError
+ * สำเร็จ = body ที่ผ่าน `schema` (zod) · ไม่ส่ง schema = `unknown` ให้ผู้เรียก narrow เอง (ไม่มี cast ลอย ๆ)
+ * ไม่สำเร็จ = throw ApiError
  */
-export async function apiFetch<T = unknown>(path: `/api/${string}`, options: ApiFetchOptions<T> = {}): Promise<T> {
+export function apiFetch<T>(path: ApiPath, options: ApiFetchOptions & { schema: z.ZodType<T> }): Promise<T>;
+export function apiFetch(path: ApiPath, options?: ApiFetchOptions): Promise<unknown>;
+export async function apiFetch<T>(
+  path: ApiPath,
+  options: ApiFetchOptions & { schema?: z.ZodType<T> } = {},
+): Promise<unknown> {
   const { json, form, schema, headers: initHeaders, method, ...init } = options;
   const headers = new Headers(initHeaders);
   headers.set("Accept", "application/json");
@@ -89,21 +95,39 @@ export async function apiFetch<T = unknown>(path: `/api/${string}`, options: Api
   const res = await send(path, { ...init, method: method ?? (body === undefined ? "GET" : "POST"), headers, body });
   const data = await readBody(res);
   if (!res.ok) throw toApiError(res.status, res.statusText, data);
-  return schema ? schema.parse(data) : (data as T);
+  return schema ? schema.parse(data) : data;
 }
 
 /**
  * ไฟล์ส่วนตัวจาก api (รูปลูกค้า ฯลฯ) เป็น Blob — ไฟล์ไม่มี public URL (R13) จึงอ่านผ่าน cookie session
  * ไม่ใช้ HTTP cache ของ browser (ข้อมูลส่วนบุคคล) · error เป็น ApiError รูปเดียวกับ apiFetch
  */
-export async function apiBlob(path: `/api/${string}`, { signal }: { signal?: AbortSignal } = {}): Promise<Blob> {
+export async function apiBlob(path: ApiPath, { signal }: { signal?: AbortSignal } = {}): Promise<Blob> {
   const res = await send(path, { signal, cache: "no-store" });
   if (!res.ok) throw toApiError(res.status, res.statusText, await readBody(res));
   return res.blob();
 }
 
-/** ข้อความสำหรับแสดงผู้ใช้จาก error ใด ๆ */
+const THAI = /[\u0E00-\u0E7F]/;
+const FALLBACK = "เกิดข้อผิดพลาด ลองใหม่อีกครั้ง";
+const STATUS_MESSAGE: Readonly<Record<number, string>> = {
+  0: "ติดต่อเซิร์ฟเวอร์ไม่ได้ ตรวจการเชื่อมต่อแล้วลองใหม่",
+  400: "ข้อมูลไม่ถูกต้อง",
+  401: "หมดเวลาใช้งาน เข้าสู่ระบบใหม่อีกครั้ง",
+  403: "ไม่มีสิทธิ์",
+  404: "ไม่พบข้อมูล",
+  409: "ข้อมูลขัดแย้งกับที่มีอยู่",
+  413: "ไฟล์ใหญ่เกินไป",
+  415: "รูปแบบข้อมูลไม่ถูกต้อง",
+  429: "ลองใหม่อีกครั้งในอีกสักครู่",
+};
+
+/**
+ * ข้อความภาษาไทยสำหรับแสดงผู้ใช้จาก error ใด ๆ — ที่เดียวของทั้งแอป
+ * ข้อความจาก API แสดงตรง ๆ เฉพาะเมื่อเป็นภาษาไทย (เช่น "branch_id ไม่ถูกต้อง") · อังกฤษ/ไม่มีข้อความ = แปลตาม status
+ */
 export function errorMessage(e: unknown): string {
-  if (e instanceof ApiError) return e.error;
-  return "เกิดข้อผิดพลาด ลองใหม่อีกครั้ง";
+  if (!(e instanceof ApiError)) return FALLBACK;
+  if (e.status !== 0 && THAI.test(e.error)) return e.error;
+  return STATUS_MESSAGE[e.status] ?? (e.status >= 500 ? "เซิร์ฟเวอร์ขัดข้อง ลองใหม่อีกครั้ง" : FALLBACK);
 }
