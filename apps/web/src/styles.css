@@ -60,8 +60,9 @@
 }
 
 /*
- * shadcn new-york · neutral — ต่างจากค่าเริ่มต้น 2 จุดเพื่อ WCAG 2.2 AA
+ * shadcn new-york · neutral — ต่างจากค่าเริ่มต้น 3 จุดเพื่อ WCAG 2.2 AA
  * --muted-foreground เข้มขึ้น (0.556 → 0.52): ตัวอักษรรองบนพื้น muted/sidebar ได้ ≥ 4.5:1
+ * --input เข้มขึ้น (0.922 → 0.64): ขอบช่องกรอก/radio ≥ 3:1 บนขาว sidebar และ muted (1.4.11) · --border ยังอ่อนเพราะแค่ตกแต่ง
  * --ring เป็นสีน้ำเงินโฟกัส (#0071e3 · 4.7:1 บนพื้นขาว): หน้าร้านใช้คีย์บอร์ดล้วน โฟกัสต้องเห็นชัด
  */
 :root {
@@ -83,7 +84,7 @@
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
+  --input: oklch(0.64 0 0);
   --ring: oklch(0.563 0.187 257.5);
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
