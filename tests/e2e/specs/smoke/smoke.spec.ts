@@ -81,7 +81,16 @@ test.describe("unknown paths — a real 404, never the SPA shell", () => {
 });
 
 test.describe("access control — fail closed without a session (spec §10 · ASVS V4)", () => {
-  for (const path of ["/api/me", "/api/customers", "/api/metals", "/api/gold-price/today", "/api/buy"]) {
+  const protectedPaths = [
+    "/api/me",
+    "/api/customers",
+    "/api/metals",
+    "/api/gold-price/today",
+    "/api/buy",
+    "/api/reports/purchase",
+    "/api/reports/stock",
+  ];
+  for (const path of protectedPaths) {
     test(`GET ${path} without a session is 401`, async ({ site }) => {
       expect((await expectApiError(await site.get(path), 401)).error).toBe("unauthorized");
     });
