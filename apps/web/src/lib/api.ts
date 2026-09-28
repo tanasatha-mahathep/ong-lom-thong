@@ -59,6 +59,17 @@ function toApiError(status: number, statusText: string, body: unknown): ApiError
   return new ApiError(status, statusText || `HTTP ${status}`, undefined, body);
 }
 
+/** fetch origin เดียวกันพร้อม cookie — ติดต่อไม่ได้ = ApiError status 0 */
+async function send(path: `/api/${string}`, init: Omit<RequestInit, "credentials">): Promise<Response> {
+  try {
+    return await fetch(path, { ...init, credentials: "same-origin" });
+  } catch (e) {
+    // ถูกยกเลิก (TanStack Query cancel / AbortController) — ส่งต่อตามเดิม ไม่ใช่ error ของระบบ
+    if (e instanceof DOMException && e.name === "AbortError") throw e;
+    throw new ApiError(0, "ติดต่อเซิร์ฟเวอร์ไม่ได้", undefined, null);
+  }
+}
+
 /**
  * fetch ไปที่ `/api/...` origin เดียวกับหน้าเว็บ — cookie session ของ better-auth ไปเอง (same-origin)
  * สำเร็จ = body ที่ parse แล้ว (ผ่าน schema ถ้าให้มา) · ไม่สำเร็จ = throw ApiError
@@ -75,24 +86,20 @@ export async function apiFetch<T = unknown>(path: `/api/${string}`, options: Api
     body = form;
   }
 
-  let res: Response;
-  try {
-    res = await fetch(path, {
-      ...init,
-      method: method ?? (body === undefined ? "GET" : "POST"),
-      headers,
-      body,
-      credentials: "same-origin",
-    });
-  } catch (e) {
-    // ถูกยกเลิก (TanStack Query cancel / AbortController) — ส่งต่อตามเดิม ไม่ใช่ error ของระบบ
-    if (e instanceof DOMException && e.name === "AbortError") throw e;
-    throw new ApiError(0, "ติดต่อเซิร์ฟเวอร์ไม่ได้", undefined, null);
-  }
-
+  const res = await send(path, { ...init, method: method ?? (body === undefined ? "GET" : "POST"), headers, body });
   const data = await readBody(res);
   if (!res.ok) throw toApiError(res.status, res.statusText, data);
   return schema ? schema.parse(data) : (data as T);
+}
+
+/**
+ * ไฟล์ส่วนตัวจาก api (รูปลูกค้า ฯลฯ) เป็น Blob — ไฟล์ไม่มี public URL (R13) จึงอ่านผ่าน cookie session
+ * ไม่ใช้ HTTP cache ของ browser (ข้อมูลส่วนบุคคล) · error เป็น ApiError รูปเดียวกับ apiFetch
+ */
+export async function apiBlob(path: `/api/${string}`, { signal }: { signal?: AbortSignal } = {}): Promise<Blob> {
+  const res = await send(path, { signal, cache: "no-store" });
+  if (!res.ok) throw toApiError(res.status, res.statusText, await readBody(res));
+  return res.blob();
 }
 
 /** ข้อความสำหรับแสดงผู้ใช้จาก error ใด ๆ */
