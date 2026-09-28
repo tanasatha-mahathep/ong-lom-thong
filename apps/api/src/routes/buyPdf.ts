@@ -3,7 +3,7 @@ import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { type AppEnv, apiError, requireRole } from "../lib/context";
 import { sha256Hex } from "../lib/pdfArchive";
-import { forUser } from "../lib/scope";
+import { type BranchRef, currentBranch, forUser } from "../lib/scope";
 import { VoidBody, voidBuy } from "../services/buyVoid";
 import { getBuy } from "../services/buy";
 import { findReadableReceipt, missingFiles, receiptForScreen } from "../services/receiptPdf";
@@ -17,6 +17,19 @@ import { findReadableReceipt, missingFiles, receiptForScreen } from "../services
 const jsonLimit = bodyLimit({ maxSize: 8 * 1024, onError: (c) => c.json(apiError("ข้อมูลใหญ่เกินไป"), 413) });
 
 const NOT_FOUND = apiError("not found");
+const NO_BRANCH = apiError("ยังไม่ได้เลือกสาขาที่ทำงาน", "branch");
+
+/**
+ * สาขาที่อ่านไฟล์ได้ (GET pdf · idcard) — จุดเดียว: จะเปลี่ยนเป็น forUserHistory (รวมสาขาที่ปิดแล้ว
+ * ให้ accounting/admin อ่านย้อนหลัง) เมื่อ fix/api-buy-hardening เข้า dev
+ */
+const readableBranches = (c: Context<AppEnv>): Promise<BranchRef[]> => forUser(c.var.db, c.var.viewer);
+
+/** เขียน (ยกเลิก · retry) ได้เฉพาะบิลของสาขาที่กำลังทำงานและยังเปิดอยู่ — ไม่มีสาขาปัจจุบัน = null (403) */
+async function workingBranch(c: Context<AppEnv>): Promise<BranchRef[] | null> {
+  const where = currentBranch(c.var.viewer, await forUser(c.var.db, c.var.viewer));
+  return where ? [where] : null;
+}
 
 async function serveStored(c: Context<AppEnv>, key: string, sha256: string, filename: string) {
   const object = await c.var.storage.get(key);
@@ -45,7 +58,7 @@ export const buyPdfRoutes = new Hono<AppEnv>()
     if (version !== undefined && version !== "original" && version !== "void") {
       return c.json(apiError("version ต้องเป็น original หรือ void", "version"), 400);
     }
-    const bill = await findReadableReceipt(c.var.db, await forUser(c.var.db, c.var.viewer), c.req.param("id"));
+    const bill = await findReadableReceipt(c.var.db, await readableBranches(c), c.req.param("id"));
     if (!bill) return c.json(NOT_FOUND, 404);
     c.header("Cache-Control", "no-store");
     const wantVoid = version === "void" || (version === undefined && bill.status === "void");
@@ -63,7 +76,7 @@ export const buyPdfRoutes = new Hono<AppEnv>()
   })
   /** สำเนาบัตรประชาชน — accounting/admin เท่านั้น (spec §5) · audit ทุกครั้งที่เปิดไฟล์ (PDPA) */
   .get("/:id/idcard", requireRole("accounting", "admin"), async (c) => {
-    const bill = await findReadableReceipt(c.var.db, await forUser(c.var.db, c.var.viewer), c.req.param("id"));
+    const bill = await findReadableReceipt(c.var.db, await readableBranches(c), c.req.param("id"));
     if (!bill) return c.json(NOT_FOUND, 404);
     c.header("Cache-Control", "no-store");
     if (bill.idcardStatus === "none") return c.json(apiError("บิลนี้ไม่มีสำเนาบัตร"), 404);
@@ -85,7 +98,9 @@ export const buyPdfRoutes = new Hono<AppEnv>()
   })
   /** สั่งสร้างไฟล์ที่ยังขาด/ล้มเหลวใหม่ (manager/admin · audit) — รอผลแล้วตอบสถานะ */
   .post("/:id/pdf/retry", requireRole("manager", "admin"), async (c) => {
-    const bill = await findReadableReceipt(c.var.db, await forUser(c.var.db, c.var.viewer), c.req.param("id"));
+    const scope = await workingBranch(c);
+    if (!scope) return c.json(NO_BRANCH, 403);
+    const bill = await findReadableReceipt(c.var.db, scope, c.req.param("id"));
     if (!bill) return c.json(NOT_FOUND, 404);
     const before = {
       pdf_status: bill.pdfStatus,
@@ -115,13 +130,14 @@ export const buyPdfRoutes = new Hono<AppEnv>()
       const issue = body.error.issues[0];
       return c.json(apiError(issue?.message ?? "ข้อมูลไม่ถูกต้อง", "reason"), 400);
     }
-    const readable = await forUser(c.var.db, c.var.viewer);
+    const scope = await workingBranch(c);
+    if (!scope) return c.json(NO_BRANCH, 403);
     const id = c.req.param("id");
-    const result = await voidBuy(c.var.db, readable, c.var.viewer, id, body.data.reason, c.var.now());
+    const result = await voidBuy(c.var.db, scope, c.var.viewer, id, body.data.reason, c.var.now());
     if (result === "not_found") return c.json(NOT_FOUND, 404);
     if (result === "already_void") return c.json(apiError("บิลนี้ถูกยกเลิกไปแล้ว", "status"), 409);
     c.var.pdf.enqueue(id);
-    const bill = await getBuy(c.var.db, readable, id);
+    const bill = await getBuy(c.var.db, scope, id);
     c.header("Cache-Control", "no-store");
     return c.json({ ...bill, receipt: await receiptForScreen(c.var.db, c.var.env, id), void_pdf_status: "pending" });
   });
