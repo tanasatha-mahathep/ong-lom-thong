@@ -18,6 +18,8 @@ interface ListItem {
   national_id_masked: string;
   name_th: string;
   mobile: string | null;
+  /** shown on /buy under the chosen customer (spec §3.1) */
+  address: string | null;
   card_status: string;
 }
 interface ListBody {
@@ -79,6 +81,7 @@ test.describe("customers — Siam ID form, masking and private photos (R12 · R1
           national_id_masked: `${nationalId[0]} XXXX XXXXX ${nationalId.slice(10, 12)} ${nationalId[12]}`,
           name_th: fields.name_th,
           mobile: fields.mobile,
+          address: fields.address,
           card_status: "ok",
         },
       ]);
@@ -87,7 +90,14 @@ test.describe("customers — Siam ID form, masking and private photos (R12 · R1
       // checked per field: other runs' names are free text, so a body-wide digit regex would be guesswork
       const firstPage = (await (await staff.get("/api/customers")).json()) as ListBody;
       for (const item of firstPage.items) {
-        expect(Object.keys(item).sort()).toEqual(["card_status", "id", "mobile", "name_th", "national_id_masked"]);
+        expect(Object.keys(item).sort()).toEqual([
+          "address",
+          "card_status",
+          "id",
+          "mobile",
+          "name_th",
+          "national_id_masked",
+        ]);
         expect(item.national_id_masked).toMatch(MASKED);
       }
     });
