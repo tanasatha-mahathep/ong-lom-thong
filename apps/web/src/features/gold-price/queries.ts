@@ -35,11 +35,15 @@ export const saveGoldPrice = (body: SaveGoldPriceBody) =>
 
 const TypoConflictSchema = z.object({ warning: z.string().min(1) });
 
-/** 409 ของด่านกันพิมพ์ผิด → ข้อความเตือนจากเซิร์ฟเวอร์ · error อื่น = null */
+/**
+ * 409 ของด่านกันพิมพ์ผิด → ข้อความเตือนจากเซิร์ฟเวอร์ · error อื่น = null
+ * สัญญา (#60): `{error, field: "confirm_typo", warning}` — ใช้ `warning` ก่อน ไม่มีจึงใช้ `error` (ข้อความเดียวกัน)
+ */
 export function typoWarningOf(error: unknown): string | null {
   if (!(error instanceof ApiError) || error.status !== 409) return null;
   const conflict = TypoConflictSchema.safeParse(error.body);
-  return conflict.success ? conflict.data.warning : null;
+  if (conflict.success) return conflict.data.warning;
+  return error.field === "confirm_typo" && error.error ? error.error : null;
 }
 
 /** 400 ที่ชี้ช่อง bar_sell → ข้อความใต้ช่องราคา · error อื่น = null */
