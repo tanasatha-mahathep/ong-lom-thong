@@ -66,6 +66,8 @@ describe.skipIf(!available)("ผู้ดูแล: ผู้ใช้ — /api/
       cookies[a.who] = await t.login(`${a.who}@ong.test`, PW);
     }
     await t.db.insert(goldPrice).values({ date: TODAY, barSell: "67850", barBuy: "67650", jewelryBuy: "64268" });
+    // สาขาที่ไม่มีรหัสสรรพากรเปิดบิลไม่ได้ — ตั้งให้ 00001 ที่เทสต์ขอบเขตสาขาใช้เปิดบิล
+    await t.db.update(branch).set({ taxBranchCode: "00001" }).where(eq(branch.code, "00001"));
     const [c] = await t.db
       .insert(customer)
       .values({ nationalId: ID_A, nameTh: "นายทดสอบ ขอบเขตสาขา", cardExpireText: "31/12/2574" })
