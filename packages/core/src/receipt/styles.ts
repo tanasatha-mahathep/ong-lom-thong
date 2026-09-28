@@ -12,7 +12,9 @@ const PAGE = `@page { size: A4 portrait; margin: 12mm 14mm; }`;
 const WATERMARK = `.ong-watermark { position: absolute; inset: 0; z-index: 3; display: flex; align-items: center;
   justify-content: center; overflow: hidden; pointer-events: none; }
 .ong-watermark span { transform: rotate(-30deg); font-size: 24pt; font-weight: 700; white-space: nowrap;
-  color: rgba(200, 0, 0, 0.25); border: 3px solid rgba(200, 0, 0, 0.25); padding: 3mm 8mm; }`;
+  color: rgba(200, 0, 0, 0.25); border: 3px solid rgba(200, 0, 0, 0.25); padding: 3mm 8mm; }
+/* พิมพ์: fixed = ซ้ำทุกหน้า (ใบยาวเกินหนึ่งหน้าก็ยังมีลายน้ำทุกแผ่น) */
+@media print { .ong-watermark { position: fixed; } }`;
 
 export const RECEIPT_CSS = `${PAGE}
 ${WATERMARK}
