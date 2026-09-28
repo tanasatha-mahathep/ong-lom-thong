@@ -16,6 +16,11 @@ export function IdCardCopy({ data }: { data: IdCardCopyData }): JSX.Element {
   return (
     <div className="ong-idcard">
       <style dangerouslySetInnerHTML={{ __html: IDCARD_CSS }} />
+      {data.watermark && (
+        <div className="ong-watermark" aria-hidden="true">
+          <span>{data.watermark}</span>
+        </div>
+      )}
       <div className="company">{data.companyName}</div>
       <div className="doctitle">สำเนาบัตรประชาชน</div>
       <div className="row">

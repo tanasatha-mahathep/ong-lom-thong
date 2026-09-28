@@ -155,6 +155,25 @@ describe("createGotenbergClient — htmlToPdf (fetch ปลอม)", () => {
     expect(err.cause).toBeInstanceOf(TypeError);
   });
 
+  it("ข้อความ error ของ fetch ไม่หลุดลง PdfRenderError (อาจมี URL ทั้งเส้น)", async () => {
+    const leaky: FetchLike = () =>
+      Promise.reject(
+        new TypeError("Request cannot be constructed from a URL that includes credentials: http://u:SECRET@x"),
+      );
+    const err = await renderError(createGotenbergClient(ENV, { fetch: leaky }).htmlToPdf({ html: "<p>x</p>" }));
+    expect(err).toMatchObject({ kind: "unreachable", message: "gotenberg unreachable", body: "" });
+    expect(err.message).not.toContain("SECRET");
+  });
+
+  it("trace ที่ไม่ใช่ ASCII token → TypeError ก่อนส่ง (บั๊กผู้เรียก ไม่ใช่ unreachable)", async () => {
+    const { fetch, calls } = fakeFetch(pdfResponse);
+    const client = createGotenbergClient(ENV, { fetch });
+    for (const trace of ["ใบ RC6910-0001", "a b", "x\ny", "", "a".repeat(129)]) {
+      await expect(client.htmlToPdf({ html: "<p>x</p>", trace }), trace).rejects.toThrow(TypeError);
+    }
+    expect(calls).toHaveLength(0);
+  });
+
   it("Gotenberg ตอบ error → PdfRenderError http พร้อม status และข้อความสั้น ๆ", async () => {
     const message = "Chromium failed to load resources: resource Font: net::ERR_FILE_NOT_FOUND";
     const conflict = fakeFetch(() => new Response(message, { status: 409 }));
