@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { PagePlaceholder } from "@/components/page-placeholder";
+import { HomePage } from "@/features/home/home-page";
 
 export const Route = createFileRoute("/_app/")({
   staticData: { title: "หน้าแรก" },
-  component: PagePlaceholder,
+  component: HomePage,
 });
