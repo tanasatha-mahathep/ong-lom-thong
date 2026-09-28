@@ -558,6 +558,32 @@ describe.skipIf(!available)("ผู้ดูแล: ผู้ใช้ — /api/
     expect((await put(third, { is_active: false })).status).toBe(200);
   });
 
+  it("PUT กับ reset-password ของผู้ใช้คนเดียวกันทับกัน → ทั้งคู่ commit (ไม่ deadlock กับ FK ของ audit_log)", async () => {
+    const target = ids.manee ?? "";
+    const password = "Manee-Overlap-2569";
+    secrets.add(password);
+    // จุดหยุด: ถือแถว credential ของเป้าหมายไว้ → reset ล็อกแถวผู้ใช้แล้วค้างก่อนถึงการเขียน audit
+    const gate = await openTransaction(t.db);
+    await gate.sql`select id from account where user_id = ${target} and provider_id = 'credential' for update`;
+    const resetting = reset(target, { password });
+    await waitForLockWait(t.db, 1);
+    // PUT ล็อกแถว admin (ผู้ทำ) แล้วรอแถวเป้าหมายที่ reset ถืออยู่
+    const updating = put(target, { name: "มานี (แก้ระหว่างรีเซ็ต)" });
+    await waitForLockWait(t.db, 2);
+    // reset ไปต่อ: audit_log.user_id = admin → FK check (FOR KEY SHARE) บนแถวที่ PUT ล็อกไว้
+    // ล็อกแบบ FOR UPDATE ตรงนี้ = รอกันเป็นวง → Postgres ยกเลิกหนึ่งคำขอ (40P01 → 500)
+    await gate.commit();
+
+    const [r, u] = await Promise.all([resetting, updating]);
+    expect(r.status).toBe(200);
+    expect(u.status).toBe(200);
+    expect(await signIn("manee@ong.test", password)).toBe(200);
+    const [row] = await t.db.select().from(user).where(eq(user.id, target));
+    expect(row?.name).toBe("มานี (แก้ระหว่างรีเซ็ต)");
+    const actions = (await userAudits()).filter((a) => a.rowId === target).map((a) => a.action);
+    expect(actions).toEqual(expect.arrayContaining(["user.reset_password", "user.update"]));
+  });
+
   // ---------- สิทธิ์สาขามีผลทันที (session เดิม ไม่ต้อง login ใหม่) ----------
 
   it("เพิ่มสาขาที่อนุญาต → สลับไปสาขานั้นได้ทันที · ถอนออก → บิลของสาขานั้นอ่านไม่ได้ทันที", async () => {

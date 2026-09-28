@@ -301,13 +301,15 @@ export async function updateUserAccount(
   return db.transaction(async (tx) => {
     // ล็อก admin ที่ใช้งานได้ทั้งชุดก่อนเสมอ (เรียงตาม id — สองคำขอพร้อมกันรอกันแทน deadlock)
     // คำขอที่ลด admin พร้อมกันจะเห็นผลของอีกฝ่ายหลังได้ล็อก → ไม่มีทางเหลือ admin 0 คน
+    // "no key update" ไม่ใช่ "update": ล็อกกันเองได้เหมือนกัน แต่ไม่ขวาง FK check (FOR KEY SHARE) ของแถวที่อ้างถึงผู้ใช้
+    // (audit_log.user_id · session · buy_receipt.created_by) — FOR UPDATE ทำให้ PUT กับ reset-password ที่ทับกัน deadlock
     const admins = await tx
       .select({ id: user.id })
       .from(user)
       .where(and(eq(user.role, "admin"), eq(user.isActive, true)))
       .orderBy(asc(user.id))
-      .for("update");
-    const [before] = await tx.select().from(user).where(eq(user.id, targetId)).for("update");
+      .for("no key update");
+    const [before] = await tx.select().from(user).where(eq(user.id, targetId)).for("no key update");
     if (!before) throw notFound();
 
     if (
@@ -397,7 +399,7 @@ export async function resetUserPassword(
   const hash = await tools.hash(secret);
   try {
     const sessionsRevoked = await db.transaction(async (tx) => {
-      const [target] = await tx.select({ id: user.id }).from(user).where(eq(user.id, targetId)).for("update");
+      const [target] = await tx.select({ id: user.id }).from(user).where(eq(user.id, targetId)).for("no key update");
       if (!target) throw notFound();
       const updated = await tx
         .update(account)
