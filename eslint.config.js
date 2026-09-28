@@ -18,6 +18,10 @@ export default defineConfig(
     "apps/web/src/routeTree.gen.ts",
     "apps/web/.tanstack/",
     "packages/db/migrations/",
+    // Playwright output: the HTML report bundles the trace viewer's JS
+    "tests/e2e/test-results/",
+    "tests/e2e/playwright-report/",
+    "tests/e2e/blob-report/",
   ]),
   js.configs.recommended,
   tseslint.configs.recommendedTypeChecked,

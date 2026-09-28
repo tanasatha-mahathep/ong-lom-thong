@@ -1,0 +1,144 @@
+# e2e stack — the deployable api image plus everything it talks to, like Railway but disposable.
+# Drive it through stack.sh (it generates the secrets for every run): `bash tests/e2e/stack/stack.sh up|down`.
+# Only the api (28787) and Gotenberg (23000, for the pdf project) reach the host, on loopback only.
+# Every image is pinned by digest; the two built here come from pinned Dockerfiles.
+name: ong-e2e
+
+# Same variables as the Railway service `Office` (.railway/railway.ts) — secrets come from stack.sh, never from git.
+x-api-env: &api-env
+  NODE_ENV: production
+  PORT: "8787"
+  DATABASE_URL: postgres://ong:${E2E_POSTGRES_PASSWORD:?run stack.sh up}@postgres:5432/ong
+  BETTER_AUTH_SECRET: ${E2E_BETTER_AUTH_SECRET:?run stack.sh up}
+  # = the origin the browser (and the tests) use — the api's CSRF check compares Origin against it
+  BETTER_AUTH_URL: http://localhost:28787
+  S3_ENDPOINT: http://s3:9000
+  S3_REGION: auto
+  S3_BUCKET: ong
+  S3_ACCESS_KEY: ${E2E_S3_ACCESS_KEY:?run stack.sh up}
+  S3_SECRET_KEY: ${E2E_S3_SECRET_KEY:?run stack.sh up}
+  S3_FORCE_PATH_STYLE: "true"
+  GOTENBERG_URL: http://gotenberg:3000
+  GOTENBERG_USERNAME: ong
+  GOTENBERG_PASSWORD: ${E2E_GOTENBERG_PASSWORD:?run stack.sh up}
+  # Receipt header (read once the receipt PDF lands; older images ignore it) — synthetic, not the shop's data.
+  # The tax ID is made up (all zeros) with a valid check digit, so a checksum guard accepts it.
+  COMPANY_NAME: ทดสอบ ร้านทอง E2E
+  COMPANY_ADDRESS: 1 ถนนทดสอบ ตำบลทดสอบ อำเภอทดสอบ จังหวัดทดสอบ 99999
+  COMPANY_TEL: "0000000000"
+  COMPANY_FAX: ""
+  COMPANY_TAX_ID: "0000000000001"
+
+# probe every second while a service starts (so `up --wait` returns as soon as it can), then every 10 s
+x-health: &health
+  interval: 10s
+  start_period: 120s
+  start_interval: 1s
+  retries: 3
+
+x-api-build: &api-build
+  context: ../../..
+  dockerfile: apps/api/Dockerfile
+
+services:
+  postgres:
+    image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873 # = docker-compose.yml
+    environment:
+      POSTGRES_DB: ong
+      POSTGRES_USER: ong
+      POSTGRES_PASSWORD: ${E2E_POSTGRES_PASSWORD:?run stack.sh up}
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ong -d ong"]
+      <<: *health
+      timeout: 3s
+
+  # S3-compatible bucket — RustFS pinned like the root docker-compose.yml (minio/minio left Docker Hub)
+  s3:
+    image: rustfs/rustfs:1.0.0@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
+    environment:
+      RUSTFS_ACCESS_KEY: ${E2E_S3_ACCESS_KEY:?run stack.sh up}
+      RUSTFS_SECRET_KEY: ${E2E_S3_SECRET_KEY:?run stack.sh up}
+      RUSTFS_CONSOLE_ENABLE: "false"
+      RUSTFS_OBS_LOG_DIRECTORY: "" # log to stdout (the image default writes to /logs inside the container)
+    volumes:
+      - s3data:/data # runs as uid 10001 — a fresh named volume inherits /data's owner from the image
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:9000/health/ready"]
+      <<: *health
+      timeout: 3s
+
+  # create the private bucket, then exit — BucketAlreadyOwnedByYou/BucketAlreadyExists also count as done
+  s3-init:
+    image: curlimages/curl:8.22.0@sha256:58adaa4e8dca9c988bae2aba4ab3434a0bb2da16bbe3f92dec39ec7785166777
+    depends_on:
+      s3:
+        condition: service_healthy
+    environment:
+      S3_ACCESS_KEY: ${E2E_S3_ACCESS_KEY:?run stack.sh up}
+      S3_SECRET_KEY: ${E2E_S3_SECRET_KEY:?run stack.sh up}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for i in $$(seq 30); do
+          r=$$(curl -s -w ' HTTP%{http_code}' --aws-sigv4 aws:amz:auto:s3 --user "$$S3_ACCESS_KEY:$$S3_SECRET_KEY" -X PUT http://s3:9000/ong)
+          case "$$r" in
+            *HTTP200 | *BucketAlreadyOwnedByYou* | *BucketAlreadyExists*) echo 'bucket ong ready'; exit 0 ;;
+          esac
+          sleep 1
+        done
+        echo "bucket ong not created: $$r" >&2
+        exit 1
+
+  gotenberg:
+    image: ong-e2e-gotenberg:local
+    build:
+      context: ../../../services/gotenberg
+    environment:
+      GOTENBERG_API_BASIC_AUTH_USERNAME: ong
+      GOTENBERG_API_BASIC_AUTH_PASSWORD: ${E2E_GOTENBERG_PASSWORD:?run stack.sh up}
+    ports:
+      - "127.0.0.1:23000:3000" # pdf project talks to Gotenberg directly
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/health"] # /health needs no auth
+      <<: *health
+      timeout: 5s
+
+  # Railway pre-deploy of every non-production environment: migrate, then seed the reference data
+  migrate:
+    image: ${API_IMAGE:-ong-e2e-api:local}
+    build: *api-build
+    command: ["/bin/sh", "-c", "node dist/migrate.js && node dist/seed.js"]
+    environment: *api-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: ${API_IMAGE:-ong-e2e-api:local} # CI: the image built once by the `image` job, docker-loaded
+    build: *api-build
+    environment: *api-env
+    ports:
+      - "127.0.0.1:28787:8787"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      s3-init:
+        condition: service_completed_successfully
+      gotenberg:
+        condition: service_healthy
+    healthcheck:
+      # the runtime image has node but no curl
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8787/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      <<: *health
+      timeout: 5s
+
+volumes:
+  pgdata:
+  s3data:

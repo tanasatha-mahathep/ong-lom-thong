@@ -7,6 +7,10 @@ coverage/
 apps/web/src/routeTree.gen.ts
 apps/web/.tanstack/
 packages/db/migrations/
+# Playwright output (reports · traces) — CI artifacts, never committed
+tests/e2e/test-results/
+tests/e2e/playwright-report/
+tests/e2e/blob-report/
 
 # semantic-release เขียนเอง — รูปแบบตาม conventional-changelog
 CHANGELOG.md
