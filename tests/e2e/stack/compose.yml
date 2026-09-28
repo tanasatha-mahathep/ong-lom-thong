@@ -21,13 +21,15 @@ x-api-env: &api-env
   GOTENBERG_URL: http://gotenberg:3000
   GOTENBERG_USERNAME: ong
   GOTENBERG_PASSWORD: ${E2E_GOTENBERG_PASSWORD:?run stack.sh up}
-  # Receipt header (read once the receipt PDF lands; older images ignore it) — synthetic, not the shop's data.
+  # Receipt header — synthetic, not the shop's data.
   # The tax ID is made up (all zeros) with a valid check digit, so a checksum guard accepts it.
   COMPANY_NAME: ทดสอบ ร้านทอง E2E
   COMPANY_ADDRESS: 1 ถนนทดสอบ ตำบลทดสอบ อำเภอทดสอบ จังหวัดทดสอบ 99999
   COMPANY_TEL: "0000000000"
   COMPANY_FAX: ""
   COMPANY_TAX_ID: "0000000000001"
+  # every environment but production stamps its receipts (.railway/railway.ts) — a test receipt must not look real
+  RECEIPT_WATERMARK: ตัวอย่าง — ระบบทดสอบ ไม่ใช่ใบรับซื้อจริง
 
 # probe every second while a service starts (so `up --wait` returns as soon as it can), then every 10 s
 x-health: &health
