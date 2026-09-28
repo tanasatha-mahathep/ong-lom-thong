@@ -1,0 +1,978 @@
+import { BUY_MSG, ZERO, fmtMoney, fmtWeight } from "@ong/core";
+import {
+  auditLog,
+  branch,
+  buyLine,
+  buyReceipt,
+  customer,
+  docSequence,
+  goldPrice,
+  metal,
+  payment,
+  stockMovement,
+} from "@ong/db";
+import { type SQL, and, asc, eq, ne, sql } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { type TestApp, databaseAvailable, startTestApp } from "../test/harness";
+
+const available = await databaseAvailable();
+const PW = "correct-horse-battery";
+
+// เลขบัตรสมมติที่ checksum ถูก — ห้ามใช้ข้อมูลลูกค้าจริง (CLAUDE.md กฎ 8)
+const ID_A = "1103700123458";
+const ID_B = "3100500987657";
+const ID_C = "5109900112237";
+const ID_D = "3101200456789";
+
+// 10:00 น. วันที่ 5 ต.ค. 2569 เวลาไทย → งวดเลขที่ 6910
+const NOW = new Date("2026-10-05T03:00:00Z");
+const TODAY = "2026-10-05";
+const NO_UUID = "00000000-0000-4000-8000-000000000000";
+
+interface QuoteRes {
+  ok: boolean;
+  errors: { field: string; message: string }[];
+  date: string;
+  branch: { id: string; code: string; name: string };
+  gold_price_snapshot: string | null;
+  lines: { index: number; metal_id: string; weight_g: string; amount: string; price_per_g: string }[];
+  total_weight: string;
+  total_amount: string;
+  avg_price_per_g: string;
+  paid: string;
+  balance: string;
+}
+interface SavedRes {
+  id: string;
+  doc_no: string;
+  pdf_status: string;
+}
+interface DetailRes {
+  id: string;
+  doc_no: string;
+  date: string;
+  time: string;
+  branch: { id: string; code: string; name: string; tax_branch_code: string | null };
+  customer: { id: string; name_th: string; name_en: string | null; address: string | null; national_id_masked: string };
+  gold_price_snapshot: string;
+  detail: string | null;
+  full_tax: boolean;
+  lines: {
+    line_no: number;
+    metal: { id: string; code: string; name_th: string };
+    weight_g: string;
+    amount: string;
+    price_per_g: string;
+  }[];
+  payments: { method: string; method_label: string; bank: string | null; amount: string }[];
+  total_weight: string;
+  total_amount: string;
+  avg_price_per_g: string;
+  status: string;
+  pdf_status: string;
+  idcard_status: string;
+  created_by: { id: string; name: string };
+  created_at: string;
+  voided_at: string | null;
+  void_reason: string | null;
+}
+interface ListItem {
+  id: string;
+  doc_no: string;
+  date: string;
+  time: string;
+  branch: { id: string; code: string; name: string };
+  customer: { id: string; name_th: string; national_id_masked: string };
+  total_weight: string;
+  total_amount: string;
+  status: string;
+  pdf_status: string;
+  created_by: { id: string; name: string };
+}
+interface Totals {
+  count: string;
+  total_weight: string;
+  total_amount: string;
+}
+interface ListRes {
+  items: ListItem[];
+  page: number;
+  has_more: boolean;
+  totals: Totals;
+}
+const ZERO_TOTALS: Totals = { count: "0", total_weight: "0.000", total_amount: "0.00" };
+/** บิล bill() ปกติหนึ่งใบ: 5.860 กรัม · 20,030 บาท */
+const ONE_BILL: Totals = { count: "1", total_weight: "5.860", total_amount: "20030.00" };
+
+describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R1–R5 · R7 · R9 · R11 · R13 · R15) — /api/buy", () => {
+  let t: TestApp;
+  let clock = NOW;
+  const cookies: Record<string, string> = {};
+  const userIds: Record<string, string> = {};
+  let metals: Record<string, string> = {};
+  let custA = "";
+  let custB = "";
+  let custC = "";
+  let custD = "";
+  let keySeq = 0;
+
+  beforeAll(async () => {
+    t = await startTestApp({ now: () => clock });
+    const accounts = [
+      { who: "staff", branch: "00000" },
+      { who: "staff1", branch: "00001" },
+      { who: "staff2", branch: "00002" },
+      { who: "acct", branch: "00000", role: "accounting" as const },
+      { who: "boss", role: "admin" as const, viewAll: true }, // เห็นทุกสาขา แต่ยังไม่ได้เลือกสาขาที่ทำงาน
+      { who: "nobranch" },
+    ];
+    for (const a of accounts) {
+      const created = await t.createUser({ email: `${a.who}@ong.test`, password: PW, ...a });
+      userIds[a.who] = created.id;
+      cookies[a.who] = await t.login(`${a.who}@ong.test`, PW);
+    }
+    metals = Object.fromEntries((await t.db.select().from(metal)).map((m) => [m.code, m.id]));
+
+    // ราคากลางของวันนี้และของวันย้อนหลัง · สาขา 00001 มีราคาของตัวเองวันนี้ · 3 ต.ค. ไม่มีราคา
+    await t.db.insert(goldPrice).values([
+      { date: TODAY, barSell: "67850", barBuy: "67650", jewelryBuy: "64268" },
+      { date: "2026-09-30", barSell: "67000", barBuy: "66800", jewelryBuy: "63460" },
+      { branchId: t.branches["00001"], date: TODAY, barSell: "68000", barBuy: "67800", jewelryBuy: "64410" },
+    ]);
+
+    const [a, b, c] = await t.db
+      .insert(customer)
+      .values([
+        {
+          nationalId: ID_A,
+          nameTh: "นายทดสอบ ซื้อทอง",
+          nameEn: "Mr. Test Buyer",
+          birthdayText: "01/01/2530",
+          religion: "พุทธ",
+          address: "1 ถ.ทดสอบ ต.ในเมือง อ.เมือง จ.ขอนแก่น",
+          cardIssueText: "01/01/2565",
+          cardExpireText: "31/12/2574",
+          mobile: "0812345678",
+          photoKey: "photos/a/card.png",
+        },
+        // บัตรหมดอายุ 1 ต.ค. 2569 — วันนี้ใช้ไม่ได้ แต่บิลย้อนหลังวันที่ 30 ก.ย. ใช้ได้
+        { nationalId: ID_B, nameTh: "นางสาวบัตร หมดอายุ", cardExpireText: "01/10/2569" },
+        { nationalId: ID_C, nameTh: "นายไม่มี วันหมดอายุ" },
+      ])
+      .returning({ id: customer.id });
+    custA = a?.id ?? "";
+    custB = b?.id ?? "";
+    custC = c?.id ?? "";
+  });
+  afterAll(async () => {
+    await t?.close();
+  });
+
+  const line = (code: string, weight_g: string, amount: string) => ({ metal_id: metals[code], weight_g, amount });
+  const bill = (over: Record<string, unknown> = {}) => ({
+    customer_id: custA,
+    lines: [line("gold", "5.860", "20030")],
+    payments: [{ method: "cash", amount: "20030" }],
+    ...over,
+  });
+  const newKey = () => `test-key-${String(++keySeq).padStart(8, "0")}`;
+  // async = คืน Promise เสมอ (app.request อาจคืน Response ตรง ๆ) — ใช้กับ Promise.all ได้
+  const quote = async (body: unknown, who = "staff") => t.request("/api/buy/quote", { cookie: cookies[who], body });
+  const save = async (body: Record<string, unknown>, who = "staff") =>
+    t.request("/api/buy", { cookie: cookies[who], body: { idempotency_key: newKey(), ...body } });
+  const saveWithKey = async (key: string, who = "staff") =>
+    t.request("/api/buy", { cookie: cookies[who], body: { ...bill(), idempotency_key: key } });
+  const get = async (path: string, who = "staff") => t.request(`/api/buy${path}`, { cookie: cookies[who] });
+  const list = async (qs = "", who = "staff") => {
+    const res = await get(qs ? `?${qs}` : "", who);
+    expect(res.status).toBe(200);
+    return (await res.json()) as ListRes;
+  };
+  const receiptCount = async () => (await t.db.select({ id: buyReceipt.id }).from(buyReceipt)).length;
+  /** เลขที่ของสาขาในงวด เรียงจากน้อยไปมาก */
+  const docNos = async (code: string, period: string) =>
+    (
+      await t.db
+        .select({ docNo: buyReceipt.docNo })
+        .from(buyReceipt)
+        .where(eq(buyReceipt.branchId, t.branches[code] ?? ""))
+        .orderBy(asc(buyReceipt.docNo))
+    )
+      .map((r) => r.docNo)
+      .filter((d) => d.startsWith(`RC${period}-`));
+  const running = (period: string, from: number, to: number) =>
+    Array.from({ length: to - from + 1 }, (_, i) => `RC${period}-${String(from + i).padStart(4, "0")}`);
+
+  // ---------- สิทธิ์ ----------
+
+  it("ต้อง login ทุก endpoint", async () => {
+    expect((await t.request("/api/buy")).status).toBe(401);
+    expect((await t.request(`/api/buy/${NO_UUID}`)).status).toBe(401);
+    expect((await t.request("/api/buy/quote", { body: bill() })).status).toBe(401);
+    expect((await t.request("/api/buy", { body: { ...bill(), idempotency_key: newKey() } })).status).toBe(401);
+  });
+
+  it("ไม่มีสิทธิ์สาขาใดเลย = 403 ทั้งอ่านและเขียน (fail-closed)", async () => {
+    expect((await get("", "nobranch")).status).toBe(403);
+    expect((await get(`/${NO_UUID}`, "nobranch")).status).toBe(403);
+    expect((await quote(bill(), "nobranch")).status).toBe(403);
+    expect((await save(bill(), "nobranch")).status).toBe(403);
+  });
+
+  it("accounting อ่านได้ แต่เปิดบิลไม่ได้ (403)", async () => {
+    expect((await save(bill(), "acct")).status).toBe(403);
+    expect((await get("", "acct")).status).toBe(200);
+    expect(await receiptCount()).toBe(0);
+  });
+
+  it("ยังไม่ได้เลือกสาขาที่ทำงาน = 403 ชี้ branch (เห็นทุกสาขาก็เปิดบิลลอย ๆ ไม่ได้)", async () => {
+    for (const res of [await quote(bill(), "boss"), await save(bill(), "boss")]) {
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: "ยังไม่ได้เลือกสาขาที่ทำงาน", field: "branch" });
+    }
+  });
+
+  it("CSRF: origin อื่นเปิดบิล/quote ไม่ได้", async () => {
+    const evil = { cookie: cookies.staff, origin: "https://evil.test" };
+    expect((await t.request("/api/buy", { ...evil, body: { ...bill(), idempotency_key: newKey() } })).status).toBe(403);
+    expect((await t.request("/api/buy/quote", { ...evil, body: bill() })).status).toBe(403);
+    expect(await receiptCount()).toBe(0);
+  });
+
+  // ---------- รูปแบบ payload ----------
+
+  it.each([
+    [{ lines: [{ metal_id: "x", weight_g: 5.86, amount: "20030" }] }, "lines.0.weight_g"],
+    [{ lines: [{ metal_id: "x", weight_g: "5.86", amount: 20030 }] }, "lines.0.amount"],
+    [{ payments: [{ method: "cash", amount: 20030 }] }, "payments.0.amount"],
+    [{ lines: "gold" }, "lines"],
+    [{ payments: undefined }, "payments"],
+    [{ date: "2026-02-30" }, "date"],
+    [{ customer_id: "not-a-uuid" }, "customer_id"],
+    [{ lines: Array.from({ length: 51 }, () => ({ metal_id: "x", weight_g: "1", amount: "1" })) }, "lines"],
+  ])("payload ผิดรูป %j → 400 ชี้ %s (ตัวเลข JSON ถูกปฏิเสธ — ต้องเป็น string)", async (over, field) => {
+    const body = bill(over);
+    for (const res of [await quote(body), await save(body)]) {
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ field });
+    }
+  });
+
+  it.each([
+    [{ idempotency_key: undefined }, "idempotency_key"],
+    [{ idempotency_key: "short" }, "idempotency_key"],
+    [{ idempotency_key: "has space in the key!!" }, "idempotency_key"],
+    [{ time: "24:00" }, "time"],
+    [{ time: "9:5" }, "time"],
+    [{ detail: "ก".repeat(2001) }, "detail"],
+    [{ full_tax: "yes" }, "full_tax"],
+  ])("POST /buy ช่องหัวบิลผิด %j → 400 ชี้ %s", async (over, field) => {
+    const res = await t.request("/api/buy", {
+      cookie: cookies.staff,
+      body: { ...bill(), idempotency_key: newKey(), ...over },
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ field });
+  });
+
+  it("body ไม่ใช่ JSON / ไม่ใช่ object = 400", async () => {
+    const raw = await t.app.request("/api/buy/quote", {
+      method: "POST",
+      headers: { cookie: cookies.staff ?? "", origin: "http://localhost:8787", "content-type": "application/json" },
+      body: "{not json",
+    });
+    expect(raw.status).toBe(400);
+    expect((await quote("gold")).status).toBe(400);
+    expect(await receiptCount()).toBe(0);
+  });
+
+  // ---------- quote ----------
+
+  it("quote ใบจริง: 5.860 กรัม รับซื้อ 20,030 → 3,418.09/กรัม · snapshot ราคาทองของวันนี้", async () => {
+    const res = await quote(bill());
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: true,
+      errors: [],
+      date: TODAY,
+      branch: { id: t.branches["00000"], code: "00000", name: "สำนักงานใหญ่ (สาขา 1)" },
+      gold_price_snapshot: "67850.00",
+      lines: [{ index: 0, metal_id: metals.gold, weight_g: "5.860", amount: "20030.00", price_per_g: "3418.09" }],
+      total_weight: "5.860",
+      total_amount: "20030.00",
+      avg_price_per_g: "3418.09",
+      paid: "20030.00",
+      balance: "0.00",
+    });
+  });
+
+  it("quote หลายแถว: index ชี้แถวที่กรอก แม้แถวก่อนหน้าผิด · เฉลี่ย/กรัม · ยอดคงเหลือ", async () => {
+    const res = await quote(
+      bill({
+        lines: [line("gold", "5.860", "20030"), line("silver", "0", "100"), line("silver", "100", "1500")],
+        payments: [{ method: "cash", amount: "21000" }],
+      }),
+    );
+    const q = (await res.json()) as QuoteRes;
+    expect(q.ok).toBe(false);
+    expect(q.lines.map((l) => l.index)).toEqual([0, 2]);
+    expect(q).toMatchObject({ total_weight: "105.860", total_amount: "21530.00", avg_price_per_g: "203.38" });
+    expect(q).toMatchObject({ paid: "21000.00", balance: "530.00" });
+    expect(q.errors).toEqual([
+      { field: "lines.1.weight_g", message: BUY_MSG.weightPositive },
+      { field: "payments", message: BUY_MSG.unbalanced("530.00") },
+    ]);
+  });
+
+  it("quote ยังไม่กรอกอะไร = 200 ok:false (ไม่ใช่ 400) — ใช้เป็น live preview ได้ตั้งแต่เปิดหน้า", async () => {
+    const res = await quote({ lines: [], payments: [] });
+    expect(res.status).toBe(200);
+    const q = (await res.json()) as QuoteRes;
+    expect(q.ok).toBe(false);
+    expect(q.errors.map((e) => e.field)).toEqual(["customer_id", "lines"]);
+    expect(q).toMatchObject({ total_amount: "0.00", avg_price_per_g: "0.00", gold_price_snapshot: "67850.00" });
+  });
+
+  // override เป็นฟังก์ชัน — id ลูกค้า/โลหะ มีค่าหลัง beforeAll
+  const cases: [string, () => Record<string, unknown>, string, string][] = [
+    ["ไม่มีลูกค้า (R1)", () => ({ customer_id: null }), "customer_id", BUY_MSG.noCustomer],
+    ["ลูกค้าที่ไม่มีอยู่", () => ({ customer_id: NO_UUID }), "customer_id", BUY_MSG.noCustomer],
+    ["บัตรหมดอายุ ณ วันที่บิล (R2)", () => ({ customer_id: custB }), "customer_id", "บัตรประชาชนหมดอายุแล้ว"],
+    ["ไม่มีวันหมดอายุบัตร (R2)", () => ({ customer_id: custC }), "customer_id", "ยังไม่ได้กรอกวันที่บัตรหมดอายุ"],
+    [
+      "ไม่มีราคาทองของวันบิล (R7)",
+      () => ({ date: "2026-10-03" }),
+      "gold_price",
+      "ยังไม่ได้ตั้งราคาทองของวันที่ 03/10/2569",
+    ],
+    [
+      "ชำระไม่ครบ (R4)",
+      () => ({ payments: [{ method: "cash", amount: "20000" }] }),
+      "payments",
+      BUY_MSG.unbalanced("30.00"),
+    ],
+    ["ชำระเกิน (R4)", () => ({ payments: [{ method: "cash", amount: "21000" }] }), "payments", BUY_MSG.overpaid],
+    [
+      "วิธีชำระซ้ำ (R5)",
+      () => ({
+        payments: [
+          { method: "cash", amount: "10000" },
+          { method: "cash", amount: "10030" },
+        ],
+      }),
+      "payments.1.method",
+      BUY_MSG.paymentDup,
+    ],
+    [
+      "วิธีชำระที่ไม่รู้จัก",
+      () => ({ payments: [{ method: "cheque", amount: "20030" }] }),
+      "payments.0.method",
+      "กรุณาเลือกประเภทเงินที่ชำระ",
+    ],
+    [
+      "โลหะที่ไม่รู้จัก",
+      () => ({ lines: [{ metal_id: NO_UUID, weight_g: "5.860", amount: "20030" }] }),
+      "lines.0.metal_id",
+      "ไม่พบประเภทโลหะ",
+    ],
+    ["วันที่ในอนาคต", () => ({ date: "2026-10-06" }), "date", "วันที่ต้องไม่เกินวันนี้"],
+    ["ไม่มีรายการ", () => ({ lines: [], payments: [] }), "lines", BUY_MSG.noLines],
+    [
+      "น้ำหนักว่าง (R3)",
+      () => ({ lines: [line("gold", "", "20030")], payments: [] }),
+      "lines.0.weight_g",
+      BUY_MSG.badNumber,
+    ],
+    [
+      "เลขบัตรหลุดลงช่องราคา",
+      () => ({ lines: [line("gold", "5.860", ID_A)], payments: [] }),
+      "lines.0.amount",
+      BUY_MSG.amountMax,
+    ],
+  ];
+
+  it.each(cases)("%s → quote ok:false · POST 409 ไม่บันทึก", async (_name, over, field, message) => {
+    const body = bill(over());
+    const before = await receiptCount();
+
+    const q = await quote(body);
+    expect(q.status).toBe(200);
+    const qBody = (await q.json()) as QuoteRes;
+    expect(qBody.ok).toBe(false);
+    expect(qBody.errors[0]).toEqual({ field, message });
+
+    const res = await save(body);
+    expect(res.status).toBe(409);
+    // 409 แนบผล quote ทั้งก้อน (ตัวเดียวกับ /quote) ให้จอแสดง error ต่อช่องได้
+    expect(await res.json()).toMatchObject({ error: message, field, ok: false, errors: qBody.errors });
+    expect(await receiptCount()).toBe(before);
+  });
+
+  it("บัตรคิด ณ วันที่ของบิล: บัตรหมดอายุ 1 ต.ค. ใช้กับบิลย้อนหลัง 30 ก.ย. ได้", async () => {
+    const q = (await (await quote(bill({ customer_id: custB, date: "2026-09-30" }))).json()) as QuoteRes;
+    expect(q).toMatchObject({ ok: true, date: "2026-09-30", gold_price_snapshot: "67000.00" });
+  });
+
+  it("Siam ID พิมพ์วันหมดอายุเป็นชื่อเดือนไทย ('31 ธันวาคม 2574') → เพิ่มลูกค้าแล้วเปิดบิลได้ (สถานะบัตร ok)", async () => {
+    const form = new FormData();
+    form.append("national_id", ID_D);
+    form.append("name_th", "นายสยาม ไอดี");
+    form.append("card_expire_text", "31 ธันวาคม 2574");
+    const created = await t.request("/api/customers", { cookie: cookies.staff, body: form });
+    expect(created.status).toBe(201);
+    custD = ((await created.json()) as { id: string }).id;
+    const detail = await t.request(`/api/customers/${custD}`, { cookie: cookies.staff });
+    expect(await detail.json()).toMatchObject({ card_status: "ok", card_expire_date: "2031-12-31" });
+
+    const q = (await (await quote(bill({ customer_id: custD }))).json()) as QuoteRes;
+    expect(q).toMatchObject({ ok: true, errors: [], total_amount: "20030.00" });
+  });
+
+  // ลูกค้าระบบเดิมย้ายมาพร้อมข้อความตามที่พิมพ์ไว้ — สถานะบัตรคิดจากข้อความ ณ วันที่ของบิล (5 ต.ค. 2569)
+  it.each([
+    ["1 ม.ค. 2570", null],
+    ["5 Oct. 2026", null], // หมดอายุวันนี้ยังใช้ได้
+    ["LIFELONG", null],
+    ["99999999", null], // บัตรตลอดชีพ ค่าดิบจากชิป
+    ["4 ต.ค. 2569", "บัตรประชาชนหมดอายุแล้ว"],
+    ["1 มกรา 2570", "รูปแบบวันที่บัตรหมดอายุไม่ถูกต้อง"],
+  ])("วันหมดอายุ %j → quote ผ่าน / บล็อกด้วย %s (R2)", async (cardExpireText, message) => {
+    await t.db.update(customer).set({ cardExpireText }).where(eq(customer.id, custD));
+    const q = (await (await quote(bill({ customer_id: custD }))).json()) as QuoteRes;
+    expect(q.errors).toEqual(message ? [{ field: "customer_id", message }] : []);
+    expect(q.ok).toBe(message === null);
+  });
+
+  // ---------- บันทึก ----------
+
+  let firstId = "";
+
+  it("บันทึกใบแรก → 201 RC6910-0001 · หัวบิล/แถว/ชำระ/สต็อก ลงครบ (R9 · R11)", async () => {
+    const res = await save(bill());
+    expect(res.status).toBe(201);
+    const saved = (await res.json()) as SavedRes;
+    expect(Object.keys(saved).sort()).toEqual(["doc_no", "id", "pdf_status"]);
+    expect(saved).toMatchObject({ doc_no: "RC6910-0001", pdf_status: "pending" });
+    firstId = saved.id;
+
+    const [r] = await t.db.select().from(buyReceipt).where(eq(buyReceipt.id, firstId));
+    expect(r).toMatchObject({
+      branchId: t.branches["00000"],
+      docNo: "RC6910-0001",
+      date: TODAY,
+      time: "10:00:00", // ไม่ส่งเวลา = เวลาไทยตอนบันทึก
+      customerId: custA,
+      goldPriceSnapshot: "67850.00",
+      detail: null,
+      fullTax: false,
+      totalWeight: "5.860",
+      totalAmount: "20030.00",
+      status: "active",
+      pdfStatus: "pending",
+      idcardStatus: "pending", // ลูกค้ามีรูปบัตร → รอสร้างสำเนาบัตร
+      createdBy: userIds.staff,
+    });
+    expect(r?.customerSnapshot).toEqual({
+      national_id: ID_A,
+      name_th: "นายทดสอบ ซื้อทอง",
+      name_en: "Mr. Test Buyer",
+      birthday_text: "01/01/2530",
+      religion: "พุทธ",
+      address: "1 ถ.ทดสอบ ต.ในเมือง อ.เมือง จ.ขอนแก่น",
+      card_issue_text: "01/01/2565",
+      card_expire_text: "31/12/2574",
+      mobile: "0812345678",
+      phone2: null,
+      photo_key: "photos/a/card.png",
+    });
+
+    expect(await t.db.select().from(buyLine).where(eq(buyLine.receiptId, firstId))).toEqual([
+      expect.objectContaining({
+        lineNo: 1,
+        metalId: metals.gold,
+        weightG: "5.860",
+        amount: "20030.00",
+        pricePerG: "3418.09",
+      }),
+    ]);
+    expect(await t.db.select().from(payment).where(eq(payment.receiptId, firstId))).toEqual([
+      expect.objectContaining({ method: "cash", bank: null, amount: "20030.00" }),
+    ]);
+    expect(await t.db.select().from(stockMovement).where(eq(stockMovement.sourceReceiptId, firstId))).toEqual([
+      expect.objectContaining({ branchId: t.branches["00000"], metalId: metals.gold, date: TODAY, grams: "5.860" }),
+    ]);
+    // บิลวันนี้ไม่ใช่บิลย้อนหลัง — ไม่มี audit
+    expect(await t.db.select().from(auditLog).where(eq(auditLog.rowId, firstId))).toHaveLength(0);
+  });
+
+  it("ตัวเลขที่บันทึก = ตัวเลขที่ quote (ฟังก์ชันเดียวกัน) · หลายแถว หลายวิธีชำระ · คอมมาถูกตัด", async () => {
+    const body = bill({
+      lines: [line("gold", "15.2", "52,000.50"), line("nak", "3.333", "7777"), line("silver", "250.5", "5010")],
+      payments: [
+        { method: "transfer", bank: " KBANK ", amount: "50,000" },
+        { method: "cash", amount: "14,787.50" },
+      ],
+    });
+    const q = (await (await quote(body)).json()) as QuoteRes;
+    expect(q).toMatchObject({ ok: true, total_weight: "269.033", total_amount: "64787.50", avg_price_per_g: "240.82" });
+    expect(q.lines.map((l) => l.price_per_g)).toEqual(["3421.09", "2333.33", "20.00"]);
+
+    const res = await save({ ...body, time: "09:15", detail: "  สร้อยขาด 1 เส้น แหวนเงิน  ", full_tax: true });
+    expect(res.status).toBe(201);
+    const saved = (await res.json()) as SavedRes;
+    expect(saved.doc_no).toBe("RC6910-0002");
+
+    const detail = (await (await get(`/${saved.id}`)).json()) as DetailRes;
+    expect(detail).toMatchObject({
+      doc_no: "RC6910-0002",
+      date: TODAY,
+      time: "09:15",
+      detail: "สร้อยขาด 1 เส้น แหวนเงิน",
+      full_tax: true,
+      gold_price_snapshot: q.gold_price_snapshot,
+      total_weight: q.total_weight,
+      total_amount: q.total_amount,
+      avg_price_per_g: q.avg_price_per_g,
+    });
+    expect(
+      detail.lines.map((l) => ({
+        line_no: l.line_no,
+        metal_id: l.metal.id,
+        weight_g: l.weight_g,
+        amount: l.amount,
+        price_per_g: l.price_per_g,
+      })),
+    ).toEqual(
+      q.lines.map((l) => ({
+        line_no: l.index + 1,
+        metal_id: l.metal_id,
+        weight_g: l.weight_g,
+        amount: l.amount,
+        price_per_g: l.price_per_g,
+      })),
+    );
+    expect(detail.lines.map((l) => [l.metal.code, l.metal.name_th])).toEqual([
+      ["gold", "ทอง"],
+      ["nak", "นาก"],
+      ["silver", "เงิน"],
+    ]);
+    // เงินสดก่อน แล้วโอน · ธนาคารตัดช่องว่าง
+    expect(detail.payments).toEqual([
+      { method: "cash", method_label: "เงินสด", bank: null, amount: "14787.50" },
+      { method: "transfer", method_label: "โอนเงิน", bank: "KBANK", amount: "50000.00" },
+    ]);
+    const stock = await t.db
+      .select()
+      .from(stockMovement)
+      .where(eq(stockMovement.sourceReceiptId, saved.id))
+      .orderBy(asc(stockMovement.grams));
+    expect(stock.map((s) => [s.metalId, s.grams, s.date])).toEqual([
+      [metals.nak, "3.333", TODAY],
+      [metals.gold, "15.200", TODAY],
+      [metals.silver, "250.500", TODAY],
+    ]);
+  });
+
+  it("เลขที่นับแยกสาขา: สาขา 00001 เริ่ม RC6910-0001 ของตัวเอง · ใช้ราคาทองเฉพาะสาขา", async () => {
+    const res = await save(bill(), "staff1");
+    expect(res.status).toBe(201);
+    const saved = (await res.json()) as SavedRes;
+    expect(saved.doc_no).toBe("RC6910-0001");
+    const detail = (await (await get(`/${saved.id}`, "staff1")).json()) as DetailRes;
+    expect(detail).toMatchObject({
+      branch: { code: "00001" },
+      gold_price_snapshot: "68000.00",
+      idcard_status: "pending",
+    });
+  });
+
+  let backdatedId = "";
+
+  it("บิลย้อนหลังข้ามเดือน → เลขงวดของวันบิล RC6909-0001 · ราคาของวันนั้น · สต็อกลงวันบิล · audit", async () => {
+    const res = await save(bill({ customer_id: custB, date: "2026-09-30", time: "16:30" }));
+    expect(res.status).toBe(201);
+    const saved = (await res.json()) as SavedRes;
+    expect(saved.doc_no).toBe("RC6909-0001");
+    backdatedId = saved.id;
+
+    const detail = (await (await get(`/${saved.id}`)).json()) as DetailRes;
+    expect(detail).toMatchObject({ date: "2026-09-30", time: "16:30", gold_price_snapshot: "67000.00" });
+    expect(detail.idcard_status).toBe("none"); // ลูกค้าไม่มีรูปบัตร
+    const [stock] = await t.db.select().from(stockMovement).where(eq(stockMovement.sourceReceiptId, saved.id));
+    expect(stock?.date).toBe("2026-09-30");
+
+    const audits = await t.db.select().from(auditLog).where(eq(auditLog.rowId, saved.id));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      userId: userIds.staff,
+      action: "buy.backdate",
+      tableName: "buy_receipt",
+      diff: { doc_no: "RC6909-0001", date: "2026-09-30", time: "16:30", entered_on: TODAY },
+    });
+  });
+
+  it("เปิดบิลพร้อมกัน 10 ใบ → เลขไม่ซ้ำ ไม่ข้าม (next_doc_no ล็อกแถวตัวนับ)", async () => {
+    const results = await Promise.all(Array.from({ length: 10 }, () => save(bill())));
+    expect(results.map((r) => r.status)).toEqual(Array(10).fill(201));
+    const nos = (await Promise.all(results.map(async (r) => ((await r.json()) as SavedRes).doc_no))).sort();
+    expect(nos).toEqual(running("6910", 3, 12));
+    expect(await docNos("00000", "6910")).toEqual(running("6910", 1, 12));
+  });
+
+  it("idempotency: ส่งซ้ำด้วย key เดิม = 200 บิลเดิม ไม่สร้างใหม่ · แม้ข้ามเที่ยงคืนแล้ว quote จะไม่ผ่าน", async () => {
+    const key = newKey();
+    const first = await saveWithKey(key);
+    expect(first.status).toBe(201);
+    const saved = (await first.json()) as SavedRes;
+    expect(saved.doc_no).toBe("RC6910-0013");
+
+    const again = await saveWithKey(key);
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual(saved);
+
+    clock = new Date("2026-10-05T17:30:00Z"); // 00:30 น. วันที่ 6 — ยังไม่มีราคาทองของวันใหม่
+    try {
+      const late = await saveWithKey(key);
+      expect(late.status).toBe(200);
+      expect(await late.json()).toEqual(saved);
+    } finally {
+      clock = NOW;
+    }
+    expect(await t.db.select().from(buyReceipt).where(eq(buyReceipt.idempotencyKey, key))).toHaveLength(1);
+  });
+
+  it("idempotency: key ของคนอื่น = 409 ชี้ idempotency_key", async () => {
+    const key = newKey();
+    expect((await saveWithKey(key)).status).toBe(201);
+    const res = await saveWithKey(key, "staff1");
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "idempotency_key นี้ถูกใช้แล้ว", field: "idempotency_key" });
+    expect(await docNos("00001", "6910")).toEqual(running("6910", 1, 1));
+  });
+
+  it("idempotency: ส่ง key เดียวกันพร้อมกัน 5 ครั้ง → บิลเดียว · ทุกคำตอบชี้บิลเดียวกัน · เลขไม่ข้าม", async () => {
+    const key = newKey();
+    const results = await Promise.all(Array.from({ length: 5 }, () => saveWithKey(key)));
+    const statuses = results.map((r) => r.status).sort();
+    expect(statuses).toEqual([200, 200, 200, 200, 201]);
+    const bodies = (await Promise.all(results.map((r) => r.json()))) as SavedRes[];
+    expect(new Set(bodies.map((b) => b.id)).size).toBe(1);
+    expect(await t.db.select().from(buyReceipt).where(eq(buyReceipt.idempotencyKey, key))).toHaveLength(1);
+
+    // ตัวที่แพ้ rollback แล้วเลขคืน → ใบถัดไปได้เลขต่อกันพอดี
+    const next = (await (await save(bill())).json()) as SavedRes;
+    expect(await docNos("00000", "6910")).toEqual(running("6910", 1, 16));
+    expect(next.doc_no).toBe("RC6910-0016");
+    const [counter] = await t.db
+      .select()
+      .from(docSequence)
+      .where(and(eq(docSequence.branchId, t.branches["00000"] ?? ""), eq(docSequence.period, "6910")));
+    expect(counter?.lastNo).toBe(16);
+  });
+
+  it("R15: snapshot ลูกค้าไม่เปลี่ยนเมื่อแก้ข้อมูลลูกค้าทีหลัง · บิลใหม่ใช้ข้อมูลใหม่", async () => {
+    await t.db
+      .update(customer)
+      .set({ nameTh: "นายเปลี่ยน ชื่อใหม่", address: "99 ที่อยู่ใหม่" })
+      .where(eq(customer.id, custA));
+    try {
+      const detail = (await (await get(`/${firstId}`)).json()) as DetailRes;
+      expect(detail.customer).toEqual({
+        id: custA,
+        name_th: "นายทดสอบ ซื้อทอง",
+        name_en: "Mr. Test Buyer",
+        address: "1 ถ.ทดสอบ ต.ในเมือง อ.เมือง จ.ขอนแก่น",
+        national_id_masked: "1 XXXX XXXXX 45 8",
+      });
+      const [row] = await t.db.select().from(buyReceipt).where(eq(buyReceipt.id, firstId));
+      expect(row?.customerSnapshot.name_th).toBe("นายทดสอบ ซื้อทอง");
+
+      const res = await save(bill());
+      const fresh = (await (await get(`/${((await res.json()) as SavedRes).id}`)).json()) as DetailRes;
+      expect(fresh.customer).toMatchObject({ name_th: "นายเปลี่ยน ชื่อใหม่", address: "99 ที่อยู่ใหม่" });
+    } finally {
+      await t.db
+        .update(customer)
+        .set({ nameTh: "นายทดสอบ ซื้อทอง", address: "1 ถ.ทดสอบ ต.ในเมือง อ.เมือง จ.ขอนแก่น" })
+        .where(eq(customer.id, custA));
+    }
+  });
+
+  // ---------- อ่าน · scoping ----------
+
+  it("GET /:id — ครบทุกช่อง · no-store · เลขบัตรมาสก์ ไม่มีเลขเต็มใน response (R13)", async () => {
+    const res = await get(`/${firstId}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const text = await res.text();
+    expect(text).not.toContain(ID_A);
+    const { created_at, ...detail } = JSON.parse(text) as DetailRes;
+    expect(created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(detail).toEqual({
+      id: firstId,
+      doc_no: "RC6910-0001",
+      date: TODAY,
+      time: "10:00",
+      branch: { id: t.branches["00000"], code: "00000", name: "สำนักงานใหญ่ (สาขา 1)", tax_branch_code: "00000" },
+      customer: {
+        id: custA,
+        name_th: "นายทดสอบ ซื้อทอง",
+        name_en: "Mr. Test Buyer",
+        address: "1 ถ.ทดสอบ ต.ในเมือง อ.เมือง จ.ขอนแก่น",
+        national_id_masked: "1 XXXX XXXXX 45 8",
+      },
+      gold_price_snapshot: "67850.00",
+      detail: null,
+      full_tax: false,
+      lines: [
+        {
+          line_no: 1,
+          metal: { id: metals.gold, code: "gold", name_th: "ทอง" },
+          weight_g: "5.860",
+          amount: "20030.00",
+          price_per_g: "3418.09",
+        },
+      ],
+      payments: [{ method: "cash", method_label: "เงินสด", bank: null, amount: "20030.00" }],
+      total_weight: "5.860",
+      total_amount: "20030.00",
+      avg_price_per_g: "3418.09",
+      status: "active",
+      pdf_status: "pending",
+      idcard_status: "pending",
+      created_by: { id: userIds.staff, name: "staff" },
+      voided_at: null,
+      void_reason: null,
+    });
+  });
+
+  it("GET /:id — uuid ผิดรูป / ไม่มี = 404", async () => {
+    expect((await get("/not-a-uuid")).status).toBe(404);
+    expect((await get(`/${NO_UUID}`)).status).toBe(404);
+  });
+
+  it("scoping: สาขาอื่นเห็นรายการว่าง และเปิดบิลข้ามสาขาได้ 404 (ไม่บอกว่ามีอยู่)", async () => {
+    const mine = await list("", "staff1");
+    expect(mine.items.length).toBe(1);
+    expect(mine.items.every((i) => i.branch.code === "00001")).toBe(true);
+    expect((await get(`/${firstId}`, "staff1")).status).toBe(404);
+
+    const own = await list("", "staff");
+    expect(own.items.length).toBeGreaterThan(0);
+    expect(own.items.every((i) => i.branch.code === "00000")).toBe(true);
+    // ขอสาขาที่ไม่มีสิทธิ์ = ว่าง (ไม่ใช่ 403 และไม่ใช่ทุกสาขา) · id มั่ว ๆ ก็ว่าง
+    expect(await list(`branch_id=${t.branches["00001"]}`, "staff")).toEqual({
+      items: [],
+      page: 1,
+      has_more: false,
+      totals: ZERO_TOTALS,
+    });
+    expect((await list("branch_id=nonsense", "staff")).items).toEqual([]);
+    expect((await list(`branch_id=${t.branches["00000"]}`, "staff")).items.length).toBe(own.items.length);
+  });
+
+  it("accounting เห็นบิลของสาขาตัวเอง (อ่านอย่างเดียว)", async () => {
+    expect((await list("", "acct")).items.every((i) => i.branch.code === "00000")).toBe(true);
+    expect((await get(`/${firstId}`, "acct")).status).toBe(200);
+  });
+
+  it("can_view_all เห็นทุกสาขา · กรองสาขาได้ · สาขาที่ถูกปิดหายจากทั้งรายการและหน้าบิล", async () => {
+    const res = await save(bill(), "staff2");
+    expect(res.status).toBe(201); // ราคากลางใช้ได้ทุกสาขา
+    const closedId = ((await res.json()) as SavedRes).id;
+
+    const all = await list("", "boss");
+    expect(new Set(all.items.map((i) => i.branch.code))).toEqual(new Set(["00000", "00001", "00002"]));
+    expect((await list(`branch_id=${t.branches["00001"]}`, "boss")).items.map((i) => i.branch.code)).toEqual(["00001"]);
+    expect((await get(`/${closedId}`, "boss")).status).toBe(200);
+
+    await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
+    try {
+      expect((await list("", "boss")).items.some((i) => i.branch.code === "00002")).toBe(false);
+      expect((await get(`/${closedId}`, "boss")).status).toBe(404);
+      expect((await get("", "staff2")).status).toBe(403);
+      expect((await save(bill(), "staff2")).status).toBe(403);
+    } finally {
+      await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
+    }
+  });
+
+  it("รายการ: ลูกค้าจาก snapshot · เลขบัตรมาสก์ · no-store · ไม่มีเลขเต็มใน response", async () => {
+    const res = await get("");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const text = await res.text();
+    for (const id of [ID_A, ID_B]) expect(text).not.toContain(id);
+    const body = JSON.parse(text) as ListRes;
+    const first = body.items.find((i) => i.id === firstId);
+    expect(first).toEqual({
+      id: firstId,
+      doc_no: "RC6910-0001",
+      date: TODAY,
+      time: "10:00",
+      branch: { id: t.branches["00000"], code: "00000", name: "สำนักงานใหญ่ (สาขา 1)" },
+      customer: { id: custA, name_th: "นายทดสอบ ซื้อทอง", national_id_masked: "1 XXXX XXXXX 45 8" },
+      total_weight: "5.860",
+      total_amount: "20030.00",
+      status: "active",
+      pdf_status: "pending",
+      created_by: { id: userIds.staff, name: "staff" },
+    });
+    expect(body.items.find((i) => i.id === backdatedId)?.customer.national_id_masked).toBe("3 XXXX XXXXX 65 7");
+  });
+
+  it("รายการ: เรียงวันที่ → เวลา → เลขที่ ใหม่ก่อน", async () => {
+    const { items } = await list();
+    const key = (i: ListItem) => `${i.date} ${i.time} ${i.doc_no}`;
+    expect(items.map(key)).toEqual([...items.map(key)].sort().reverse());
+    expect(items.at(-1)?.id).toBe(backdatedId);
+  });
+
+  it.each([
+    ["date_from=2026-09-30&date_to=2026-09-30", ["RC6909-0001"]],
+    ["date_to=2026-10-04", ["RC6909-0001"]],
+    ["date_from=2026-10-06", []],
+    ["metal=nak", ["RC6910-0002"]],
+    ["metal=silver&date_from=2026-10-05", ["RC6910-0002"]],
+    ["metal=platinum", []],
+    ["metal=unknown", []],
+    ["q=rc6909", ["RC6909-0001"]], // เลขที่ ไม่สนตัวพิมพ์
+    ["q=6910-0002", ["RC6910-0002"]],
+    [`q=${encodeURIComponent("บัตร หมด")}`, ["RC6909-0001"]], // ชื่อจาก snapshot
+    ["q=00987", ["RC6909-0001"]], // เลขบัตรบางส่วน
+    [`q=${encodeURIComponent("3-1005-00987")}`, ["RC6909-0001"]], // เลขบัตรมีขีด
+    ["q=%25%25", []], // wildcard ถูก escape
+    ["q=__", []],
+  ])("กรอง %s → %j", async (qs, expected) => {
+    expect((await list(qs)).items.map((i) => i.doc_no)).toEqual(expected);
+  });
+
+  it("ช่องค้นที่ส่งมาว่าง = ไม่กรอง (ไม่ใช่ 400)", async () => {
+    const all = await list();
+    expect(await list("date_from=&date_to=&metal=&q=&branch_id=&page=")).toEqual(all);
+  });
+
+  it("กรองตามชื่ออังกฤษใน snapshot ได้", async () => {
+    const { items } = await list(`q=${encodeURIComponent("test buyer")}`);
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every((i) => i.customer.id === custA)).toBe(true);
+  });
+
+  it.each([
+    ["q=ก", "q"],
+    ["page=0", "page"],
+    ["date_from=2026-13-01", "date_from"],
+    ["date_to=yesterday", "date_to"],
+  ])("query ผิด %s → 400 ชี้ %s", async (qs, field) => {
+    const res = await get(`?${qs}`);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ field });
+  });
+
+  it("แบ่งหน้าละ 50 · has_more · ไม่มีบิลซ้ำข้ามหน้า", async () => {
+    for (let round = 0; round < 4; round++) {
+      const results = await Promise.all(Array.from({ length: 10 }, () => save(bill())));
+      expect(results.every((r) => r.status === 201)).toBe(true);
+    }
+    const total = (
+      await t.db
+        .select()
+        .from(buyReceipt)
+        .where(eq(buyReceipt.branchId, t.branches["00000"] ?? ""))
+    ).length;
+    expect(total).toBeGreaterThan(50);
+    const p1 = await list("page=1");
+    const p2 = await list("page=2");
+    expect([p1.items.length, p1.has_more, p2.items.length, p2.has_more]).toEqual([50, true, total - 50, false]);
+    expect(new Set([...p1.items, ...p2.items].map((i) => i.id)).size).toBe(total);
+    const p3 = await list("page=3");
+    expect([p3.items, p3.has_more]).toEqual([[], false]);
+    expect(p3.totals).toEqual(p1.totals); // ยอดรวมครอบทุกหน้า ไม่ใช่เฉพาะหน้าที่ขอ
+    // เลขที่ของงวดยังต่อเนื่องหลังเปิดบิลพร้อมกันอีก 40 ใบ
+    const nos = await docNos("00000", "6910");
+    expect(nos).toEqual(running("6910", 1, nos.length));
+  });
+
+  // ---------- totals (การ์ด "ยอดซื้อวันนี้" · หน้าค้นบิล) ----------
+
+  /** ยอดที่ควรได้ คิดจากแถวใน DB ด้วย decimal.js — เฉพาะบิลที่ยังไม่ยกเลิก */
+  const expectedTotals = async (where?: SQL): Promise<Totals> => {
+    const rows = await t.db
+      .select({ weight: buyReceipt.totalWeight, amount: buyReceipt.totalAmount })
+      .from(buyReceipt)
+      .where(and(where, eq(buyReceipt.status, "active")));
+    return {
+      count: String(rows.length),
+      total_weight: fmtWeight(rows.reduce((sum, r) => sum.plus(r.weight), ZERO)),
+      total_amount: fmtMoney(rows.reduce((sum, r) => sum.plus(r.amount), ZERO)),
+    };
+  };
+
+  it("totals = ผลรวมของบิลทุกหน้าตามตัวกรองเดียวกับรายการ (ตรงกับ DB และกับผลรวมของรายการ)", async () => {
+    const own = await expectedTotals(eq(buyReceipt.branchId, t.branches["00000"] ?? ""));
+    const p1 = await list();
+    const p2 = await list("page=2");
+    expect(p1.totals).toEqual(own);
+    expect(p2.totals).toEqual(own);
+    const items = [...p1.items, ...p2.items];
+    expect({
+      count: String(items.length),
+      total_weight: fmtWeight(items.reduce((sum, i) => sum.plus(i.total_weight), ZERO)),
+      total_amount: fmtMoney(items.reduce((sum, i) => sum.plus(i.total_amount), ZERO)),
+    }).toEqual(p1.totals);
+
+    // การ์ดหน้าแรก: ?date_from=วันนี้&date_to=วันนี้&branch_id=สาขาปัจจุบัน
+    const card = await list(`date_from=${TODAY}&date_to=${TODAY}&branch_id=${t.branches["00000"]}`);
+    expect(card.totals).toEqual(
+      await expectedTotals(and(eq(buyReceipt.branchId, t.branches["00000"] ?? ""), eq(buyReceipt.date, TODAY))),
+    );
+  });
+
+  it.each([
+    ["date_from=2026-09-30&date_to=2026-09-30", ONE_BILL],
+    ["q=rc6909", ONE_BILL],
+    [`q=${encodeURIComponent("บัตร หมด")}`, ONE_BILL],
+    ["metal=nak", { count: "1", total_weight: "269.033", total_amount: "64787.50" }], // ยอดทั้งบิลที่มีนาก
+    ["date_from=2026-10-06", ZERO_TOTALS],
+    ["metal=platinum", ZERO_TOTALS],
+  ])("totals ตามตัวกรอง %s → %j", async (qs, totals) => {
+    expect((await list(qs)).totals).toEqual(totals);
+  });
+
+  it("totals ไม่นับบิลที่ยกเลิก — บิลยังอยู่ในรายการ", async () => {
+    const qs = "date_from=2026-09-30&date_to=2026-09-30";
+    await t.db.update(buyReceipt).set({ status: "void" }).where(eq(buyReceipt.id, backdatedId));
+    try {
+      const res = await list(qs);
+      expect(res.items.map((i) => [i.doc_no, i.status])).toEqual([["RC6909-0001", "void"]]);
+      expect(res.totals).toEqual(ZERO_TOTALS);
+    } finally {
+      await t.db.update(buyReceipt).set({ status: "active" }).where(eq(buyReceipt.id, backdatedId));
+    }
+    expect((await list(qs)).totals).toEqual(ONE_BILL);
+  });
+
+  it("totals ตามสิทธิ์สาขา: สาขาอื่นไม่ถูกนับ · branch_id ที่ไม่มีสิทธิ์ = ศูนย์ · สาขาที่ปิดไม่นับ", async () => {
+    const b1 = t.branches["00001"] ?? "";
+    expect((await list("", "staff1")).totals).toEqual(ONE_BILL);
+    expect((await list(`branch_id=${t.branches["00000"]}`, "staff1")).totals).toEqual(ZERO_TOTALS);
+    expect((await list(`branch_id=${b1}`, "staff")).totals).toEqual(ZERO_TOTALS);
+    expect((await list("", "boss")).totals).toEqual(await expectedTotals());
+    expect((await list(`branch_id=${b1}`, "boss")).totals).toEqual(ONE_BILL);
+
+    await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
+    try {
+      expect((await list("", "boss")).totals).toEqual(
+        await expectedTotals(ne(buyReceipt.branchId, t.branches["00002"] ?? "")),
+      );
+    } finally {
+      await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
+    }
+  });
+
+  it("customer_snapshot เก็บเป็น jsonb object (ค้นด้วย ->> ได้ ไม่ใช่ string ซ้อน)", async () => {
+    const rows = await t.db.execute<{ kind: string }>(
+      sql`select distinct jsonb_typeof(${buyReceipt.customerSnapshot}) as kind from ${buyReceipt}`,
+    );
+    expect(rows.map((r) => r.kind)).toEqual(["object"]);
+  });
+});
