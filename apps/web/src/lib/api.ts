@@ -25,13 +25,11 @@ export class ApiError extends Error {
   }
 }
 
-export interface ApiFetchOptions<T> extends Omit<RequestInit, "body" | "credentials"> {
+export interface ApiFetchOptions extends Omit<RequestInit, "body" | "credentials"> {
   /** ส่งเป็น JSON (ตั้ง Content-Type ให้) */
   json?: unknown;
   /** ส่งเป็น multipart — browser ใส่ boundary เอง */
   form?: FormData;
-  /** ตรวจรูปคำตอบ — ไม่ส่ง = ได้ unknown กลับไป ให้ผู้เรียก narrow เอง */
-  schema?: z.ZodType<T>;
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -59,11 +57,19 @@ function toApiError(status: number, statusText: string, body: unknown): ApiError
   return new ApiError(status, statusText || `HTTP ${status}`, undefined, body);
 }
 
+type ApiPath = `/api/${string}`;
+
 /**
  * fetch ไปที่ `/api/...` origin เดียวกับหน้าเว็บ — cookie session ของ better-auth ไปเอง (same-origin)
- * สำเร็จ = body ที่ parse แล้ว (ผ่าน schema ถ้าให้มา) · ไม่สำเร็จ = throw ApiError
+ * สำเร็จ = body ที่ผ่าน `schema` (zod) · ไม่ส่ง schema = `unknown` ให้ผู้เรียก narrow เอง (ไม่มี cast ลอย ๆ)
+ * ไม่สำเร็จ = throw ApiError
  */
-export async function apiFetch<T = unknown>(path: `/api/${string}`, options: ApiFetchOptions<T> = {}): Promise<T> {
+export function apiFetch<T>(path: ApiPath, options: ApiFetchOptions & { schema: z.ZodType<T> }): Promise<T>;
+export function apiFetch(path: ApiPath, options?: ApiFetchOptions): Promise<unknown>;
+export async function apiFetch<T>(
+  path: ApiPath,
+  options: ApiFetchOptions & { schema?: z.ZodType<T> } = {},
+): Promise<unknown> {
   const { json, form, schema, headers: initHeaders, method, ...init } = options;
   const headers = new Headers(initHeaders);
   headers.set("Accept", "application/json");
@@ -92,7 +98,7 @@ export async function apiFetch<T = unknown>(path: `/api/${string}`, options: Api
 
   const data = await readBody(res);
   if (!res.ok) throw toApiError(res.status, res.statusText, data);
-  return schema ? schema.parse(data) : (data as T);
+  return schema ? schema.parse(data) : data;
 }
 
 /** ข้อความสำหรับแสดงผู้ใช้จาก error ใด ๆ */
