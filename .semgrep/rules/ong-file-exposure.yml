@@ -1,0 +1,61 @@
+# Project rules (scripts/ci/sast.sh). Test: semgrep --test .semgrep/rules (fixture = same name, .js).
+# CLAUDE.md rule 7 · spec R13: the bucket is private; photos, ID-card copies and receipt PDFs leave only
+# through the API after an access check — never through a public or pre-signed URL.
+rules:
+  - id: ong-s3-public-access
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      This makes stored files (customer photos, ID-card copies, receipt PDFs) readable without going
+      through the API's access check (CLAUDE.md rule 7 · spec R13). Keep objects private (no ACL) and
+      manage bucket ACL/policy in infrastructure, not in application code.
+    metadata:
+      category: security
+      subcategory: [vuln]
+      technology: [aws-sdk, s3]
+      cwe:
+        - "CWE-732: Incorrect Permission Assignment for Critical Resource"
+        - "CWE-200: Exposure of Sensitive Information to an Unauthorized Actor"
+      owasp:
+        - A01:2021 - Broken Access Control
+        - A01:2025 - Broken Access Control
+      confidence: HIGH
+      likelihood: LOW
+      impact: HIGH
+      references:
+        - https://docs.aws.amazon.com/AmazonS3/latest/userguide/acl-overview.html#canned-acl
+    pattern-either:
+      - patterns:
+          - pattern: "({..., ACL: $ACL, ...})"
+          - metavariable-regex:
+              metavariable: $ACL
+              regex: (?i).*(public|authenticated)[-_]read
+      - pattern: new PutBucketAclCommand(...)
+      - pattern: new PutBucketPolicyCommand(...)
+      - pattern: new DeletePublicAccessBlockCommand(...)
+
+  - id: ong-s3-presigned-url
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      A pre-signed URL is a bearer link: whoever holds it can fetch the object until it expires, without
+      the API's login and branch check (CLAUDE.md rule 7 · spec R13). Stream the file through an
+      authorised API route instead (see GET /api/customers/:id/photo).
+    metadata:
+      category: security
+      subcategory: [vuln]
+      technology: [aws-sdk, s3]
+      cwe:
+        - "CWE-200: Exposure of Sensitive Information to an Unauthorized Actor"
+        - "CWE-284: Improper Access Control"
+      owasp:
+        - A01:2021 - Broken Access Control
+        - A01:2025 - Broken Access Control
+      confidence: HIGH
+      likelihood: LOW
+      impact: HIGH
+      references:
+        - https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html
+    pattern-either:
+      - pattern: import "@aws-sdk/s3-request-presigner";
+      - pattern: import "@aws-sdk/s3-presigned-post";
