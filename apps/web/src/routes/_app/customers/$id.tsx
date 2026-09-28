@@ -37,12 +37,24 @@ export const Route = createFileRoute("/_app/customers/$id")({
 /** ย้ายโฟกัสไปที่เนื้อหาใหม่ (เปลี่ยนโหมด/บันทึกเสร็จ) — ปุ่มที่กดหายไป โฟกัสจึงไม่หลุดไปต้นหน้า */
 const focusOnMount = (element: HTMLElement | null) => element?.focus();
 
+/** โหมดของหน้าเปลี่ยนหลังเปิดหน้าแล้ว (ดู ↔ แก้ไข) — เปิดหน้ามาครั้งแรกไม่ย้ายโฟกัส */
+function useModeChanged(mode: "view" | "edit"): boolean {
+  const [shown, setShown] = useState(mode);
+  const [changed, setChanged] = useState(false);
+  if (mode !== shown) {
+    setShown(mode);
+    setChanged(true);
+  }
+  return changed;
+}
+
 /** /customers/$id — หน้าเดียวที่แสดงเลขบัตรเต็ม (R13) · ดู/แก้ไข · สถานะบัตร */
 function CustomerPage() {
   const { t } = useTranslation("customers");
   const { id } = Route.useParams();
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
+  const modeChanged = useModeChanged(search.mode ?? "view");
   useCustomerSync();
 
   const detail = useQuery(customerDetailQuery(id));
@@ -95,7 +107,7 @@ function CustomerPage() {
     return (
       <>
         <PageHeader description={customer.name_th} />
-        <div ref={focusOnMount} tabIndex={-1} className="outline-none">
+        <div ref={modeChanged ? focusOnMount : undefined} tabIndex={-1}>
           <EditCustomer
             customer={customer}
             photo={photoState.blob}
@@ -135,10 +147,10 @@ function CustomerPage() {
         />
       )}
       <Card
-        ref={search.saved ? undefined : focusOnMount}
+        ref={modeChanged && !search.saved ? focusOnMount : undefined}
         tabIndex={-1}
         aria-labelledby="customer-name"
-        className="max-w-3xl gap-4 outline-none"
+        className="max-w-3xl gap-4"
       >
         <CardHeader className="flex flex-wrap items-center gap-3">
           <CardTitle id="customer-name" role="heading" aria-level={2} className="text-xl">
@@ -183,7 +195,7 @@ function SavedBanner({
   }, []);
 
   return (
-    <Alert role="status" ref={focusOnMount} tabIndex={-1} className="max-w-3xl pr-12 outline-none">
+    <Alert role="status" ref={focusOnMount} tabIndex={-1} className="max-w-3xl pr-12">
       <CircleCheck aria-hidden="true" />
       <AlertTitle>{t(saved === "created" ? "detail.created" : "detail.updated")}</AlertTitle>
       <AlertDescription className="flex flex-wrap items-center gap-3 text-foreground">
