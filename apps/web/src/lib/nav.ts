@@ -86,3 +86,5 @@ export function navFor(role: Role): NavGroup[] {
 
 export const canCreateBill = (role: Role) => BILL_CREATORS.includes(role);
 export const canSetGoldPrice = (role: Role) => GOLD_PRICE_SETTERS.includes(role);
+/** ส่งบัญชีรายเดือน — GET /api/reports/export รับเฉพาะ accounting/admin (role อื่นเห็นสถานะไม่มีสิทธิ์แทนฟอร์ม) */
+export const canExportReports = (role: Role) => EXPORTERS.includes(role);
