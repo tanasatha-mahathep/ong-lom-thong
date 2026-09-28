@@ -15,6 +15,8 @@ WEB_PORT=5181 API_PORT=8791 make dev   # หลายชุดพร้อมก
 make check               # lint · format · typecheck · test · build — ชุดเดียวกับ CI
 ```
 
+เบราว์เซอร์ขั้นต่ำของหน้าเว็บ: Chrome/Edge 111 · Firefox 128 · Safari 16.4 (Tailwind 4 และ `Intl.NumberFormat` ที่รับข้อความทศนิยม — ตั้งไว้ใน `build.target` ของ `apps/web/vite.config.ts`)
+
 ```bash
 make branch NAME=feat/xxx   # feature branch จาก dev
 make pr                     # push + เปิด PR เข้า dev
