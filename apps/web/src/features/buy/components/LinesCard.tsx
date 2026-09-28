@@ -190,7 +190,7 @@ function LinesTable({ c }: { c: BuyController }) {
   const { state, actions, quote, fresh, metals } = c;
   const errors = fresh && quote ? quote.errors : [];
   const nameOf = (metalId: string) => metals.find((m) => m.id === metalId)?.name_th ?? metalId;
-  const stale = !fresh && "opacity-60";
+  const stale = !fresh && "text-muted-foreground";
 
   return (
     <div className="overflow-hidden rounded-lg border">

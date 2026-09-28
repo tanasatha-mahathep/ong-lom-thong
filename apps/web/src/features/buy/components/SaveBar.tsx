@@ -29,7 +29,7 @@ export function SaveBar({ c }: { c: BuyController }) {
   return (
     <div className="sticky bottom-0 z-20 -mx-4 border-t-2 bg-background px-4 py-3 md:-mx-6 md:px-6">
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-2">
-        <dl className={cn("flex flex-wrap gap-x-6 gap-y-1", !fresh && "opacity-60")} aria-busy={!fresh}>
+        <dl className={cn("flex flex-wrap gap-x-6 gap-y-1", !fresh && "text-muted-foreground")} aria-busy={!fresh}>
           <Total label={t("save.total")} value={quote?.total_amount} strong />
           <Total label={t("save.paid")} value={quote?.paid} />
           <Total label={t("save.balance")} value={quote?.balance} />
@@ -45,7 +45,7 @@ export function SaveBar({ c }: { c: BuyController }) {
             size="lg"
             aria-disabled={!ready}
             aria-describedby={`${id}-reason`}
-            className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+            className="aria-disabled:cursor-not-allowed aria-disabled:bg-muted aria-disabled:text-muted-foreground aria-disabled:shadow-none"
             onClick={() => void actions.submit()}
           >
             {saving ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}

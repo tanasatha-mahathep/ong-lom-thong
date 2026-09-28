@@ -176,7 +176,7 @@ export function PaymentsCard({ c }: { c: BuyController }) {
               type="button"
               variant="outline"
               aria-disabled={!balanceLeft}
-              className="aria-disabled:opacity-50"
+              className="aria-disabled:cursor-not-allowed aria-disabled:text-muted-foreground"
               onClick={() => void actions.payFull()}
             >
               {t("payments.payFull")}
@@ -229,7 +229,7 @@ function PaymentsTable({ c }: { c: BuyController }) {
         </TableBody>
         {quote && (
           <TableFooter>
-            <TableRow className={cn("hover:bg-transparent", !fresh && "opacity-60")}>
+            <TableRow className={cn("hover:bg-transparent", !fresh && "text-muted-foreground")}>
               <TableCell colSpan={2} className="px-3 text-right">
                 {t("payments.total")}
               </TableCell>
