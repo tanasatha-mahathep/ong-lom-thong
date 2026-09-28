@@ -43,26 +43,29 @@ requirements.in/.txt   pytest + requests — lock พร้อม hash (pip-comp
 
 ## เทสต์ชุดแรก — backend probes (ไม่ต้อง login)
 
-| ไฟล์                                | ตรวจ                                                                                                                                                                                 | สถานะ           |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------- |
-| `test_health.py`                    | `/healthz` · `/api/healthz` = 200 JSON มีแค่ `{ok, time}`                                                                                                                            | sync            |
-| `test_auth_required.py`             | route ข้อมูลใต้ `/api` (me · metals · gold-price · customers · buy) ไม่มี session · cookie ปลอม · Bearer = 401 · คำขอเขียน origin เดียวกันหยุดที่ 401                                | sync            |
-| `test_origin_guard.py`              | คำขอเขียน 12 แบบ (รวม `POST /api/buy` · `/api/buy/quote`) จาก origin อื่น / `null` / ต่อท้ายโดเมน / subdomain / scheme อื่น / ไม่มี Origin = 403 · positive control 401 · ไม่มี CORS | sync            |
-| `test_malformed_ids.py`             | id/query ผิดรูปของลูกค้าและใบรับซื้อ (SQL · traversal · NUL · 2000 ตัว · ภาษาไทย · %-encoding เสีย · CRLF) ก่อน login = 401 เหมือนกันทุกตัว ไม่มี 5xx                                | sync            |
-| `test_error_hygiene.py`             | error body ไม่มี stack trace · path ภายใน · ข้อความ DB · errno — ทุกคำขอที่ผิดโดยตั้งใจต้องไม่ 5xx                                                                                   | sync            |
-| `test_security_headers.py`          | พิมพ์ header ที่สังเกตได้ลง log · ไม่บอกเวอร์ชัน · cookie (ถ้ามี) HttpOnly+SameSite(+Secure) · ไม่มี CORS `*`                                                                        | sync            |
-| `test_unknown_api_route.py`         | path ที่ไม่มีใต้ `/api` = 404 JSON                                                                                                                                                   | **F1** ไม่ sync |
-| `test_security_headers_baseline.py` | nosniff · กัน framing · CSP · Referrer-Policy · HSTS (https)                                                                                                                         | **F2** ไม่ sync |
+| ไฟล์                                | ตรวจ                                                                                                                                                                                 | สถานะ |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----- |
+| `test_health.py`                    | `/healthz` · `/api/healthz` = 200 JSON มีแค่ `{ok, time}`                                                                                                                            | sync  |
+| `test_auth_required.py`             | route ข้อมูลใต้ `/api` (me · metals · gold-price · customers · buy · reports) ไม่มี session · cookie ปลอม · Bearer = 401 · คำขอเขียน origin เดียวกันหยุดที่ 401                      | sync  |
+| `test_origin_guard.py`              | คำขอเขียน 12 แบบ (รวม `POST /api/buy` · `/api/buy/quote`) จาก origin อื่น / `null` / ต่อท้ายโดเมน / subdomain / scheme อื่น / ไม่มี Origin = 403 · positive control 401 · ไม่มี CORS | sync  |
+| `test_malformed_ids.py`             | id/query ผิดรูปของลูกค้าและใบรับซื้อ (SQL · traversal · NUL · 2000 ตัว · ภาษาไทย · %-encoding เสีย · CRLF) ก่อน login = 401 เหมือนกันทุกตัว ไม่มี 5xx                                | sync  |
+| `test_error_hygiene.py`             | error body ไม่มี stack trace · path ภายใน · ข้อความ DB · errno — ทุกคำขอที่ผิดโดยตั้งใจต้องไม่ 5xx                                                                                   | sync  |
+| `test_security_headers.py`          | พิมพ์ header ที่สังเกตได้ลง log · ไม่บอกเวอร์ชัน · cookie (ถ้ามี) HttpOnly+SameSite(+Secure) · ไม่มี CORS `*`                                                                        | sync  |
+| `test_unknown_api_route.py`         | path ที่ไม่มีใต้ `/api` = 404 JSON ทุก method · path ย่อยใต้ route ที่ต้อง login หยุดที่ 401 (ไม่มี oracle) — กันถดถอย F1                                                            | sync  |
+| `test_security_headers_baseline.py` | nosniff · กัน framing · CSP ไม่ยอม inline/eval script + `object-src 'none'` · Referrer-Policy · COOP · `/api` no-store · HSTS (https) — กันถดถอย F2                                  | sync  |
 
-ปลอดภัยกับ environment ที่ใช้ร่วม: GET/OPTIONS ล้วน ยกเว้นคำขอเขียนที่ถูกปฏิเสธก่อนถึง handler (origin อื่น หรือไม่มี session) และ body ผิดรูปโดยตั้งใจ — ต่อให้ guard ถดถอยก็เขียนอะไรไม่ได้ ·
-**ไม่แตะ `/api/auth/sign-in/*` เลย** (ดู F3) · ~170 คำขอต่อรอบ · User-Agent `ong-probe/1 (read-only; tests/testsprite)` หาใน log ของ Railway ได้
+ปลอดภัยกับ environment ที่ใช้ร่วม: GET/OPTIONS ล้วน ยกเว้นคำขอเขียนที่ถูกปฏิเสธก่อนถึง handler (origin อื่น หรือไม่มี session) หรือไปที่ path ที่ไม่มีอยู่ และ body ผิดรูปโดยตั้งใจ —
+ต่อให้ guard ถดถอยก็เขียนอะไรไม่ได้ · **ไม่แตะ `/api/auth/sign-in/*` เลย** (ดู F3) · ~200 คำขอต่อรอบ · User-Agent `ong-probe/1 (read-only; tests/testsprite)` หาใน log ของ Railway ได้
 
-**ผลที่พบ (28 ก.ย. 2569 · build ของ `dev` ในเครื่อง และ image จาก `apps/api/Dockerfile` แบบ Railway)** — ไม่ได้แก้โค้ดแอป รายงานให้เจ้าของ `apps/api`
+**ผลที่พบ** (28 ก.ย. 2569 · build ของ `dev` และ image จาก `apps/api/Dockerfile`) — **แก้แล้วใน PR #61 (`cdab984`, 29 ก.ย.)** · probes ยืนยันกับ build ใหม่ในเครื่อง: 25 ผ่าน · 1 ข้าม (HSTS บน http)
 
-- **F1** `GET /api/<ไม่มี>` ได้หน้า SPA **200 text/html** (POST ได้ 404 `text/plain`) — `api.notFound()` ของ sub-app ไม่ถูกเรียก (Hono เรียก notFound ของ app บนสุดเท่านั้น) แล้ว `app.get("/*")` ใน `index.ts` เสิร์ฟ `index.html`
-- **F2** api ไม่ตั้ง security header ใดเลย (ไม่มี `hono/secure-headers`) — ยกเว้น `/customers/:id/photo` ที่ตั้ง nosniff เอง
-- **F3** (ข้อสังเกต ไม่มีเทสต์) better-auth เตือน _"Rate limiting could not determine a client IP and is falling back to a single shared per-path bucket"_ — ถ้าบน Railway เป็นแบบนี้ด้วย sign-in 5 ครั้ง/นาทีจะเป็น bucket เดียวทั้งร้าน
-  (ใครก็ล็อก login ของพนักงานได้) · ตั้ง `advanced.ipAddress` ให้ตรงกับ proxy ของ Railway แล้วยืนยันบน staging
+- **F1** `GET /api/<ไม่มี>` เคยได้หน้า SPA 200 (POST ได้ 404 `text/plain`) → ตอนนี้ `app.all("/api/*")` ตอบ 404 JSON ทุก method · `test_unknown_api_route.py` กันถดถอย
+- **F2** api เคยไม่ตั้ง security header เลย → ตอนนี้ `hono/secure-headers` (CSP · X-Frame-Options DENY · nosniff · Referrer-Policy · HSTS 1 ปี · COOP) ทุก response และ `/api/*` เป็น `no-store` · `test_security_headers_baseline.py` กันถดถอย
+- **F3** better-auth เคยเตือน _"could not determine a client IP … single shared per-path bucket"_ (X-Forwarded-For ของ Railway มี 2 ค่า → ทั้งร้านใช้ถัง rate limit เดียว) →
+  ตอนนี้เชื่อ IP จาก `X-Real-IP` อย่างเดียว (Railway edge เขียนทับทุก request) และ sign-in จำกัด **20 ครั้ง/นาที ต่อ IP** (`SIGN_IN_PER_MINUTE` ใน `apps/api/src/auth.ts`) ·
+  ไม่มี X-Real-IP (เช่น รันตรงไม่ผ่าน edge) = ถังรวมถังเดียว + warn ใน log · probes ยังไม่แตะ sign-in: ถังต่อ IP ของ runner บน cloud อาจใช้ร่วมกับคนอื่น และ login ที่ล้มเหลวคือเสียงรบกวนใน log ของร้าน
+
+known failure ใหม่ (ถ้ามี): ใส่ `known_failure` ใน `testsprite.json` (`sync: false`) — pytest ของเราถือเป็น `xfail(strict)` และ `sync` จะไม่อัปโหลด
 
 ## รันในเครื่อง — pytest ของเรา (ไม่ใช้ TestSprite · ไม่ต้องมี key)
 
@@ -157,7 +160,7 @@ CLI อยู่ใน env ที่ตัด `TESTSPRITE_API_URL` / `TESTSPRITE
 - **B (ถ้าต้องการบน TestSprite)** เก็บ `email:password` ของบัญชีทดสอบด้วย `project credential <id> --type "API key" --credential-file <file>` → เทสต์อ่าน `__AUTH_CREDENTIAL__`
   แล้ว login เองหนึ่งครั้งต่อไฟล์ด้วย `requests.Session` + `Origin` ของแอป · ต้องยืนยันก่อนว่า server แทรกบล็อกให้ backend project จริง (`rewroteCount`) · ยอมรับว่า TestSprite เก็บรหัสผ่านนั้น
 - เงื่อนไขร่วม: บัญชีสมมติ 2 บัญชี (role `staff` สาขา A / สาขา B — ทดสอบข้ามสาขา) สร้างด้วย `node dist/create-user.js` บน `testing` เท่านั้น · ห้าม admin/`--view-all` ·
-  login ≤ 2 ครั้งต่อรอบ และแก้ F3 ก่อน · ลูกค้าในเทสต์ = seed สมมติชื่อขึ้นต้น "ทดสอบ" · **ห้ามสร้างใบรับซื้อจากเทสต์บน TestSprite** (PDF immutable — สร้างแล้วลบไม่ได้)
+  login ครั้งเดียวต่อบัญชีต่อรอบ (sign-in 20 ครั้ง/นาที ต่อ IP — F3) · ลูกค้าในเทสต์ = seed สมมติชื่อขึ้นต้น "ทดสอบ" · **ห้ามสร้างใบรับซื้อจากเทสต์บน TestSprite** (PDF immutable — สร้างแล้วลบไม่ได้)
 
 ## MCP server (ทางเลือก · ระดับผู้ใช้เท่านั้น · ไม่ใช้ใน CI)
 
@@ -167,7 +170,7 @@ CLI อยู่ใน env ที่ตัด `TESTSPRITE_API_URL` / `TESTSPRITE
 claude mcp add TestSprite --env API_KEY=your_api_key -- npx @testsprite/testsprite-mcp@latest
 ```
 
-- scope ค่าเริ่มต้น `local` = เก็บใน `~/.claude.json` ของเครื่องนั้น ไม่เข้า repo · **ห้าม `--scope project` และห้าม commit `.mcp.json`** · key ถูกเก็บเป็น plaintext ใน `~/.claude.json`
+- scope ค่าเริ่มต้น `local` = เก็บใน `~/.claude.json` ของเครื่องนั้น ไม่เข้า repo · **ห้ามใส่ TestSprite ลง `.mcp.json` ของ repo** (`--scope project` — ไฟล์นั้นมีแค่ shadcn และ commit อยู่) · key ถูกเก็บเป็น plaintext ใน `~/.claude.json`
 - แนะนำปักเวอร์ชันแทน `@latest` (เช่น `@testsprite/testsprite-mcp@0.0.46`) — แพ็กเกจเผยแพร่โดยบัญชี npm ส่วนตัว ไม่มี provenance และรันด้วยสิทธิ์ของผู้ใช้
 - **ราคาความเป็นส่วนตัว**: MCP อัปโหลด PRD + **สรุป codebase ที่ agent เขียน** (`codeSummary`) + แผนเทสต์และ log ไปที่ TestSprite — เท่ากับส่งโครงสร้างระบบ/กฎธุรกิจออกนอกประเทศ
   ใช้ได้เฉพาะเมื่อยอมรับเรื่องนี้แล้ว และชี้ได้เฉพาะ `testing`

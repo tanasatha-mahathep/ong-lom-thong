@@ -42,6 +42,8 @@ def protected_reads():
         "/api/buy",
         "/api/buy?date_from=2026-09-01&date_to=2026-09-28&metal=gold",
         f"/api/buy/{some_id}",
+        "/api/reports/purchase",
+        "/api/reports/stock",
     ]
 
 
