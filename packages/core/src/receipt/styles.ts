@@ -8,7 +8,16 @@ const FONT_STACK = `"Sarabun", "TH Sarabun New", "THSarabunPSK", "Garuda", "Kinn
 
 const PAGE = `@page { size: A4 portrait; margin: 12mm 14mm; }`;
 
+/** ลายน้ำระบบทดสอบ — ทับทั้งเอกสารแนวทแยง จางพอให้อ่านข้อมูลได้ แต่ถ่ายเอกสารก็ยังเห็น */
+const WATERMARK = `.ong-watermark { position: absolute; inset: 0; z-index: 3; display: flex; align-items: center;
+  justify-content: center; overflow: hidden; pointer-events: none; }
+.ong-watermark span { transform: rotate(-30deg); font-size: 24pt; font-weight: 700; white-space: nowrap;
+  color: rgba(200, 0, 0, 0.25); border: 3px solid rgba(200, 0, 0, 0.25); padding: 3mm 8mm; }
+/* พิมพ์: fixed = ซ้ำทุกหน้า (ใบยาวเกินหนึ่งหน้าก็ยังมีลายน้ำทุกแผ่น) */
+@media print { .ong-watermark { position: fixed; } }`;
+
 export const RECEIPT_CSS = `${PAGE}
+${WATERMARK}
 .ong-receipt { position: relative; box-sizing: border-box; width: 100%; max-width: 190mm; margin: 0 auto;
   background: #fff; color: #000; font-family: ${FONT_STACK}; font-size: 13.5px; font-weight: 400; line-height: 1.45;
   font-variant-numeric: tabular-nums; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -50,6 +59,8 @@ export const RECEIPT_CSS = `${PAGE}
 `;
 
 export const IDCARD_CSS = `${PAGE}
+${WATERMARK}
+.ong-idcard { position: relative; }
 .ong-idcard { box-sizing: border-box; width: 100%; max-width: 190mm; margin: 0 auto; background: #fff; color: #000;
   font-family: ${FONT_STACK}; font-size: 13.5px; font-weight: 400; line-height: 1.45;
   -webkit-print-color-adjust: exact; print-color-adjust: exact; }

@@ -72,7 +72,9 @@ export default defineRailway((ctx) => {
   const restartOnFailure = { restartPolicyMaxRetries: 5 };
   // preDeployTimeoutSeconds ยังไม่มีใน type ของ SDK แต่ engine ของ CLI รู้จัก — ไม่ประกาศ = apply จะล้างเป็น null
   // (ไม่มีเวลาจำกัด) · migration มี lock_timeout 10 วินาทีกันค้างอีกชั้น
-  const apiDeploy = { ...restartOnFailure, preDeployTimeoutSeconds: 300 };
+  // drainingSeconds: SIGTERM → SIGKILL (ค่าเริ่มต้นของ Railway ไม่กี่วินาที) — api ปิดนุ่มนวลภายใน 8 วินาที
+  // (apps/api/src/lib/shutdown.ts) ให้บิลที่กำลังบันทึกตอน redeploy ทำจนจบ
+  const apiDeploy = { ...restartOnFailure, preDeployTimeoutSeconds: 300, drainingSeconds: 10 };
 
   const db = postgres("Postgres", { region: REGION });
 
@@ -137,6 +139,8 @@ export default defineRailway((ctx) => {
       BETTER_AUTH_URL: "https://${{RAILWAY_PUBLIC_DOMAIN}}",
 
       ...COMPANY,
+      // ใบจากระบบทดสอบต้องไม่ดูเหมือนใบรับซื้อจริง — production ไม่ประกาศ (apply แล้วถูกล้าง = ไม่มีลายน้ำ)
+      ...(production ? {} : { RECEIPT_WATERMARK: "ตัวอย่าง — ระบบทดสอบ ไม่ใช่ใบรับซื้อจริง" }),
     },
   });
 

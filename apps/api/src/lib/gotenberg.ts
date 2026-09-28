@@ -34,6 +34,8 @@ const CONVERT_FIELDS: Readonly<Record<string, string>> = {
 
 // ชื่อไฟล์ asset = ชื่อที่ HTML อ้างแบบ relative — ห้าม path และห้ามชนกับ index.html
 const ASSET_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+// header Gotenberg-Trace ต้องเป็น ASCII — ค่าผิดรูปเป็นบั๊กของผู้เรียก ไม่ใช่ "ต่อไม่ได้"
+const TRACE = /^[A-Za-z0-9._-]{1,128}$/;
 
 export type FetchLike = (input: URL, init: RequestInit) => Promise<Response>;
 
@@ -110,6 +112,7 @@ export function createGotenbergClient(
 
   return {
     async htmlToPdf({ html, files = [], trace }) {
+      if (trace !== undefined && !TRACE.test(trace)) throw new TypeError(`invalid trace: ${JSON.stringify(trace)}`);
       const body = buildForm(html, files);
       const headers: Record<string, string> = { authorization };
       if (trace) headers["gotenberg-trace"] = trace;
@@ -177,9 +180,10 @@ function transportError(e: unknown, timeoutMs: number): PdfRenderError {
   if (name === "TimeoutError" || name === "AbortError") {
     return new PdfRenderError("timeout", `gotenberg did not answer within ${timeoutMs} ms`, { cause: e });
   }
+  // ใช้แค่รหัส (ECONNREFUSED · ENOTFOUND …) — ข้อความของ fetch อาจมี URL ทั้งเส้น ห้ามลงข้อความ/ log
   const code = (e as { cause?: { code?: unknown } } | null)?.cause?.code;
-  const reason = typeof code === "string" ? code : e instanceof Error ? e.message : String(e);
-  return new PdfRenderError("unreachable", `gotenberg unreachable: ${reason}`, { cause: e });
+  const reason = typeof code === "string" && /^[A-Z0-9_]{1,40}$/.test(code) ? `: ${code}` : "";
+  return new PdfRenderError("unreachable", `gotenberg unreachable${reason}`, { cause: e });
 }
 
 /** ไฟล์นี้จะถูกเก็บถาวรแก้ไม่ได้ — ต้องขึ้นต้น `%PDF-` และมี `%%EOF` ใน 1024 byte สุดท้าย (ไม่ถูกตัดกลางทาง) */

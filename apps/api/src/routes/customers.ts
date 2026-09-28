@@ -13,6 +13,7 @@ import {
   searchCustomers,
   toDetail,
   toListItem,
+  toMaskedDetail,
   updateCustomer,
 } from "../services/customers";
 
@@ -44,7 +45,7 @@ const NOT_MULTIPART = apiError("ต้องส่งเป็น multipart/form
 
 /**
  * ลูกค้าใช้ร่วมทั้งร้าน (ไม่มี branch_id) แต่ต้องมีสิทธิ์อย่างน้อยหนึ่งสาขา — fail-closed
- * เลขบัตรเต็มออกเฉพาะ GET /:id (R13) · รูปออกทาง api เท่านั้น ไม่ cache
+ * เลขบัตรเต็มออกเฉพาะ GET /:id (R13) — PUT ตอบแบบมาสก์ · รูปออกทาง api เท่านั้น ไม่ cache
  */
 export const customerRoutes = new Hono<AppEnv>()
   .use(requireSession, requireAnyBranch)
@@ -85,7 +86,8 @@ export const customerRoutes = new Hono<AppEnv>()
     try {
       const input = parseCustomerInput(form);
       const row = await updateCustomer(c.var.db, c.var.storage, before, input, form.photo, c.var.viewer.userId);
-      return c.json(toDetail(row, businessDate(c.var.now())));
+      // เลขบัตรเต็มออกเฉพาะ GET /:id (R13 · spec §5) — response ของการแก้ไขมาสก์
+      return c.json(toMaskedDetail(row, businessDate(c.var.now())));
     } catch (e) {
       if (e instanceof CustomerInputError) return c.json(inputError(e), e.status);
       throw e;
