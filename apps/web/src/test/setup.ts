@@ -16,6 +16,7 @@ afterEach(() => {
   toast.dismiss();
   // ธีม/ภาษาที่เทสต์ก่อนหน้าตั้งไว้ไม่ค้างมาเทสต์ถัดไป
   localStorage.clear();
+  sessionStorage.clear();
   document.documentElement.classList.remove("dark");
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -54,5 +55,6 @@ function stubMissing(target: object, key: string, value: unknown) {
 stubMissing(Element.prototype, "scrollIntoView", () => undefined);
 stubMissing(Element.prototype, "hasPointerCapture", () => false);
 stubMissing(Element.prototype, "releasePointerCapture", () => undefined);
+stubMissing(Element.prototype, "setPointerCapture", () => undefined);
 // router คืนตำแหน่ง scroll เอง — scrollTo ของ jsdom แค่พิมพ์ "not implemented"
 window.scrollTo = () => undefined;

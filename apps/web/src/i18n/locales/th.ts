@@ -112,6 +112,10 @@ export default {
       dark: "มืด",
       system: "ตามระบบ",
     },
+    update: {
+      message: "มีเวอร์ชันใหม่ กรุณารีเฟรช",
+      reload: "รีเฟรช",
+    },
     table: {
       empty: "ไม่พบข้อมูล",
       pager: "เปลี่ยนหน้า",
