@@ -1,0 +1,1 @@
+ALTER TABLE "buy_receipt" ADD COLUMN "customer_snapshot" jsonb NOT NULL;

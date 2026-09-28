@@ -15,3 +15,18 @@ export function businessDate(now: Date = new Date(), timeZone: string = SHOP_TIM
   const get = (type: "year" | "month" | "day") => parts.find((p) => p.type === type)?.value ?? "";
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
+
+/**
+ * เวลาปัจจุบันตามเขตเวลาของร้าน "HH:MM" (24 ชม.) — ค่าเริ่มต้นของช่องเวลาในบิล (ระบบเดิมเติมเวลาปัจจุบัน)
+ * ตัวอย่าง: 2026-09-27T17:05:00Z = 00:05 น. วันที่ 28 เวลาไทย → "00:05"
+ */
+export function businessTime(now: Date = new Date(), timeZone: string = SHOP_TIME_ZONE): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  const get = (type: "hour" | "minute") => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("hour")}:${get("minute")}`;
+}
