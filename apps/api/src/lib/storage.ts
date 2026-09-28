@@ -7,6 +7,7 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import type { Env } from "../env";
+import { sha256Hex } from "./pdfArchive";
 
 /** user metadata ของ object (S3 `x-amz-meta-*`) — key ตัวเล็ก ค่า ASCII */
 export type ObjectMetadata = Record<string, string>;
@@ -34,7 +35,10 @@ export interface Storage {
   get(key: string): Promise<StoredObject | null>;
   /** HEAD — null เฉพาะเมื่อ bucket บอกว่าไม่มี (404) · error อื่น throw (ไม่เดาว่าไม่มี) */
   exists(key: string): Promise<ObjectHead | null>;
-  /** เขียนไฟล์เขียนครั้งเดียวพร้อม metadata เจ้าของ — ห้ามเรียกตรง ใช้ putNew() (ตรวจว่ายังไม่มีก่อน) */
+  /**
+   * เขียนไฟล์เขียนครั้งเดียว — ห้ามเรียกตรง ใช้ putNew() · ไม่เขียนทับ: มีอยู่แล้ว = ObjectExistsError
+   * (S3: `If-None-Match: *` เมื่อ bucket รองรับ ไม่งั้นพึ่ง HEAD ใน putNew())
+   */
   putImmutable(
     key: string,
     body: Uint8Array<ArrayBuffer>,
@@ -47,27 +51,104 @@ function refuseArchiveKey(key: string) {
   if (isArchiveKey(key)) throw new Error(`archive keys are write-once — use putNew(): ${key}`);
 }
 
-export function createS3Storage(env: Env): Storage {
+const errorInfo = (e: unknown) => {
+  const err = e as { name?: unknown; $metadata?: { httpStatusCode?: number } } | null;
+  return { name: typeof err?.name === "string" ? err.name : "", status: err?.$metadata?.httpStatusCode };
+};
+
+/** bucket บอกว่าไม่รู้จัก conditional write — ใช้ HEAD แล้ว PUT แทน */
+const conditionalUnsupported = (e: unknown) => {
+  const { name, status } = errorInfo(e);
+  return status === 501 || name === "NotImplemented" || (status === 400 && /InvalidArgument|InvalidRequest/.test(name));
+};
+
+export interface S3Timeouts {
+  /** ต่อ TCP ไม่ได้ภายในเวลานี้ = error */
+  connectionMs: number;
+  /** ไม่ได้คำตอบทั้ง request ภายในเวลานี้ = error (ต้อง throwOnRequestTimeout — ค่าเริ่มต้นของ SDK แค่ warn) */
+  requestMs: number;
+  /** socket เงียบ (ไม่มี byte เข้าออก) นานเกินนี้ = error — กัน bucket ที่รับ connection แล้วไม่ตอบ */
+  socketMs: number;
+}
+
+export const S3_TIMEOUTS: S3Timeouts = { connectionMs: 5_000, requestMs: 30_000, socketMs: 30_000 };
+
+export function createS3Storage(
+  env: Env,
+  { timeouts = S3_TIMEOUTS, log = console }: { timeouts?: S3Timeouts; log?: Pick<Console, "warn"> } = {},
+): Storage {
   const client = new S3Client({
     endpoint: env.S3_ENDPOINT,
     region: env.S3_REGION,
     forcePathStyle: env.S3_FORCE_PATH_STYLE,
     credentials: { accessKeyId: env.S3_ACCESS_KEY, secretAccessKey: env.S3_SECRET_KEY },
-    // bucket ค้าง = request ค้างไม่รู้จบ — ต่อไม่ได้ใน 5 วินาที / ไม่จบใน 30 วินาที = error (PDF ไป failed แล้ว retry)
-    requestHandler: { connectionTimeout: 5_000, requestTimeout: 30_000 },
+    // bucket ค้าง = request ค้างไม่รู้จบ → งาน PDF ค้าง · หมดเวลา = error (ไฟล์ไป failed แล้ว retry ภายหลัง)
+    requestHandler: {
+      connectionTimeout: timeouts.connectionMs,
+      requestTimeout: timeouts.requestMs,
+      throwOnRequestTimeout: true,
+      socketTimeout: timeouts.socketMs,
+    },
   });
   const Bucket = env.S3_BUCKET;
-  const write = async (key: string, body: Uint8Array<ArrayBuffer>, contentType: string, metadata?: ObjectMetadata) => {
+  // ไม่รู้จนกว่าจะลอง — bucket ที่ปฏิเสธ If-None-Match ครั้งหนึ่งแล้ว ไม่ต้องลองซ้ำทุกไฟล์
+  let conditionalWrites: "unknown" | "supported" | "unsupported" = "unknown";
+
+  const write = async (
+    key: string,
+    body: Uint8Array<ArrayBuffer>,
+    contentType: string,
+    metadata?: ObjectMetadata,
+    ifNoneMatch = false,
+  ) => {
     await client.send(
-      new PutObjectCommand({ Bucket, Key: key, Body: body, ContentType: contentType, Metadata: metadata }),
+      new PutObjectCommand({
+        Bucket,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+        Metadata: metadata,
+        ...(ifNoneMatch ? { IfNoneMatch: "*" } : {}),
+      }),
     );
   };
+
+  async function exists(key: string): Promise<ObjectHead | null> {
+    try {
+      const res = await client.send(new HeadObjectCommand({ Bucket, Key: key }));
+      return { contentType: res.ContentType ?? "application/octet-stream", metadata: res.Metadata ?? {} };
+    } catch (e) {
+      // HEAD ไม่มี body → SDK แปลง 404 เป็น NotFound · บาง S3-compatible ส่ง NoSuchKey
+      // 403 (ไม่มีสิทธิ์ ListBucket) และอื่น ๆ = ไม่รู้ → throw ให้ผู้เรียกล้มแทนที่จะเขียนทับ
+      if (e instanceof NotFound || e instanceof NoSuchKey || errorInfo(e).status === 404) return null;
+      throw e;
+    }
+  }
+
   return {
     async put(key, body, contentType) {
       refuseArchiveKey(key);
       await write(key, body, contentType);
     },
-    putImmutable: (key, body, contentType, metadata) => write(key, body, contentType, metadata),
+    async putImmutable(key, body, contentType, metadata) {
+      if (conditionalWrites !== "unsupported") {
+        try {
+          // atomic: bucket ปฏิเสธเองถ้ามี object อยู่แล้ว (412) — ปิดช่องว่างระหว่าง HEAD กับ PUT
+          await write(key, body, contentType, metadata, true);
+          conditionalWrites = "supported";
+          return;
+        } catch (e) {
+          const { name, status } = errorInfo(e);
+          if (status === 412 || name === "PreconditionFailed") {
+            throw new ObjectExistsError(key, (await exists(key))?.metadata ?? {});
+          }
+          if (!conditionalUnsupported(e)) throw e;
+          conditionalWrites = "unsupported";
+          log.warn(`[storage] bucket rejects If-None-Match (${status ?? name}) — using HEAD-then-PUT`);
+        }
+      }
+      await write(key, body, contentType, metadata);
+    },
     async get(key) {
       try {
         const res = await client.send(new GetObjectCommand({ Bucket, Key: key }));
@@ -83,22 +164,8 @@ export function createS3Storage(env: Env): Storage {
         throw e;
       }
     },
-    async exists(key) {
-      try {
-        const res = await client.send(new HeadObjectCommand({ Bucket, Key: key }));
-        return { contentType: res.ContentType ?? "application/octet-stream", metadata: res.Metadata ?? {} };
-      } catch (e) {
-        // HEAD ไม่มี body → SDK แปลง 404 เป็น NotFound · บาง S3-compatible ส่ง NoSuchKey
-        // 403 (ไม่มีสิทธิ์ ListBucket) และอื่น ๆ = ไม่รู้ → throw ให้ผู้เรียกล้มแทนที่จะเขียนทับ
-        if (e instanceof NotFound || e instanceof NoSuchKey || httpStatus(e) === 404) return null;
-        throw e;
-      }
-    },
+    exists,
   };
-}
-
-function httpStatus(e: unknown): number | undefined {
-  return (e as { $metadata?: { httpStatusCode?: number } } | null)?.$metadata?.httpStatusCode;
 }
 
 /** key นี้มีไฟล์อยู่แล้ว — putNew() ไม่เขียนทับ · metadata = ของ object ที่มีอยู่ (ไว้ตรวจเจ้าของก่อนรับมาใช้) */
@@ -115,13 +182,11 @@ export class ObjectExistsError extends Error {
 
 /**
  * เขียนไฟล์ที่ต้อง immutable (PDF ใบรับซื้อ · สำเนาบัตร — R15) — key มีไฟล์อยู่แล้ว = ObjectExistsError ไม่เขียนทับ
- * metadata บอกเจ้าของ (เช่น receipt-id) — ใครจะรับไฟล์ที่มีอยู่แล้วมาใช้ต้องตรวจว่าเป็นของตัวเองก่อน
+ * metadata บอกเจ้าของ (receipt-id · kind) + sha256 ของ byte ที่เขียน — ผู้ที่จะรับไฟล์ที่มีอยู่มาใช้ต้องตรวจก่อน
  *
- * ทำแบบ HEAD แล้วค่อย PUT จึงยังมีช่องว่างเล็ก ๆ: สองตัวเขียน key เดียวกันพร้อมกัน ต่างเห็นว่า "ยังไม่มี"
- * แล้ว PUT ทั้งคู่ → ตัวหลังทับ (S3 PUT เป็น atomic ต่อ object — ไม่มีไฟล์ครึ่ง ๆ แต่ตัวแรกหาย)
- * กติกา: **หนึ่งใบมีผู้เขียนคนเดียว** — pipeline/retry ต้องจองบิลก่อน render (advisory lock ต่อบิล)
- * ยังไม่ใช้ `If-None-Match: *` (atomic จริง): bucket ของ Railway รันบน Tigris ที่รองรับตามเอกสาร
- * แต่ยังไม่ได้ทดสอบกับ bucket จริง — ถ้า endpoint ไม่รู้จัก header นี้ อาจเขียนทับเงียบ ๆ หรือปฏิเสธทุก PUT
+ * HEAD ก่อน แล้ว PUT แบบ `If-None-Match: *` (bucket ปฏิเสธเองถ้ามีคนเขียนตัดหน้า) · bucket ที่ไม่รองรับ header นี้
+ * เหลือช่องว่างเล็ก ๆ ระหว่าง HEAD กับ PUT — pipeline จึงมีผู้เขียนคนเดียวต่อบิล (lease) และ HEAD ซ้ำหลังเขียน
+ * เพื่อยืนยันว่า object เป็นของเราจริง (receipt-id + sha256)
  */
 export async function putNew(
   storage: Storage,
@@ -129,14 +194,22 @@ export async function putNew(
   body: Uint8Array<ArrayBuffer>,
   contentType: string,
   metadata: ObjectMetadata = {},
-): Promise<void> {
+): Promise<{ sha256: string }> {
   const existing = await storage.exists(key);
   if (existing) throw new ObjectExistsError(key, existing.metadata);
-  await storage.putImmutable(key, body, contentType, metadata);
+  const sha256 = sha256Hex(body);
+  await storage.putImmutable(key, body, contentType, { ...metadata, sha256 });
+  return { sha256 };
 }
 
-/** สำหรับเทสต์ — เก็บในหน่วยความจำ (กติกาเดียวกับ S3: put ปฏิเสธ key เก็บถาวร) */
-export function createMemoryStorage(): Storage & { keys(): string[] } {
+/**
+ * สำหรับเทสต์ — เก็บในหน่วยความจำ (กติกาเดียวกับ S3: put ปฏิเสธ key เก็บถาวร · putImmutable ไม่เขียนทับ)
+ * replace() มีไว้จำลองไฟล์ถูกแก้/ผู้เขียนอื่นในเทสต์เท่านั้น
+ */
+export function createMemoryStorage(): Storage & {
+  keys(): string[];
+  replace(key: string, object: StoredObject): void;
+} {
   const objects = new Map<string, StoredObject>();
   return {
     put(key, body, contentType) {
@@ -148,8 +221,12 @@ export function createMemoryStorage(): Storage & { keys(): string[] } {
       });
     },
     putImmutable(key, body, contentType, metadata) {
-      objects.set(key, { body, contentType, metadata: { ...metadata } });
-      return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        const existing = objects.get(key);
+        if (existing) throw new ObjectExistsError(key, existing.metadata);
+        objects.set(key, { body, contentType, metadata: { ...metadata } });
+        resolve();
+      });
     },
     get: (key) => Promise.resolve(objects.get(key) ?? null),
     exists(key) {
@@ -157,5 +234,8 @@ export function createMemoryStorage(): Storage & { keys(): string[] } {
       return Promise.resolve(o ? { contentType: o.contentType, metadata: o.metadata } : null);
     },
     keys: () => [...objects.keys()],
+    replace(key, object) {
+      objects.set(key, object);
+    },
   };
 }
