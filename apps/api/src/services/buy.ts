@@ -37,6 +37,7 @@ export const BUY_API_MSG = {
   futureDate: "วันที่ต้องไม่เกินวันนี้",
   unknownMetal: "ไม่พบประเภทโลหะ",
   keyTaken: "idempotency_key นี้ถูกใช้แล้ว",
+  keyReused: "idempotency_key นี้ใช้กับบิลอื่นแล้ว — สร้าง key ใหม่ต่อบิล",
   docNoTaken: "เลขที่เอกสารชนกับบิลที่มีอยู่แล้ว — แจ้งผู้ดูแลระบบตรวจตัวนับเลขที่ (doc_sequence)",
   noGoldPriceOn: (isoDate: string) => `ยังไม่ได้ตั้งราคาทองของวันที่ ${beDate(isoDate)}`,
 } as const;
@@ -133,6 +134,9 @@ export interface PreparedBuy {
  * ขั้นเดียวที่ทั้ง POST /buy/quote และ POST /buy เรียก (CLAUDE.md กฎ 2) — ตัวเลขทั้งหมดมาจาก quoteBuy() ใน @ong/core
  * ส่วนที่ต้องอ่าน DB (สาขา · ราคาทองของวันบิล · ลูกค้า · โลหะ) ทำที่นี่แล้วต่อ error เข้ากับผลของ quoteBuy
  */
+const quoteLines = (body: QuoteBody) =>
+  body.lines.map((l) => ({ metalId: l.metal_id, weightG: l.weight_g, amount: l.amount }));
+
 export async function prepareBuy(db: Db, viewer: Viewer, body: QuoteBody, now: Date): Promise<PreparedBuy> {
   const where = currentBranch(viewer, await forUser(db, viewer));
   if (!where) throw new BuyError(BUY_API_MSG.noBranch, "branch", 403);
@@ -147,7 +151,7 @@ export async function prepareBuy(db: Db, viewer: Viewer, body: QuoteBody, now: D
   ]);
 
   const quote = quoteBuy({
-    lines: body.lines.map((l) => ({ metalId: l.metal_id, weightG: l.weight_g, amount: l.amount })),
+    lines: quoteLines(body),
     payments: body.payments.map((p) => ({ method: p.method, bank: p.bank, amount: p.amount })),
     // สถานะบัตรคิด ณ วันที่ของบิล — บิลย้อนหลังใช้บัตรที่ยังไม่หมดอายุในวันนั้นได้
     customer: customerRow ? { id: customerRow.id, cardStatus: cardStatus(customerRow.cardExpireText, date) } : null,
@@ -221,15 +225,32 @@ const pgError = (e: unknown): { code?: string; constraint_name?: string } | null
   return null;
 };
 
-/** key เดิมของผู้ใช้คนเดิม = คำตอบเดิม (กดซ้ำ/เน็ตหลุด) · ของคนอื่น = 409 */
-async function findReplay(db: Db, viewer: Viewer, key: string): Promise<SavedBuy | null> {
+/**
+ * key เดิม + ผู้ใช้คนเดิม + เนื้อบิลเดิม = คำตอบเดิม (กดซ้ำ/เน็ตหลุด) · key ของคนอื่น หรือเนื้อบิลต่าง = 409
+ * เนื้อบิล = ลูกค้า · ยอดเงิน · น้ำหนักรวม — ยอดคิดด้วย quoteBuy ตัวเดียวกับตอนบันทึก (ไม่ขึ้นกับนาฬิกา/สาขา/ราคาทอง)
+ */
+async function findReplay(db: Db, viewer: Viewer, body: SaveBody): Promise<SavedBuy | null> {
   const [row] = await db
-    .select({ id: buyReceipt.id, docNo: buyReceipt.docNo, pdfStatus: buyReceipt.pdfStatus, by: buyReceipt.createdBy })
+    .select({
+      id: buyReceipt.id,
+      docNo: buyReceipt.docNo,
+      pdfStatus: buyReceipt.pdfStatus,
+      by: buyReceipt.createdBy,
+      customerId: buyReceipt.customerId,
+      totalWeight: buyReceipt.totalWeight,
+      totalAmount: buyReceipt.totalAmount,
+    })
     .from(buyReceipt)
-    .where(eq(buyReceipt.idempotencyKey, key))
+    .where(eq(buyReceipt.idempotencyKey, body.idempotency_key))
     .limit(1);
   if (!row) return null;
   if (row.by !== viewer.userId) throw new BuyError(BUY_API_MSG.keyTaken, "idempotency_key", 409);
+  const again = quoteBuy({ lines: quoteLines(body), payments: [], customer: null, goldPriceSet: true });
+  const same =
+    row.customerId === body.customer_id?.toLowerCase() &&
+    D(row.totalAmount).eq(again.totalAmount) &&
+    D(row.totalWeight).eq(again.totalWeight);
+  if (!same) throw new BuyError(BUY_API_MSG.keyReused, "idempotency_key", 409);
   return { id: row.id, doc_no: row.docNo, pdf_status: row.pdfStatus };
 }
 
@@ -306,7 +327,7 @@ async function insertBuy(db: Db, viewer: Viewer, p: PreparedBuy, body: SaveBody,
 
 /**
  * POST /buy — quote ด้วยขั้นเดียวกับ /buy/quote แล้วบันทึกทั้งบิลในทรานแซกชันเดียว
- * replay = key เดิมของผู้ใช้คนเดิม (ตอบ 200 ด้วยบิลเดิม ไม่สร้างใหม่)
+ * replay = key เดิมของผู้ใช้คนเดิม เนื้อบิลเดิม (ตอบ 200 ด้วยบิลเดิม ไม่สร้างใหม่)
  */
 export async function saveBuy(
   db: Db,
@@ -315,10 +336,10 @@ export async function saveBuy(
   now: Date,
   time: string,
 ): Promise<{ replay: boolean; receipt: SavedBuy }> {
-  const prepared = await prepareBuy(db, viewer, body, now);
-  // ตรวจ key ก่อนผล quote — กดซ้ำหลังบันทึกไปแล้ว (เช่นข้ามเที่ยงคืน) ต้องได้บิลเดิม ไม่ใช่ error
-  const existing = await findReplay(db, viewer, body.idempotency_key);
+  // ตรวจ key ก่อนทุกอย่าง — กดซ้ำหลังบันทึกไปแล้ว (ข้ามเที่ยงคืน · session เสียสาขาปัจจุบัน) ต้องได้บิลเดิม
+  const existing = await findReplay(db, viewer, body);
   if (existing) return { replay: true, receipt: existing };
+  const prepared = await prepareBuy(db, viewer, body, now);
   const first = prepared.errors[0];
   if (first) throw new BuyError(first.message, first.field, 409, quoteJson(prepared));
   try {
@@ -327,7 +348,7 @@ export async function saveBuy(
     const pg = pgError(e);
     if (pg?.code === "23505" && pg.constraint_name === "buy_receipt_idempotency_key_unique") {
       // ส่งพร้อมกันด้วย key เดียวกัน — ตัวที่ commit ก่อนชนะ ตัวที่เหลือได้บิลนั้น
-      const winner = await findReplay(db, viewer, body.idempotency_key);
+      const winner = await findReplay(db, viewer, body);
       if (winner) return { replay: true, receipt: winner };
     }
     if (pg?.code === "23505" && pg.constraint_name === "buy_receipt_branch_doc_no") {

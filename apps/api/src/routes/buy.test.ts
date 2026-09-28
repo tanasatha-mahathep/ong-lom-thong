@@ -9,6 +9,7 @@ import {
   goldPrice,
   metal,
   payment,
+  session,
   stockMovement,
 } from "@ong/db";
 import { type SQL, and, asc, eq, ne, sql } from "drizzle-orm";
@@ -636,6 +637,54 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       .from(docSequence)
       .where(and(eq(docSequence.branchId, t.branches["00000"] ?? ""), eq(docSequence.period, "6910")));
     expect(counter?.lastNo).toBe(16);
+  });
+
+  it("idempotency ผูกกับเนื้อบิล: key เดิมแต่ยอด/น้ำหนัก/ลูกค้าต่าง = 409 · เนื้อเดิม = บิลเดิม", async () => {
+    const key = newKey();
+    const first = await saveWithKey(key);
+    expect(first.status).toBe(201);
+    const saved = (await first.json()) as SavedRes;
+    const other = [
+      bill({ lines: [line("gold", "5.860", "20031")], payments: [{ method: "cash", amount: "20031" }] }),
+      bill({ lines: [line("gold", "5.861", "20030")] }),
+      bill({ customer_id: custB }),
+      bill({ customer_id: null }),
+    ];
+    for (const body of other) {
+      const res = await t.request("/api/buy", { cookie: cookies.staff, body: { ...body, idempotency_key: key } });
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({
+        error: "idempotency_key นี้ใช้กับบิลอื่นแล้ว — สร้าง key ใหม่ต่อบิล",
+        field: "idempotency_key",
+      });
+    }
+    // เนื้อเดิม (ลูกค้า · ยอด · น้ำหนัก) แม้เขียนตัวเลขคนละรูป = บิลเดิม
+    const same = await t.request("/api/buy", {
+      cookie: cookies.staff,
+      body: { ...bill({ lines: [line("gold", "5.86", "20,030")] }), idempotency_key: key },
+    });
+    expect(same.status).toBe(200);
+    expect(await same.json()).toEqual(saved);
+    expect(await t.db.select().from(buyReceipt).where(eq(buyReceipt.idempotencyKey, key))).toHaveLength(1);
+  });
+
+  it("idempotency: session ที่เสียสาขาปัจจุบันไปแล้วยังได้บิลเดิม · บิลใหม่ยังต้องเลือกสาขา", async () => {
+    const key = newKey();
+    const first = await saveWithKey(key);
+    expect(first.status).toBe(201);
+    const saved = (await first.json()) as SavedRes;
+    const mine = eq(session.userId, userIds.staff ?? "");
+    await t.db.update(session).set({ currentBranchId: null }).where(mine);
+    try {
+      const again = await saveWithKey(key);
+      expect(again.status).toBe(200);
+      expect(await again.json()).toEqual(saved);
+      const fresh = await save(bill());
+      expect(fresh.status).toBe(403);
+      expect(await fresh.json()).toEqual({ error: "ยังไม่ได้เลือกสาขาที่ทำงาน", field: "branch" });
+    } finally {
+      await t.db.update(session).set({ currentBranchId: t.branches["00000"] }).where(mine);
+    }
   });
 
   it("R15: snapshot ลูกค้าไม่เปลี่ยนเมื่อแก้ข้อมูลลูกค้าทีหลัง · บิลใหม่ใช้ข้อมูลใหม่", async () => {
