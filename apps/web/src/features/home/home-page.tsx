@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { TodayBillsCard } from "@/features/bills/TodayBillsCard";
 import { useBusinessDate } from "@/hooks/use-business-date";
 import { formatBoardPrice, formatInteger, formatMoney, formatThaiDate, formatWeight } from "@/lib/format";
 import { canCreateBill, canSetGoldPrice } from "@/lib/nav";
@@ -26,7 +27,7 @@ export function HomePage() {
         <QuickActions role={me.role} />
         <TodayTotalsCard branch={me.branch} date={today} />
       </div>
-      {/* ตารางบิลวันนี้ (W4) — เพิ่ม <TodayBillsCard /> ตรงนี้ บรรทัดเดียว */}
+      <TodayBillsCard />
     </>
   );
 }
