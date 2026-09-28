@@ -1179,4 +1179,36 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     );
     expect(rows.map((r) => r.kind)).toEqual(["object"]);
   });
+
+  it("อักษรนำเลขที่ของสาขา: PT-RC6910-0002 · ตัวนับเดิมของสาขา · ค้นเจอ · (สาขา, เลขที่) ยังห้ามซ้ำ", async () => {
+    const b1 = t.branches["00001"] ?? "";
+    const setPrefix = (docPrefix: string | null) => t.db.update(branch).set({ docPrefix }).where(eq(branch.id, b1));
+    await setPrefix("PT");
+    try {
+      const res = await save(bill(), "staff1");
+      expect(res.status).toBe(201);
+      expect(((await res.json()) as SavedRes).doc_no).toBe("PT-RC6910-0002"); // ต่อจาก RC6910-0001 ของสาขา
+      for (const q of ["PT-RC6910", "pt-rc6910-0002"]) {
+        expect((await list(`q=${q}`, "staff1")).items.map((i) => i.doc_no)).toEqual(["PT-RC6910-0002"]);
+      }
+      // สาขาอื่นไม่มีอักษรนำ
+      const other = (await (await save(bill())).json()) as SavedRes;
+      expect(other.doc_no).toMatch(/^RC6910-\d{4}$/);
+
+      // ตัวนับถูกตั้งถอยหลัง (ใช้ runbook ผิด) → เลขชน → 409 ไม่บันทึกซ้ำ
+      const counter = and(eq(docSequence.branchId, b1), eq(docSequence.prefix, "RC"), eq(docSequence.period, "6910"));
+      await t.db.update(docSequence).set({ lastNo: 1 }).where(counter);
+      const dup = await save(bill(), "staff1");
+      expect(dup.status).toBe(409);
+      expect(await dup.json()).toMatchObject({ field: "doc_no" });
+      const [after] = await t.db.select().from(docSequence).where(counter);
+      expect(after?.lastNo).toBe(1); // rollback คืนเลข
+      await t.db.update(docSequence).set({ lastNo: 2 }).where(counter);
+    } finally {
+      await setPrefix(null);
+    }
+    const plain = await save(bill(), "staff1");
+    expect(((await plain.json()) as SavedRes).doc_no).toBe("RC6910-0003");
+    expect(await docNos("00001", "6910")).toEqual(["RC6910-0001", "RC6910-0003"]);
+  });
 });

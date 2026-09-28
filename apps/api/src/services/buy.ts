@@ -313,11 +313,14 @@ async function insertBuy(db: Db, viewer: Viewer, p: PreparedBuy, body: SaveBody,
       sql`select next_doc_no(${p.branch.id}::uuid, 'RC', ${p.date}::date) as doc_no`,
     );
     if (!seq) throw new Error("next_doc_no returned nothing");
+    // อักษรนำของสาขา (แบบ Django Branch.doc_prefix): PT-RC6910-0001 · ตัวนับยังเป็นของสาขา/RC/งวด ตัวเดิม
+    const [head] = await tx.select({ prefix: branch.docPrefix }).from(branch).where(eq(branch.id, p.branch.id));
+    const docNo = head?.prefix ? `${head.prefix}-${seq.doc_no}` : seq.doc_no;
     const [receipt] = await tx
       .insert(buyReceipt)
       .values({
         branchId: p.branch.id,
-        docNo: seq.doc_no,
+        docNo,
         date: p.date,
         time,
         customerId: buyer.id,
