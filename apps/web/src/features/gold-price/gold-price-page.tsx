@@ -20,21 +20,27 @@ import { useBusinessDate } from "@/hooks/use-business-date";
 import { formatBoardPrice, formatThaiDate } from "@/lib/format";
 import { canSetGoldPrice } from "@/lib/nav";
 import { goldPriceTodayQueryOptions, useMe } from "@/lib/queries";
+import { BranchPricesCard } from "./branch-prices";
 import { useTranslation } from "./i18n";
 import { PriceFormError, PriceInputField, PriceList, QuotePreview, TypoConfirmDialog } from "./price-form";
 import { saveGoldPrice } from "./queries";
 import { usePriceForm } from "./use-price-form";
 
-/** /settings/gold-price — ตั้งราคากลางของวัน (manager · admin) และราคาที่สาขาปัจจุบันใช้อยู่ */
+/**
+ * /settings/gold-price — ตั้งราคากลางของวัน (manager · admin) · ราคาที่สาขาปัจจุบันใช้อยู่
+ * · ราคาเฉพาะสาขา (manager · admin — สาขาที่บัญชีนี้จัดการได้)
+ */
 export function GoldPricePage() {
   const { t } = useTranslation("goldPrice");
   const { role } = useMe();
+  const manager = canSetGoldPrice(role);
   return (
     <>
       <PageHeader description={t("description")} />
       <div className="grid items-start gap-4 md:gap-6 lg:grid-cols-2">
-        {canSetGoldPrice(role) ? <SetPriceCard /> : <ManagersOnlyNotice />}
+        {manager ? <SetPriceCard /> : <ManagersOnlyNotice />}
         <TodayPriceCard />
+        {manager && <BranchPricesCard className="lg:col-span-2" />}
       </div>
     </>
   );
@@ -69,7 +75,8 @@ function SetPriceCard() {
       toast.success(t("saved"), {
         description: t("savedDescription", { price: formatBoardPrice(saved.bar_sell) }),
       });
-      // หัวหน้า · หน้าแรก · การ์ดราคาวันนี้ อ่านราคาของสาขาปัจจุบันใหม่ (สาขาที่มีราคาเฉพาะสาขาไม่เปลี่ยนตามราคากลาง)
+      // หัวหน้า · หน้าแรก · การ์ดราคาวันนี้ · ตารางราคาเฉพาะสาขา อ่านใหม่ (key ร่วม ["gold-price","today"])
+      // สาขาที่มีราคาเฉพาะสาขาไม่เปลี่ยนตามราคากลาง — ตารางแสดงที่มาของแต่ละสาขาหลังอ่านใหม่
       await queryClient.invalidateQueries({ queryKey: goldPriceTodayQueryOptions.queryKey });
     },
   });

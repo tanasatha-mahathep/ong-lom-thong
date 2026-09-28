@@ -20,6 +20,7 @@ async function openAs(role: Role, routes: Parameters<typeof fakeApi>[0] = {}) {
     "GET /api/me": () => json(makeMe(role)),
     "GET /api/gold-price/today": () => json(GOLD_PRICE),
     "POST /api/gold-price/quote": () => json(QUOTE_70850),
+    "GET /api/gold-price/today/branches": () => json([]),
     ...routes,
   });
   renderApp("/settings/gold-price");

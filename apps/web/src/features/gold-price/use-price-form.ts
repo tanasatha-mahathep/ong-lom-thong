@@ -10,10 +10,12 @@ import { type SaveGoldPriceBody, barSellErrorOf, goldPriceQuoteQueryOptions, typ
 const QUOTE_DEBOUNCE_MS = 300;
 
 /** error ที่ไม่ได้ชี้ช่อง — ข้อความไทยของเราเอง ไม่แสดงข้อความดิบของเซิร์ฟเวอร์ (อาจเป็นภาษาอังกฤษ) */
-export function requestErrorMessage(t: GoldPriceT, error: unknown, action: "save" | "quote"): string {
+export function requestErrorMessage(t: GoldPriceT, error: unknown, action: "save" | "quote" | "clear"): string {
   if (error instanceof ApiError) {
     if (error.status === 0) return errorMessage(error);
     if (error.status === 403) return t("errors.forbidden");
+    // มีได้เฉพาะ endpoint ของสาขา: สาขาถูกปิด/ถูกถอนสิทธิ์ระหว่างเปิดหน้านี้
+    if (error.status === 404) return t("errors.branchNotFound");
   }
   return t(`errors.${action}Failed`);
 }
@@ -26,16 +28,26 @@ interface TypoWarning {
 interface PriceFormOptions<TSaved> {
   /** ช่องราคาของ component ที่เรียก — hook ใช้แค่ใน event handler (โฟกัสกลับ) ไม่อ่านตอน render */
   inputRef: RefObject<HTMLInputElement | null>;
+  /** ตั้งราคาเฉพาะสาขา — quote เทียบราคาที่สาขานี้ใช้ครั้งก่อน (ไม่ส่ง = ราคากลาง) */
+  branchId?: string;
   save: (body: SaveGoldPriceBody) => Promise<TSaved>;
   onSaved: (saved: TSaved) => Promise<void> | void;
+  /** error ที่ไม่ใช่ด่านกันพิมพ์ผิด (เช่น 404 → โหลดรายการสาขาใหม่) */
+  onFailed?: (error: Error) => void;
 }
 
 /**
- * ฟอร์มค่าเดียวของราคาทอง: พิมพ์ → quote สดจากเซิร์ฟเวอร์ → Enter บันทึก
+ * ฟอร์มค่าเดียวของราคาทอง: พิมพ์ → quote สดจากเซิร์ฟเวอร์ → Enter บันทึก — ราคากลางและราคาเฉพาะสาขาใช้ตัวเดียวกัน
  * ด่านกันพิมพ์ผิด (409 · field "confirm_typo") → `typo` มีค่า → หน้าแสดง TypoConfirmDialog → `confirmTypo()` ส่งซ้ำ
  * browser ไม่คำนวณราคา — ตัวเลขทุกตัวใน preview มาจาก POST /gold-price/quote
  */
-export function usePriceForm<TSaved>({ inputRef, save: saveFn, onSaved }: PriceFormOptions<TSaved>) {
+export function usePriceForm<TSaved>({
+  inputRef,
+  branchId,
+  save: saveFn,
+  onSaved,
+  onFailed,
+}: PriceFormOptions<TSaved>) {
   const { t } = useTranslation("goldPrice");
   const base = useId();
   const [text, setText] = useState("");
@@ -44,7 +56,7 @@ export function usePriceForm<TSaved>({ inputRef, save: saveFn, onSaved }: PriceF
 
   const barSell = normalizeDecimalInput(text);
   const debounced = useDebouncedValue(barSell, QUOTE_DEBOUNCE_MS);
-  const quote = useQuery({ ...goldPriceQuoteQueryOptions(debounced), placeholderData: keepPreviousData });
+  const quote = useQuery({ ...goldPriceQuoteQueryOptions(debounced, branchId), placeholderData: keepPreviousData });
 
   // error อื่น: กลับไปที่ช่องราคาพร้อมเลือกข้อความ พิมพ์ทับได้ทันที
   const focusInput = () => {
@@ -64,6 +76,7 @@ export function usePriceForm<TSaved>({ inputRef, save: saveFn, onSaved }: PriceF
         setTypo({ barSell: body.bar_sell, warning });
         return;
       }
+      onFailed?.(error);
       focusInput();
     },
   });
