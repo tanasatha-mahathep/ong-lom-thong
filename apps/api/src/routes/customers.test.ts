@@ -833,21 +833,19 @@ describe.skipIf(!available)("ลูกค้า — สัญญาราย rou
     sameMaskId = c.id;
   });
 
-  // F2 — ต้นเหตุ: apps/api/src/services/customers.ts:221–227 updateCustomer หา "ช่องที่เปลี่ยน" จากผลของ auditView()
-  // ซึ่งมาสก์เลขบัตรไปแล้ว (:164) → เลขใหม่ที่มาสก์ออกมาเหมือนเลขเดิม (หลักแรก + 3 หลักท้ายตรงกัน) เทียบแล้ว "ไม่เปลี่ยน"
-  // → :228 ข้ามการ insert audit ทั้งแถว: เปลี่ยนตัวตนลูกค้าได้โดยไม่มีร่องรอย (R12 · repudiation · ASVS 4.0.3 V7.1.4)
-  // ทางแก้: หา change set จากค่าดิบ (before.nationalId !== row.nationalId ฯลฯ) แล้วค่อยมาสก์ตอนเขียน diff เช่น
-  // { national_id: { before: "1 XXXX XXXXX 12 3", after: "1 XXXX XXXXX 12 3", changed: true } } — ห้ามเก็บเลขเต็ม (PDPA)
-  // แก้แล้วเทสต์นี้จะแดง → เปลี่ยนเป็น it(...) ธรรมดา · setup อยู่ในเทสต์ก่อนหน้า (ต้องเขียว) เพื่อไม่ให้ setup พังถูกกลบ
-  it.fails("F2 — แก้เลขบัตรต้องลง audit เสมอ แม้เลขใหม่มาสก์ออกมาเหมือนเลขเดิม (R12 · ASVS V7.1.4)", async () => {
+  // F2 — แก้แล้วใน dev (PR #61 · fix(api): audit national id changes that mask to the same value): updateCustomer หา
+  // ช่องที่เปลี่ยนจากค่าดิบก่อนมาสก์ แล้วค่อยมาสก์ตอนเขียน diff (PDPA) · เดิมเป็น it.fails (เปลี่ยนตัวตนลูกค้าได้โดยไม่มี audit)
+  it("F2 (แก้แล้ว) — แก้เลขบัตรเป็นเลขที่มาสก์ออกมาเหมือนเดิม → audit customer.update 1 แถว · ผู้แก้ถูกคน · diff มาสก์ทั้งก่อน/หลัง (R12 · ASVS V7.1.4)", async () => {
     const updates = await t.db
       .select()
       .from(auditLog)
       .where(and(eq(auditLog.rowId, sameMaskId), eq(auditLog.action, "customer.update")));
     expect(updates).toHaveLength(1);
     expect(updates[0]?.userId).toBe(userIds.staff2);
-    // รูปแบบ diff ให้คนแก้เลือกเอง (before/after ที่มาสก์ + changed · หรือ national_id_changed) — ขอแค่มีร่องรอยเลขบัตร
-    expect(JSON.stringify(updates[0]?.diff)).toContain("national_id");
+    const [row] = await t.db.select().from(customer).where(eq(customer.id, sameMaskId));
+    const mask = masked(row?.nationalId ?? "");
+    expect(updates[0]?.diff).toEqual({ national_id: { before: mask, after: mask } });
+    expectNoNationalId(JSON.stringify(updates), "audit ของ F2", knownIds);
   });
 
   // ── PII (R13 · CLAUDE.md กฎ 7) ──────────────────────────────────────────────────────────────────────
@@ -914,19 +912,19 @@ describe.skipIf(!available)("ลูกค้า — สัญญาราย rou
     expect((JSON.parse(text) as { national_id: string }).national_id).toBe(subject.nid);
   });
 
-  // F1 — ต้นเหตุ: apps/api/src/routes/customers.ts:86 PUT ตอบ c.json(toDetail(row, …)) และ toDetail
-  // (apps/api/src/services/customers.ts:58–77) ใส่ national_id: row.nationalId เต็ม 13 หลัก (:61) — ขัด spec §5
-  // ("national_id เต็มส่งเฉพาะ GET /customers/{id}") · CLAUDE.md กฎ 7 · R13 · OWASP API3:2023 (excessive data exposure)
-  // (ต่างจาก GET /:id ตรงที่ไม่มี Cache-Control: no-store ด้วย แม้ RFC 9110 §9.3.4 จะไม่ให้ cache response ของ PUT)
-  // ทางแก้: PUT ตอบ view ที่ไม่มีเลขเต็ม — เช่น {id} หรือรายละเอียดที่ใช้ national_id_masked — แล้วหน้าเว็บ refetch GET /:id
-  // แก้แล้วเทสต์นี้จะแดง → เปลี่ยนเป็น it(...) ธรรมดา
-  it.fails(
-    "F1 — PUT /:id ต้องไม่ส่งเลขบัตรเต็มกลับ (spec §5: เลขเต็มส่งเฉพาะ GET /customers/{id} · CLAUDE.md กฎ 7)",
-    async () => {
-      const res = await put(f1Target.id, { ...f1Target.fields, mobile: "0800000005" }, "staff");
-      expectNoNationalId(await res.text(), "PUT /api/customers/:id", knownIds);
-    },
-  );
+  // F1 — แก้แล้วใน dev (PR #61 · fix(api): mask the national id in the customer update response): PUT ตอบ
+  // toMaskedDetail (national_id_masked) · เลขเต็มออกเฉพาะ GET /:id (spec §5 · CLAUDE.md กฎ 7) · no-store มาจาก F8 (/api/*)
+  // เดิมเป็น it.fails (PUT ตอบ national_id เต็ม 13 หลักโดยไม่มี no-store)
+  it("F1 (แก้แล้ว) — PUT /:id ตอบเลขบัตรแบบมาสก์เท่านั้น (national_id_masked) · ไม่มีเลขเต็ม · Cache-Control: no-store", async () => {
+    const res = await put(f1Target.id, { ...f1Target.fields, mobile: "0800000005" }, "staff");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control") ?? "").toMatch(/\bno-store\b/);
+    const text = await res.text();
+    expectNoNationalId(text, "PUT /api/customers/:id", knownIds);
+    const body = JSON.parse(text) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("national_id");
+    expect(body).toMatchObject({ id: f1Target.id, national_id_masked: masked(f1Target.nid), mobile: "0800000005" });
+  });
 
   // อยู่ท้ายสุดโดยตั้งใจ — สแกนทุกแถวที่ทั้งชุดเขียน (รวม setup ของ F1/F2) · เขียนแถวแก้เลขบัตรของตัวเองก่อน ให้มีของตรวจแน่ ๆ
   it("audit_log ทั้งตารางไม่มีเลขบัตรเต็มเลยแม้แต่แถวเดียว (R12 · PDPA · CLAUDE.md กฎ 7)", async () => {
