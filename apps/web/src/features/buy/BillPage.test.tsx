@@ -40,6 +40,13 @@ describe("/buy/$id", () => {
     expect(screen.getByRole("link", { name: new RegExp(t("bill.newBill")) })).toHaveFocus();
   });
 
+  it("skips auto-print when the receipt data does not add up (nit)", async () => {
+    // total_amount ไม่ตรงกับผลรวมรายการ — <Receipt/> throw · error boundary จับไว้แทนพัง แต่ไม่ควรพิมพ์กระดาษเปล่า/ error
+    const { print } = setup(makeBill({ total_amount: "999999.00" }), { search: "?print=true" });
+    expect(await screen.findByText(/แสดงใบรับซื้อไม่ได้/)).toBeInTheDocument();
+    expect(print).not.toHaveBeenCalled();
+  });
+
   it("offers the archived PDF only when it is ready", async () => {
     setup(makeBill({ created_at: new Date().toISOString() }));
     expect(await screen.findByText(t("bill.pdf.pending"))).toBeInTheDocument();

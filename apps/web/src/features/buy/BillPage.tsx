@@ -79,14 +79,16 @@ function BillView({ bill, autoPrint }: { bill: Bill; autoPrint: boolean }) {
   const navigate = useNavigate();
   const receipt = toReceiptData(bill);
   const printed = useRef(false);
+  const receiptBroken = useRef(false);
   const newBill = useRef<HTMLAnchorElement>(null);
 
   // หลังบันทึก: โฟกัสอยู่ที่ "ซื้อเข้าบิลใหม่" — Enter ครั้งเดียวเริ่มบิลถัดไป
   useEffect(() => newBill.current?.focus(), []);
 
   // หลังบันทึก: พิมพ์หนึ่งครั้ง (รอฟอนต์ไทยก่อน) แล้วเอา ?print ออกจาก URL — กดย้อนกลับ/รีเฟรชไม่พิมพ์ซ้ำ
+  // ใบพังต้องไม่พิมพ์ (พิมพ์กระดาษเปล่า/ข้อความ error) — <ReceiptErrorBoundary onError> ทำงานก่อน effect นี้เสมอ
   useEffect(() => {
-    if (!autoPrint || printed.current) return;
+    if (!autoPrint || printed.current || receiptBroken.current) return;
     printed.current = true;
     void navigate({ to: ".", search: {}, replace: true });
     const fontsReady = "fonts" in document ? document.fonts.ready : Promise.resolve();
@@ -146,13 +148,23 @@ function BillView({ bill, autoPrint }: { bill: Bill; autoPrint: boolean }) {
         aria-label={t("bill.receiptLabel")}
         className="theme-light overflow-x-auto rounded-xl border bg-card p-4 md:p-8"
       >
-        <ReceiptErrorBoundary fallback={receiptError}>
+        <ReceiptErrorBoundary
+          fallback={receiptError}
+          onError={() => {
+            receiptBroken.current = true;
+          }}
+        >
           <Receipt data={receipt} />
         </ReceiptErrorBoundary>
       </section>
 
       <PrintPortal>
-        <ReceiptErrorBoundary fallback={() => null}>
+        <ReceiptErrorBoundary
+          fallback={() => null}
+          onError={() => {
+            receiptBroken.current = true;
+          }}
+        >
           <Receipt data={receipt} />
         </ReceiptErrorBoundary>
       </PrintPortal>
