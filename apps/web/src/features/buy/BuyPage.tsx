@@ -12,7 +12,6 @@ import { PaymentsCard } from "./components/PaymentsCard";
 import { ConflictDialog, SaveBar } from "./components/SaveBar";
 import { useBuyT } from "./i18n";
 import { metalsQuery } from "./queries";
-import type { Metal } from "./types";
 import { useBuyController } from "./use-buy-controller";
 
 /**
@@ -22,7 +21,6 @@ import { useBuyController } from "./use-buy-controller";
 export function BuyPage() {
   const t = useBuyT();
   const me = useMe();
-  const { data: metals } = useSuspenseQuery(metalsQuery);
 
   if (me.role === "accounting") {
     return (
@@ -52,7 +50,7 @@ export function BuyPage() {
     );
   }
   // สลับสาขากลางบิล: บิลที่กรอกอยู่ยังอยู่ · quote โหลดใหม่ หัวบิลแสดงสาขาใหม่ (บันทึกลงสาขาที่ทำงานเสมอ)
-  return <BuyForm me={me} metals={metals} />;
+  return <BuyForm me={me} />;
 }
 
 function NoBranchAlert() {
@@ -66,8 +64,9 @@ function NoBranchAlert() {
   );
 }
 
-function BuyForm({ me, metals }: { me: Me; metals: readonly Metal[] }) {
+function BuyForm({ me }: { me: Me }) {
   const t = useBuyT();
+  const { data: metals } = useSuspenseQuery(metalsQuery);
   const c = useBuyController(me, metals);
 
   return (

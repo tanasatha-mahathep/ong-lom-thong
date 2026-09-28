@@ -10,7 +10,7 @@ import {
   fakeCustomerSearch,
   fakeQuote,
 } from "@/test/buy-api";
-import type { Role } from "@/lib/queries";
+import type { Me, Role } from "@/lib/queries";
 import { t } from "./i18n";
 import type { QuoteBody, SaveBody } from "./types";
 
@@ -18,16 +18,17 @@ const SAVED = { id: "7f1c2d3e-0000-4000-8000-000000000001", doc_no: "RC6909-0001
 
 interface Options {
   role?: Role;
+  me?: Me;
   customers?: FakeCustomer[];
   /** แทนคำตอบของ POST /api/buy (ค่าเริ่มต้น 201 + SAVED) */
   save?: (body: SaveBody, attempt: number) => Response;
 }
 
-function setup({ role = "staff", customers = [CUSTOMER_OK, CUSTOMER_EXPIRED], save }: Options = {}) {
+function setup({ role = "staff", me, customers = [CUSTOMER_OK, CUSTOMER_EXPIRED], save }: Options = {}) {
   const db = { customers: [...customers] };
   let attempts = 0;
   const api = fakeApi({
-    "GET /api/me": () => json(makeMe(role)),
+    "GET /api/me": () => json(me ?? makeMe(role)),
     "GET /api/gold-price/today": () => json(GOLD_PRICE),
     "GET /api/metals": () => json(METALS),
     "GET /api/customers": ({ path }) => fakeCustomerSearch(path, db.customers),
@@ -285,6 +286,15 @@ describe("/buy", () => {
     expect(screen.getByRole("link", { name: t("access.toBills") })).toHaveAttribute("href", "/bills");
     expect(screen.queryByLabelText(t("customer.idLabel"))).not.toBeInTheDocument();
     expect(quotes(api)).toHaveLength(0);
+    expect(api.callsTo("GET", "/api/metals")).toHaveLength(0);
+  });
+
+  it("asks for a working branch instead of opening the form", async () => {
+    const { api } = setup({ me: { ...makeMe("staff"), branch: null } });
+    expect(await screen.findByText(t("access.noBranchTitle"))).toBeInTheDocument();
+    expect(screen.queryByLabelText(t("customer.idLabel"))).not.toBeInTheDocument();
+    expect(quotes(api)).toHaveLength(0);
+    expect(api.callsTo("GET", "/api/metals")).toHaveLength(0);
   });
 
   it("hides backdating from staff", async () => {
