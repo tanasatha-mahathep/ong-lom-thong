@@ -1,6 +1,6 @@
 import { taxBranchLabel } from "@ong/core";
 import { type Db, type Role, auditLog, branch, buyReceipt, docSequence, user } from "@ong/db";
-import { and, asc, eq, getTableColumns, ne, sql } from "drizzle-orm";
+import { and, asc, eq, getTableColumns, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { uniqueViolation } from "../lib/pg";
 import { AdminError, type Executor, changedFields, notFound } from "./adminCommon";
@@ -251,19 +251,59 @@ export interface AffectedUser {
   email: string;
   name: string;
   role: Role;
+  /** ผูกกับสาขานี้ทาง: สาขาหลัก / สาขาที่อนุญาต */
+  via: "main" | "allowed";
+  /** ไม่เหลือสาขาที่เปิดอยู่ให้ทำงานเลย — ต้องผูกสาขาใหม่ก่อน (can_view_all นับทุกสาขาที่เปิดอยู่) */
+  becomes_branchless: boolean;
 }
 
-/** ผู้ใช้ที่ยังใช้งานอยู่และมีสาขานี้เป็นสาขาหลัก — ต้องย้ายสาขาหลักเมื่อสาขาถูกปิด */
-const mainBranchUsers = (db: Executor, branchId: string): Promise<AffectedUser[]> =>
-  db
-    .select({ id: user.id, email: user.email, name: user.name, role: user.role })
+/** ผู้ใช้ที่ยังใช้งานอยู่และผูกกับสาขานี้ (สาขาหลักหรือสาขาที่อนุญาต) — รายงานเมื่อสาขาถูกปิด · สาขาหลักขึ้นก่อน */
+async function affectedUsersOf(db: Executor, branchId: string): Promise<AffectedUser[]> {
+  const rows = await db
+    .select({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      branchId: user.branchId,
+      allowedBranchIds: user.allowedBranchIds,
+      canViewAll: user.canViewAll,
+    })
     .from(user)
-    .where(and(eq(user.branchId, branchId), eq(user.isActive, true)))
-    .orderBy(asc(user.email));
+    .where(
+      and(
+        eq(user.isActive, true),
+        or(eq(user.branchId, branchId), sql`${branchId}::uuid = any(${user.allowedBranchIds})`),
+      ),
+    );
+  const open = new Set(
+    (
+      await db
+        .select({ id: branch.id })
+        .from(branch)
+        .where(and(eq(branch.isActive, true), ne(branch.id, branchId)))
+    ).map((b) => b.id),
+  );
+  return rows
+    .map((u) => {
+      const stillWorks = u.canViewAll
+        ? open.size > 0
+        : [u.branchId, ...u.allowedBranchIds].some((id) => id !== null && open.has(id));
+      return {
+        id: u.id,
+        email: u.email,
+        name: u.name,
+        role: u.role,
+        via: u.branchId === branchId ? ("main" as const) : ("allowed" as const),
+        becomes_branchless: !stillWorks,
+      };
+    })
+    .sort((a, b) => (a.via === b.via ? a.email.localeCompare(b.email) : a.via === "main" ? -1 : 1));
+}
 
 /**
  * แก้สาขา (ยกเว้น code · doc_prefix หลังมีบิล) · ปิด/เปิดสาขาได้ — ปิดแล้ว forUser() ตัดออกจากสิทธิ์ทุกคนทันที
- * affectedUsers = ผู้ใช้ที่ยังใช้สาขาที่ปิดอยู่นี้เป็นสาขาหลัก ([] เมื่อสาขาเปิดอยู่)
+ * affectedUsers = ผู้ใช้ที่ยังผูกกับสาขาที่ปิดอยู่นี้ (สาขาหลัก/ที่อนุญาต) · [] เมื่อสาขาเปิดอยู่
  */
 export async function updateBranch(db: Db, id: string, input: BranchUpdate, actorId: string) {
   if (!z.uuid().safeParse(id).success) throw notFound();
@@ -317,7 +357,7 @@ export async function updateBranch(db: Db, id: string, input: BranchUpdate, acto
         diff: changed,
       });
     }
-    const affectedUsers = row.isActive ? [] : await mainBranchUsers(tx, id);
+    const affectedUsers = row.isActive ? [] : await affectedUsersOf(tx, id);
     return { row: await withBills(tx, row), affectedUsers };
   });
 }

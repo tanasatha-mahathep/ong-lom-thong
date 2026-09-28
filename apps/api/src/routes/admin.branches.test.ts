@@ -32,6 +32,8 @@ interface AffectedUser {
   email: string;
   name: string;
   role: string;
+  via: "main" | "allowed";
+  becomes_branchless: boolean;
 }
 interface MeBody {
   branch: { code: string } | null;
@@ -54,6 +56,8 @@ describe.skipIf(!available)("ผู้ดูแล: สาขา — /api/admin/
       { who: "acct", role: "accounting" as const, branch: "00000" },
       { who: "s2", branch: "00002" },
       { who: "multi", branch: "00000", allow: ["00002"] },
+      // ไม่มีสาขาหลัก · ทำงานสาขา 00002 ผ่านสาขาที่อนุญาตอย่างเดียว
+      { who: "roamer", allow: ["00002"] },
       { who: "gone", branch: "00002", active: false },
     ];
     for (const a of accounts) {
@@ -418,7 +422,7 @@ describe.skipIf(!available)("ผู้ดูแล: สาขา — /api/admin/
 
   // ---------- ปิด/เปิดสาขา → สิทธิ์เปลี่ยนทันที ----------
 
-  it("ปิดสาขา: หายจากสิทธิ์ทุกคนทันที (session เดิม) · รายงานผู้ใช้ที่ใช้เป็นสาขาหลัก", async () => {
+  it("ปิดสาขา: หายจากสิทธิ์ทุกคนทันที (session เดิม) · รายงานผู้ใช้ที่ผูกสาขานี้ (หลัก/ที่อนุญาต)", async () => {
     const id = t.branches["00002"] ?? "";
     expect((await me("s2")).branch?.code).toBe("00002");
     expect((await me("multi")).branches.map((b) => b.code)).toEqual(["00000", "00002"]);
@@ -427,13 +431,32 @@ describe.skipIf(!available)("ผู้ดูแล: สาขา — /api/admin/
     expect(res.status).toBe(200);
     const body = (await res.json()) as { branch: BranchJson; affected_users: AffectedUser[] };
     expect(body.branch.is_active).toBe(false);
-    // เฉพาะผู้ใช้ที่ยังใช้งานอยู่และมีสาขานี้เป็นสาขาหลัก (multi แค่ได้รับอนุญาต · gone ถูกปิดบัญชีแล้ว)
-    expect(body.affected_users).toEqual([{ id: ids.s2, email: "s2@ong.test", name: "s2", role: "staff" }]);
+    // ผู้ใช้ที่ยังใช้งานอยู่และผูกสาขานี้ — สาขาหลักขึ้นก่อน · gone ถูกปิดบัญชีแล้ว · manager เห็นทุกสาขาแต่ไม่ได้ผูก
+    expect(body.affected_users).toEqual([
+      { id: ids.s2, email: "s2@ong.test", name: "s2", role: "staff", via: "main", becomes_branchless: true },
+      {
+        id: ids.multi,
+        email: "multi@ong.test",
+        name: "multi",
+        role: "staff",
+        via: "allowed",
+        becomes_branchless: false,
+      },
+      {
+        id: ids.roamer,
+        email: "roamer@ong.test",
+        name: "roamer",
+        role: "staff",
+        via: "allowed",
+        becomes_branchless: true,
+      },
+    ]);
 
     const s2 = await me("s2");
     expect(s2.branches).toEqual([]);
     expect(s2.branch).toBeNull();
     expect((await me("multi")).branches.map((b) => b.code)).toEqual(["00000"]);
+    expect((await me("roamer")).branches).toEqual([]);
     expect((await me("manager")).branches.map((b) => b.code)).not.toContain("00002");
     // ไม่มีสาขาที่เปิดอยู่เลย = ข้อมูลของร้านอ่านไม่ได้ (fail-closed)
     expect((await t.request("/api/customers", { cookie: cookies.s2 })).status).toBe(403);
@@ -449,7 +472,7 @@ describe.skipIf(!available)("ผู้ดูแล: สาขา — /api/admin/
   it("แก้สาขาที่ปิดอยู่ยังรายงาน affected_users · เปิดคืนแล้วสิทธิ์กลับมาทันที", async () => {
     const id = t.branches["00002"] ?? "";
     const renamed = await update(id, { name: "สาขา 3 (ปิดปรับปรุง)" });
-    expect(((await renamed.json()) as { affected_users: AffectedUser[] }).affected_users).toHaveLength(1);
+    expect(((await renamed.json()) as { affected_users: AffectedUser[] }).affected_users).toHaveLength(3);
 
     const res = await update(id, { is_active: true });
     expect(res.status).toBe(200);
