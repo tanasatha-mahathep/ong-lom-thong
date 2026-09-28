@@ -2,7 +2,7 @@ import type { Db, Role } from "@ong/db";
 import { createMiddleware } from "hono/factory";
 import type { Auth } from "../auth";
 import type { Env } from "../env";
-import type { Viewer } from "./scope";
+import { type Viewer, forUser } from "./scope";
 import type { Storage } from "./storage";
 
 export interface AppEnv {
@@ -45,3 +45,13 @@ export const requireRole = (...roles: Role[]) =>
     if (!roles.includes(c.var.viewer.role)) return c.json(apiError("forbidden"), 403);
     await next();
   });
+
+/**
+ * ข้อมูลที่ใช้ร่วมทั้งร้าน (เช่น ลูกค้า) — ต้องมีสิทธิ์อย่างน้อยหนึ่งสาขาที่เปิดอยู่ (fail-closed · CLAUDE.md กฎ 4)
+ * บัญชีที่ยังไม่ผูกสาขา / สาขาถูกปิดหมด = 403
+ */
+export const requireAnyBranch = createMiddleware<AppEnv>(async (c, next) => {
+  const readable = await forUser(c.var.db, c.var.viewer);
+  if (readable.length === 0) return c.json(apiError("forbidden"), 403);
+  await next();
+});
