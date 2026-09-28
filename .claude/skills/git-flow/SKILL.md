@@ -29,6 +29,6 @@ description: ขั้นตอน worktree/branch/commit/PR ของ repo ร�
 ## PR
 
 - `git push -u origin HEAD` แล้ว `gh pr create --base dev --title "<type>(<scope>): <summary>" --body-file -` (ภาษาอังกฤษ: What · Why · Tests · Decisions)
-- **ห้าม merge · promote · push เข้า `dev` `testing` `staging` `main`** — ผู้ประสานงานรีวิวแล้ว merge แบบ rebase เอง
-- dev ขยับระหว่างทำ: `git fetch origin && git rebase origin/dev` · lockfile ชน → เอาของ dev แล้ว `pnpm install` ใหม่ แล้ว commit lockfile
+- **ห้าม merge · promote · push เข้า `dev` `testing` `staging` `main`** — ผู้ประสานงานรีวิวแล้ว merge เอง (merge commit — repo ปิด rebase/squash)
+- **ห้าม `git rebase`** (เจ้าของ repo ต้องการ merge) · dev ขยับระหว่างทำ: ถ้าไม่ชนไม่ต้องตาม (CI ของ PR ทดสอบผล merge กับ dev ให้แล้ว) · ถ้าต้องการ: `git fetch origin && git merge origin/dev` · lockfile ชน → `git checkout origin/dev -- pnpm-lock.yaml && pnpm install` แล้ว `git add pnpm-lock.yaml` ก่อนจบ merge
 - จบงาน: รายงาน PR URL · สิ่งที่ทำ · สิ่งที่ตัดสินใจเอง (พร้อมเหตุผล) · สิ่งที่ยังไม่ได้ทำ/ความเสี่ยง · ผล `make check`

@@ -114,7 +114,7 @@ railway-logs: ## log ของ service
 railway-status: ## สถานะ service ทั้งหมด
 	railway service list --environment $(ENV)
 
-##@ Git — PR เท่านั้น · merge แบบ rebase
+##@ Git — PR เท่านั้น · merge commit (ห้าม rebase)
 branch: ## สร้าง feature branch จาก dev (NAME=feat/xxx)
 	@test -n "$(NAME)" || { echo "ต้องระบุ NAME=feat/..." >&2; exit 1; }
 	git fetch -q origin
@@ -126,12 +126,12 @@ pr: ## push branch ปัจจุบันแล้วเปิด PR เข้
 	git push -u origin HEAD
 	gh pr create --base dev --fill-first
 
-merge: ## รอ CI ผ่านแล้ว merge แบบ rebase (PR=เลข)
+merge: ## รอ CI ผ่านแล้ว merge แบบ merge commit (PR=เลข)
 	@test -n "$(PR)" || { echo "ต้องระบุ PR=<เลข>" >&2; exit 1; }
 	@for i in $$(seq 1 30); do \
 	[ "$$(gh pr view $(PR) --json statusCheckRollup --jq '.statusCheckRollup | length')" != 0 ] && break; sleep 3; done
 	gh pr checks $(PR) --watch
-	gh pr merge $(PR) --rebase --delete-branch
+	gh pr merge $(PR) --merge --delete-branch
 	git switch dev && git pull --ff-only
 
 promote: ## promote ทีละขั้นแบบ fast-forward (TO=testing|staging|main · main ต้อง CONFIRM=yes)
