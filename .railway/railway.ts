@@ -52,6 +52,12 @@ export default defineRailway((ctx) => {
   // deploy จาก branch ของ environment นั้น — รอ GitHub Actions ผ่านก่อน (checkSuites)
   const source = { branch, checkSuites: true };
   const oneReplicaInRegion = { [REGION]: 1 };
+  // ไม่ประกาศค่าที่เป็น default ของ Railway (restartPolicyType ON_FAILURE · builder ของ Dockerfile ที่ root)
+  // Railway เก็บค่า default เป็น null → ถ้าประกาศ plan จะเห็น diff ค้างตลอด และจับ drift จริงไม่ได้
+  const restartOnFailure = { restartPolicyMaxRetries: 5 };
+  // preDeployTimeoutSeconds ยังไม่มีใน type ของ SDK แต่ engine ของ CLI รู้จัก — ไม่ประกาศ = apply จะล้างเป็น null
+  // (ไม่มีเวลาจำกัด) · migration มี lock_timeout 10 วินาทีกันค้างอีกชั้น
+  const apiDeploy = { ...restartOnFailure, preDeployTimeoutSeconds: 300 };
 
   const db = postgres("Postgres", { region: REGION });
 
@@ -60,11 +66,11 @@ export default defineRailway((ctx) => {
 
   const gotenberg = service("gotenberg", {
     source: github(REPO, { ...source, rootDirectory: "services/gotenberg" }),
-    build: { builder: "DOCKERFILE", watchPatterns: ["/services/gotenberg/**"] },
+    build: { watchPatterns: ["/services/gotenberg/**"] }, // Dockerfile ที่ root ของ services/gotenberg
     healthcheck: "/health",
     healthcheckTimeout: 120,
     replicas: oneReplicaInRegion,
-    deploy: { restartPolicyType: "ON_FAILURE", restartPolicyMaxRetries: 5 },
+    deploy: restartOnFailure,
     // ไม่มี public domain — api เรียกผ่าน private network เท่านั้น
     env: {
       PORT: GOTENBERG_PORT,
@@ -94,7 +100,7 @@ export default defineRailway((ctx) => {
     healthcheck: "/healthz",
     healthcheckTimeout: 120,
     replicas: oneReplicaInRegion,
-    deploy: { restartPolicyType: "ON_FAILURE", restartPolicyMaxRetries: 5 },
+    deploy: apiDeploy,
     env: {
       DATABASE_URL: db.env.DATABASE_URL,
 
