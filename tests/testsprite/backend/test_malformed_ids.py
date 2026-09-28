@@ -1,4 +1,4 @@
-"""id สุ่ม/ผิดรูปใน path ของข้อมูลลูกค้า — ต้องไม่ทำให้เซิร์ฟเวอร์ล้ม (5xx) และต้องไม่บอกใบ้อะไรก่อน login
+"""id สุ่ม/ผิดรูปใน path ของลูกค้าและใบรับซื้อ — ต้องไม่ทำให้เซิร์ฟเวอร์ล้ม (5xx) และต้องไม่บอกใบ้อะไรก่อน login
 
 ไม่มี session: ทุก id (สุ่ม · nil · ไม่ใช่ UUID · SQL · path traversal · NUL · ยาวมาก · ภาษาไทย · %-encoding เสีย · CRLF)
 ต้องได้ 401 เหมือนกันทุกตัว (auth ก่อน lookup = ไม่มี oracle ว่า id ไหนมีอยู่/รูปแบบไหนถูก) และไม่ฉีด header ได้
@@ -46,9 +46,9 @@ def raw_get(path):
         return session.send(prepared, timeout=TIMEOUT, allow_redirects=False)
 
 
-def test_malformed_customer_ids_are_uniform_401():
+def test_malformed_ids_are_uniform_401():
     for raw_id in RAW_IDS:
-        for path in (f"/api/customers/{raw_id}", f"/api/customers/{raw_id}/photo"):
+        for path in (f"/api/customers/{raw_id}", f"/api/customers/{raw_id}/photo", f"/api/buy/{raw_id}"):
             res = raw_get(path)
             what = f"GET {path[:80]}"
             assert res.status_code < 500, f"{what}: เซิร์ฟเวอร์ล้ม {res.status_code} — {res.text[:200]!r}"
@@ -58,9 +58,11 @@ def test_malformed_customer_ids_are_uniform_401():
 
 
 def test_malformed_query_params_are_401_not_5xx():
-    for query in ("page=abc", "page=-1", "page=99999999999999999999", "q=%ZZ", "q=%00", "q=" + "x" * 3000):
-        res = raw_get(f"/api/customers?{query}")
-        what = f"GET /api/customers?{query[:40]}"
+    queries = ("page=abc", "page=-1", "page=99999999999999999999", "q=%ZZ", "q=%00", "q=" + "x" * 3000)
+    buy_only = ("date_from=2026-13-45", "date_to=%ZZ", "metal=" + "x" * 200, "branch_id=%00")
+    for path, query in [("/api/customers", q) for q in queries] + [("/api/buy", q) for q in queries + buy_only]:
+        res = raw_get(f"{path}?{query}")
+        what = f"GET {path}?{query[:40]}"
         assert res.status_code == 401, f"{what}: ได้ {res.status_code} ควรได้ 401 — {res.text[:200]!r}"
 
 
@@ -68,7 +70,7 @@ def test_malformed_query_params_are_401_not_5xx():
 # pytest ของเรา: conftest.py ตั้ง ONG_PROBE_RUNNER=pytest แล้วให้ pytest เป็นคนเรียกแทน
 if os.environ.get("ONG_PROBE_RUNNER") != "pytest":
     for test in (
-        test_malformed_customer_ids_are_uniform_401,
+        test_malformed_ids_are_uniform_401,
         test_malformed_query_params_are_401_not_5xx,
     ):
         test()

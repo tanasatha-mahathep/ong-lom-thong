@@ -54,6 +54,10 @@ def state_changing_requests():
         ("DELETE", f"/api/customers/{some_id}"),
         ("PATCH", "/api/me"),
         ("POST", "/api/auth/sign-out"),
+        ("POST", "/api/buy/quote"),
+        ("POST", "/api/buy"),
+        ("PUT", f"/api/buy/{some_id}"),
+        ("DELETE", f"/api/buy/{some_id}"),
     ]
 
 

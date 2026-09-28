@@ -43,21 +43,21 @@ requirements.in/.txt   pytest + requests — lock พร้อม hash (pip-comp
 
 ## เทสต์ชุดแรก — backend probes (ไม่ต้อง login)
 
-| ไฟล์                                | ตรวจ                                                                                                                                                         | สถานะ           |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------- |
-| `test_health.py`                    | `/healthz` · `/api/healthz` = 200 JSON มีแค่ `{ok, time}`                                                                                                    | sync            |
-| `test_auth_required.py`             | route ข้อมูลใต้ `/api` ไม่มี session · cookie ปลอม · Bearer = 401 `{"error":"unauthorized"}` · คำขอเขียน origin เดียวกันหยุดที่ 401                          | sync            |
-| `test_origin_guard.py`              | คำขอเขียนจาก origin อื่น / `null` / ต่อท้ายโดเมน / subdomain / scheme อื่น / ไม่มี Origin = 403 · positive control 401 · GET จาก origin อื่นได้แต่ไม่มี CORS | sync            |
-| `test_malformed_ids.py`             | id/query ผิดรูป (SQL · traversal · NUL · 2000 ตัว · ภาษาไทย · %-encoding เสีย · CRLF) ก่อน login = 401 เหมือนกันทุกตัว ไม่มี 5xx ไม่ฉีด header               | sync            |
-| `test_error_hygiene.py`             | error body ไม่มี stack trace · path ภายใน · ข้อความ DB · errno — ทุกคำขอที่ผิดโดยตั้งใจต้องไม่ 5xx                                                           | sync            |
-| `test_security_headers.py`          | พิมพ์ header ที่สังเกตได้ลง log · ไม่บอกเวอร์ชัน · cookie (ถ้ามี) HttpOnly+SameSite(+Secure) · ไม่มี CORS `*`                                                | sync            |
-| `test_unknown_api_route.py`         | path ที่ไม่มีใต้ `/api` = 404 JSON                                                                                                                           | **F1** ไม่ sync |
-| `test_security_headers_baseline.py` | nosniff · กัน framing · CSP · Referrer-Policy · HSTS (https)                                                                                                 | **F2** ไม่ sync |
+| ไฟล์                                | ตรวจ                                                                                                                                                                                 | สถานะ           |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------- |
+| `test_health.py`                    | `/healthz` · `/api/healthz` = 200 JSON มีแค่ `{ok, time}`                                                                                                                            | sync            |
+| `test_auth_required.py`             | route ข้อมูลใต้ `/api` (me · metals · gold-price · customers · buy) ไม่มี session · cookie ปลอม · Bearer = 401 · คำขอเขียน origin เดียวกันหยุดที่ 401                                | sync            |
+| `test_origin_guard.py`              | คำขอเขียน 12 แบบ (รวม `POST /api/buy` · `/api/buy/quote`) จาก origin อื่น / `null` / ต่อท้ายโดเมน / subdomain / scheme อื่น / ไม่มี Origin = 403 · positive control 401 · ไม่มี CORS | sync            |
+| `test_malformed_ids.py`             | id/query ผิดรูปของลูกค้าและใบรับซื้อ (SQL · traversal · NUL · 2000 ตัว · ภาษาไทย · %-encoding เสีย · CRLF) ก่อน login = 401 เหมือนกันทุกตัว ไม่มี 5xx                                | sync            |
+| `test_error_hygiene.py`             | error body ไม่มี stack trace · path ภายใน · ข้อความ DB · errno — ทุกคำขอที่ผิดโดยตั้งใจต้องไม่ 5xx                                                                                   | sync            |
+| `test_security_headers.py`          | พิมพ์ header ที่สังเกตได้ลง log · ไม่บอกเวอร์ชัน · cookie (ถ้ามี) HttpOnly+SameSite(+Secure) · ไม่มี CORS `*`                                                                        | sync            |
+| `test_unknown_api_route.py`         | path ที่ไม่มีใต้ `/api` = 404 JSON                                                                                                                                                   | **F1** ไม่ sync |
+| `test_security_headers_baseline.py` | nosniff · กัน framing · CSP · Referrer-Policy · HSTS (https)                                                                                                                         | **F2** ไม่ sync |
 
 ปลอดภัยกับ environment ที่ใช้ร่วม: GET/OPTIONS ล้วน ยกเว้นคำขอเขียนที่ถูกปฏิเสธก่อนถึง handler (origin อื่น หรือไม่มี session) และ body ผิดรูปโดยตั้งใจ — ต่อให้ guard ถดถอยก็เขียนอะไรไม่ได้ ·
-**ไม่แตะ `/api/auth/sign-in/*` เลย** (ดู F3) · ~150 คำขอต่อรอบ · User-Agent `ong-probe/1 (read-only; tests/testsprite)` หาใน log ของ Railway ได้
+**ไม่แตะ `/api/auth/sign-in/*` เลย** (ดู F3) · ~170 คำขอต่อรอบ · User-Agent `ong-probe/1 (read-only; tests/testsprite)` หาใน log ของ Railway ได้
 
-**ผลที่พบ (28 ก.ย. 2569 · build ของ `dev` รันในเครื่อง)** — ไม่ได้แก้โค้ดแอป รายงานให้เจ้าของ `apps/api`
+**ผลที่พบ (28 ก.ย. 2569 · build ของ `dev` ในเครื่อง และ image จาก `apps/api/Dockerfile` แบบ Railway)** — ไม่ได้แก้โค้ดแอป รายงานให้เจ้าของ `apps/api`
 
 - **F1** `GET /api/<ไม่มี>` ได้หน้า SPA **200 text/html** (POST ได้ 404 `text/plain`) — `api.notFound()` ของ sub-app ไม่ถูกเรียก (Hono เรียก notFound ของ app บนสุดเท่านั้น) แล้ว `app.get("/*")` ใน `index.ts` เสิร์ฟ `index.html`
 - **F2** api ไม่ตั้ง security header ใดเลย (ไม่มี `hono/secure-headers`) — ยกเว้น `/customers/:id/photo` ที่ตั้ง nosniff เอง

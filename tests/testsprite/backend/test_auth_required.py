@@ -39,6 +39,9 @@ def protected_reads():
         "/api/customers?q=%E0%B8%97%E0%B8%94%E0%B8%AA%E0%B8%AD%E0%B8%9A",
         f"/api/customers/{some_id}",
         f"/api/customers/{some_id}/photo",
+        "/api/buy",
+        "/api/buy?date_from=2026-09-01&date_to=2026-09-28&metal=gold",
+        f"/api/buy/{some_id}",
     ]
 
 
@@ -79,6 +82,8 @@ def test_same_origin_writes_without_session_are_401():
         ("PUT", "/api/gold-price/today"),
         ("POST", "/api/customers"),
         ("PUT", f"/api/customers/{some_id}"),
+        ("POST", "/api/buy/quote"),
+        ("POST", "/api/buy"),  # บันทึกใบรับซื้อ (PDF immutable) — body {} ผ่าน validation ไม่ได้อยู่แล้ว
     ]
     for method, path in writes:
         res = requests.request(method, url(path), headers=headers, json={}, timeout=TIMEOUT, allow_redirects=False)
