@@ -9,6 +9,7 @@ description: ขั้นตอน worktree/branch/commit/PR ของ repo ร�
 
 - ทำงานเฉพาะใน worktree ที่ได้รับมอบหมาย (เช่น `../ong-lom-thong-wt/<ชื่อ>` ข้าง repo) — ใช้ absolute path เสมอ
 - **ห้ามแตะ checkout หลักของ repo** (session อื่นอาจใช้อยู่) · ห้าม `git switch` ใน worktree ของคนอื่น · สร้าง worktree ใหม่ด้วย `git worktree add -b <branch> <path> origin/dev` (worktree อัตโนมัติของ Claude Code เริ่มจาก `main` — ห้ามใช้)
+- **ห้ามใช้ `git stash` ทุกรูปแบบ** — stash ใช้ stack เดียวกันทุก worktree และทุก session (28 ก.ย. เอเจนต์หนึ่ง `stash pop` ได้งานของอีกตัวมา) · พักงานด้วย commit ใน branch ตัวเองแทน
 - worktree มี `node_modules` แล้ว · เพิ่ม dependency: `pnpm --filter <pkg> add <dep>@^x` แล้ว commit `pnpm-lock.yaml` ไปกับ commit ที่ใช้ dep นั้น
 - Postgres สำหรับเทสต์: container local (`postgres://ong:ong@localhost:5432/postgres`) — เทสต์สร้าง database ใหม่ต่อไฟล์ รันขนานกับเอเจนต์อื่นได้
 
@@ -29,6 +30,6 @@ description: ขั้นตอน worktree/branch/commit/PR ของ repo ร�
 ## PR
 
 - `git push -u origin HEAD` แล้ว `gh pr create --base dev --title "<type>(<scope>): <summary>" --body-file -` (ภาษาอังกฤษ: What · Why · Tests · Decisions)
-- **ห้าม merge · promote · push เข้า `dev` `testing` `staging` `main`** — ผู้ประสานงานรีวิวแล้ว merge แบบ rebase เอง
-- dev ขยับระหว่างทำ: `git fetch origin && git rebase origin/dev` · lockfile ชน → เอาของ dev แล้ว `pnpm install` ใหม่ แล้ว commit lockfile
+- **ห้าม merge · promote · push เข้า `dev` `testing` `staging` `main`** — ผู้ประสานงานรีวิวแล้ว merge เอง (merge commit — repo ปิด rebase/squash)
+- **ห้าม `git rebase`** (เจ้าของ repo ต้องการ merge) · dev ขยับระหว่างทำ: ถ้าไม่ชนไม่ต้องตาม (CI ของ PR ทดสอบผล merge กับ dev ให้แล้ว) · ถ้าต้องการ: `git fetch origin && git merge origin/dev` · lockfile ชน → `git checkout origin/dev -- pnpm-lock.yaml && pnpm install` แล้ว `git add pnpm-lock.yaml` ก่อนจบ merge
 - จบงาน: รายงาน PR URL · สิ่งที่ทำ · สิ่งที่ตัดสินใจเอง (พร้อมเหตุผล) · สิ่งที่ยังไม่ได้ทำ/ความเสี่ยง · ผล `make check`
