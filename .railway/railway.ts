@@ -12,6 +12,10 @@ const REPO = "tanasatha-mahathep/ong-lom-thong";
 const REGION = "asia-southeast1-eqsg3a";
 /** gotenberg ฟังพอร์ตนี้ (Railway ฉีด PORT=8080 ทับ ENV ใน image ถ้าไม่ตั้งเป็น service variable) */
 const GOTENBERG_PORT = "3000";
+/** ชื่อ service ตามที่ตั้งใน dashboard — IaC ผูกด้วยชื่อ: เปลี่ยนชื่อใน dashboard แล้วต้องแก้ตรงนี้ด้วย ไม่งั้น apply จะสร้างใหม่แล้วลบตัวเดิม */
+const APP_SERVICE = "Office";
+const PDF_SERVICE = "PDF (Gotenberg)";
+const BUCKET = "Media";
 /**
  * Railway environment → git branch ที่ deploy (flow: dev → testing → staging → main)
  * สร้าง environment บน Railway เฉพาะที่ต้องใช้ — มีในตารางนี้ไม่ได้แปลว่าถูกสร้าง
@@ -62,9 +66,9 @@ export default defineRailway((ctx) => {
   const db = postgres("Postgres", { region: REGION });
 
   // private เสมอ (Railway bucket ไม่มี public) — สำเนา off-site รายคืนไป R2/B2 เป็นภาคบังคับ (spec §11)
-  const files = bucket("files", { region: "sin" });
+  const files = bucket(BUCKET, { region: "sin" });
 
-  const gotenberg = service("gotenberg", {
+  const gotenberg = service(PDF_SERVICE, {
     source: github(REPO, { ...source, rootDirectory: "services/gotenberg" }),
     build: { watchPatterns: ["/services/gotenberg/**"] }, // Dockerfile ที่ root ของ services/gotenberg
     healthcheck: "/health",
@@ -79,7 +83,7 @@ export default defineRailway((ctx) => {
     },
   });
 
-  const api = service("api", {
+  const api = service(APP_SERVICE, {
     // build context = root ของ repo (Dockerfile build ทั้ง web และ api)
     source: github(REPO, source),
     build: {
@@ -104,7 +108,8 @@ export default defineRailway((ctx) => {
     env: {
       DATABASE_URL: db.env.DATABASE_URL,
 
-      GOTENBERG_URL: `http://\${{gotenberg.RAILWAY_PRIVATE_DOMAIN}}:${GOTENBERG_PORT}`,
+      // ชื่อที่มีช่องว่าง/วงเล็บต้องครอบด้วย " ใน reference (รูปแบบเดียวกับที่ Railway เก็บ) · DNS ภายในยังเป็น gotenberg.railway.internal
+      GOTENBERG_URL: `http://\${{"${PDF_SERVICE}".RAILWAY_PRIVATE_DOMAIN}}:${GOTENBERG_PORT}`,
       GOTENBERG_USERNAME: "ong",
       GOTENBERG_PASSWORD: secret("GOTENBERG_PASSWORD"),
 
