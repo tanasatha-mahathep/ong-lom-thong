@@ -15,7 +15,7 @@ concurrency:
 permissions:
   contents: read
 
-# actions ปักที่ commit SHA (กัน tag ถูกย้าย) — dependabot อัปเดตให้พร้อมคอมเมนต์เวอร์ชัน
+# actions ปักที่ commit SHA (กัน tag ถูกย้าย) — Renovate (helpers:pinGitHubActionDigests) อัปเดตให้พร้อมคอมเมนต์เวอร์ชัน
 jobs:
   check:
     runs-on: ubuntu-latest
