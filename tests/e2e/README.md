@@ -3,20 +3,20 @@
 ชั้นบนสุดของ test pyramid: ยิงใส่ **image ตัวเดียวกับที่ Railway deploy** (`apps/api/Dockerfile` — web + REST origin เดียว)
 พร้อม Postgres 18 · S3 (RustFS) · Gotenberg + Sarabun จริง — ไม่ mock อะไรเลย ชั้นล่างกว่านี้ (unit · integration) อยู่ในแต่ละแพ็กเกจ
 
-| project | ตรวจอะไร                                                                                                                                                                                                                          | เขียนข้อมูล | รันที่ไหน                                      |
-| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ---------------------------------------------- |
-| `setup` | สร้างบัญชีของรอบนี้ผ่าน `node dist/create-user.js` ใน container (ปิด sign-up) — เฉพาะ stack ในเครื่อง                                                                                                                             | ✓           | ก่อน `api` เท่านั้น                            |
-| `smoke` | health · SPA shell + assets · 401 ไม่มี session · 403 เขียนจาก origin อื่น · path traversal · ไม่มี stack trace ใน error                                                                                                          | **ไม่เลย**  | ring 1 + **หลัง Railway deploy** (ring 2)      |
-| `api`   | journey ต่อ role ผ่าน cookie/CSRF/S3 จริง: ลูกค้า (มาสก์ · เลขเต็ม · รูป private) · ราคาทอง (R8) · **ซื้อเข้า**: quote → บันทึก (idempotent) → อ่านกลับเป็น string → สาขาอื่น 404 · PDF ใบรับซื้อ (R15) รอ pipeline (`@pending`)  | ✓           | stack ในเครื่อง หรือ `E2E_ALLOW_WRITES=1`      |
-| `pdf`   | Gotenberg ตรง ๆ ด้วยฟอนต์ Sarabun **ที่ติดตั้งใน image** (ไม่ส่งไฟล์ฟอนต์): ISO 32000 header/trailer · A4 ±0.5 pt · ข้อความไทยทุกบรรทัดตรงทุกวรรณยุกต์ (/ActualText) · ฝังแค่ Sarabun (FontFile2) + negative control · basic auth | ไม่         | stack ในเครื่อง (Gotenberg บน Railway private) |
-| `ui`    | Chromium: SPA ขึ้น · `lang="th"` · console เงียบ · Sarabun โหลดจริง · axe-core WCAG 2.0/2.1/2.2 A+AA                                                                                                                              | ไม่         | ring 1                                         |
+| project | ตรวจอะไร                                                                                                                                                                                                                                | เขียนข้อมูล | รันที่ไหน                                      |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ---------------------------------------------- |
+| `setup` | สร้างบัญชีของรอบนี้ผ่าน `node dist/create-user.js` ใน container (ปิด sign-up) — เฉพาะ stack ในเครื่อง                                                                                                                                   | ✓           | ก่อน `api` และ `ui`                            |
+| `smoke` | health · SPA shell + assets · `/api` ที่ไม่มี = JSON 404 · asset ที่ไม่มี = 404 · 401 ไม่มี session · 403 เขียนจาก origin อื่น · path traversal · ไม่มี stack trace · security header (CSP · HSTS · COOP …) + cache ของ shell/asset/api | **ไม่เลย**  | ring 1 + **หลัง Railway deploy** (ring 2)      |
+| `api`   | journey ต่อ role ผ่าน cookie/CSRF/S3 จริง: ลูกค้า (มาสก์ · เลขเต็ม · รูป private) · ราคาทอง (R8) · **ซื้อเข้า**: quote → บันทึก (idempotent) → อ่านกลับเป็น string → สาขาอื่น 404 · PDF ใบรับซื้อ (R15) รอ pipeline (`@pending`)        | ✓           | stack ในเครื่อง หรือ `E2E_ALLOW_WRITES=1`      |
+| `pdf`   | Gotenberg ตรง ๆ ด้วยฟอนต์ Sarabun **ที่ติดตั้งใน image** (ไม่ส่งไฟล์ฟอนต์): ISO 32000 header/trailer · A4 ±0.5 pt · ข้อความไทยทุกบรรทัดตรงทุกวรรณยุกต์ (/ActualText) · ฝังแค่ Sarabun (FontFile2) + negative control · basic auth       | ไม่         | stack ในเครื่อง (Gotenberg บน Railway private) |
+| `ui`    | Chromium กับ build จริง: `/` → `/login` · login ด้วยคีย์บอร์ด → หน้าแรกแสดงราคา R8 จากเซิร์ฟเวอร์ · `lang="th"` · Sarabun โหลดจริง · console เงียบ · ไม่มี CSP violation · axe-core WCAG 2.0/2.1/2.2 A+AA ทั้งสองหน้า                   | ✓ (login)   | ring 1 (stack ในเครื่อง)                       |
 
 ## รัน
 
 ```bash
 pnpm --filter @ong/e2e stack:up     # = make e2e-up   · build image จาก working tree · secrets ใหม่ · รอจน healthy (~40 วินาที)
 pnpm --filter @ong/e2e e2e          # = make e2e      · ทุก project · เลือกได้: … e2e --project=api
-pnpm --filter @ong/e2e stack:down   # = make e2e-down · ลบ container · network · volume · secrets
+pnpm --filter @ong/e2e stack:down   # = make e2e-down · SIGTERM api (ต้อง exit 0) · ลบ container · network · volume · secrets
 pnpm --filter @ong/e2e report       # เปิด HTML report (trace ของเทสต์ที่ fail อยู่ในนั้น)
 ```
 
@@ -47,7 +47,7 @@ deploy-smoke (ring 2): `E2E_BASE_URL=https://<env>.up.railway.app pnpm --filter 
 
 - **สมมติทั้งหมด** — ชื่อขึ้นต้น "ทดสอบ" · เลขบัตรจาก `syntheticNationalId()`: หลักตรวจสอบถูก (เลือกหลักที่ `isValidNationalId` ของ `@ong/core` ยอมรับ — ไม่มีสูตรที่สอง) แต่รหัสจังหวัด `00` ไม่มีจริง จึงไม่ใช่เลขของใคร
 - ทุกอย่างติด `E2E_RUN_ID` (`yyMMddHHmm-xxxx`) — รันซ้ำบน stack เดิมไม่ชนกัน · เทสต์ไม่พึ่งลำดับกัน
-- ทุก client ที่จำลองมี cookie jar ของตัวเอง · ส่ง `Origin` แบบ browser บนเว็บนี้ · มี IP ของตัวเองใน `X-Forwarded-For` จาก `198.18.0.0/15` (RFC 2544) — บน Railway edge เป็นคนใส่ ใน stack ไม่มี proxy เทสต์จึงทำแทน ไม่งั้น better-auth นับทุก sign-in รวมถังเดียว (ดู known issues)
+- ทุก client ที่จำลอง (รวม browser ของ `ui`) มี cookie jar ของตัวเอง · ส่ง `Origin` แบบ browser บนเว็บนี้ · มี IP ของตัวเองใน `X-Real-IP` จาก `198.18.0.0/15` (RFC 2544) — api เชื่อ IP จาก header นี้อย่างเดียว (edge ของ Railway เขียนทับทุก request) · ใน stack ไม่มี edge เทสต์จึงทำแทน ไม่งั้น production นับทุก sign-in รวมถังเดียว (20 ครั้ง/นาที)
 
 ### `pdf` กับเทสต์ PDF ของ `apps/api` (vitest · `TEST_GOTENBERG_URL`)
 
@@ -57,27 +57,21 @@ e2e `pdf` ไม่ทำซ้ำ แต่ครอบส่วนที่เ
 ข้อเท็จจริงที่วัดได้ (Gotenberg 8.37.0 · HeadlessChrome 152): `%PDF-1.4` · MediaBox `[0 0 594.95996 841.91998]` · Producer `Skia/PDF m152` · `…+Sarabun-Regular/Bold` เป็น Type0/CIDFontType2 + FontFile2
 **ข้อความไทยถูกเฉพาะผ่าน `/ActualText`**: Skia เขียน `<0000>` ใน /ToUnicode ให้ glyph ที่ font สลับรูป (วรรณยุกต์บนสระบน · ลิเกเจอร์ของ น้ำ · ป ปู่) แล้วห่อทั้ง cluster ด้วย `/ActualText` — reader ที่ไม่อ่าน ActualText (PDF.js/Firefox) ได้ `ซื\u0000อ` · `lib/pdf.ts` ใช้ ActualText เอง (ISO 32000-1 §14.9.4) และปักทั้งสองชั้นเป็น golden
 
-## Known issues — `@known-issue`
+## ที่ product แก้แล้ว (PR #61) — ตอนนี้เป็นเทสต์ปกติ
 
-เทสต์ที่รู้ว่า fail เพราะ product ยังไม่แก้ ใช้ `test.fail()` + tag `@known-issue`: CI เขียวจนกว่าจะแก้ แล้วแดงทันทีที่แก้ — ลบ `test.fail` ใน PR เดียวกับที่แก้
-
-1. **`GET /api/<ไม่มี route>` ตอบ SPA shell (200 HTML)** แทน JSON 404 — `apps/api/src/index.ts` ลง SPA fallback (`GET /*`) หลัง `createApp` เลยไม่ถึง `api.notFound` · ไฟล์ที่ไม่มีใต้ `/assets/` ก็ได้ 200 HTML
-   ```bash
-   curl -si http://localhost:28787/api/nope | head -3       # HTTP/1.1 200 · text/html
-   ```
-2. **ไม่มี security header** (OWASP ASVS 4.0.3 V14.4.3–7): ไม่มี CSP · `frame-ancestors`/`X-Frame-Options` · `X-Content-Type-Options` · `Referrer-Policy` ทั้งหน้าเว็บและ api · staging ไม่มี HSTS จาก edge ด้วย
-   ```bash
-   curl -sI https://ong-lom-thong-staging.up.railway.app/ | grep -iE 'content-security|x-frame|nosniff|referrer|strict-transport'   # ว่าง
-   ```
+- `/api/<ไม่มี route>` ทุก method = JSON 404 `no-store` (เคยได้ SPA shell 200) · `/assets/<ไม่มี>` = 404 ไม่ใช่ HTML ไม่ cache
+- security header ทุก response: CSP (`default-src 'self'` · `object-src 'none'` · `frame-ancestors 'none'` · `base-uri`/`form-action 'self'`) · `X-Frame-Options: DENY` · `nosniff` · `Referrer-Policy: strict-origin-when-cross-origin` · COOP `same-origin` · HSTS
+  - **HSTS บน http://localhost**: แอปส่ง `Strict-Transport-Security: max-age=31536000` ทุก response แม้ผ่าน http — browser ไม่สนเมื่อได้มาทางที่ไม่ปลอดภัย (RFC 6797 §8.1) และใช้จริงบน HTTPS ของ Railway · เทสต์ตรวจ max-age ≥ 1 ปี (ค่าจริงลงใน annotation ของ report)
+- cache: `/api/*` = `no-store` (route ที่ตั้งเองใช้ค่าของ route) · index.html ทุกทาง = `no-cache` · `/assets/*` = `public, max-age=31536000, immutable`
+- sign-in: IP จาก `X-Real-IP` อย่างเดียว · 20 ครั้ง/นาที ต่อ IP → ครั้งที่ 21 = 429 (+ `X-Retry-After`) · สุ่ม `X-Forwarded-For` ทุกครั้งก็ไม่ได้รอบใหม่
+- access log บรรทัดละ request ไม่มี query/เลขบัตร/cookie — `specs/api/access-log.spec.ts` อ่าน log จริงของ container
+- SIGTERM: `stack.sh down` หยุด api ด้วย SIGTERM ก่อน (เหมือน Railway redeploy) และ fail ถ้า exit code ไม่ใช่ 0
 
 ### รอฟีเจอร์ — `@pending`
 
 `test.fixme` + tag `@pending` = เขียนตามสัญญาใน spec แล้วแต่ product ยังไม่มี — เปิดใน PR เดียวกับที่ทำฟีเจอร์
 
 - **PDF ใบรับซื้อ (R15 · กฎ 5)** `specs/api/buy.spec.ts`: `POST /api/buy` ค้าง `pdf_status: "pending"` · ยังไม่มี `GET /api/buy/:id/pdf` · `POST /api/buy/:id/void` — เทสต์รอ `ready` → ดาวน์โหลด (no-store · nosniff) → A4 · ฝัง Sarabun · มีเลขที่บิล/ยอด/ยอดตัวอักษร → พิมพ์ซ้ำได้ไฟล์เดิม byte ต่อ byte → สาขาอื่น 404 · ยกเลิก = ไฟล์ใหม่มีตรา "ยกเลิก"
-
-ข้อสังเกตที่ไม่มีเทสต์ (แก้ที่ config ของ product): **rate limit ของ sign-in** — better-auth หา IP ไม่ได้ (ไม่มี `X-Forwarded-For` หรือมีหลาย hop) จะนับ**ทุกคนรวมถังเดียว** 5 ครั้ง/นาที = ใครก็ล็อกพนักงานทั้งร้านได้ · และเชื่อ `X-Forwarded-For` ค่าเดียวที่ client ส่งเอง · ตั้ง `advanced.ipAddress` (`ipAddressHeaders` / `trustedProxies`) ให้ตรงกับ edge ของ Railway
-**log ของ API ไม่ออก** — `app.use(logger())` ลงหลัง route เลย log แค่ไฟล์ static ไม่มี request ของ `/api`
 
 ## เขียนเทสต์เพิ่ม
 
@@ -90,5 +84,5 @@ e2e `pdf` ไม่ทำซ้ำ แต่ครอบส่วนที่เ
 ## มาตรฐานที่ใช้
 
 Playwright best practices (web-first assertions · isolation ต่อเทสต์ · project dependencies แทน globalSetup · trace เมื่อ fail) ·
-WCAG 2.2 AA ผ่าน axe-core · OWASP ASVS 4.0.3 (V2.2 anti-automation · V3.4 cookie · V4 access control · V7.4 error handling · V12.3 path traversal · V13 API · V14.4 headers) ·
+WCAG 2.2 AA ผ่าน axe-core · OWASP ASVS 4.0.3 (V2.2 anti-automation · V3.4 cookie · V4 access control · V7.1 log ไม่มีข้อมูลอ่อนไหว · V7.4 error handling · V12.3 path traversal · V13 API · V14.4 headers) + OWASP Secure Headers Project · RFC 6797 (HSTS) ·
 ISO 32000 (โครง PDF) + ISO 216 (A4) · Unicode UAX #15 (NFC) · ISO/IEC/IEEE 29119 (แยกระดับเทสต์ · test data · negative control) · RFC 2544/2606 (ที่อยู่/โดเมนสำหรับทดสอบ)
