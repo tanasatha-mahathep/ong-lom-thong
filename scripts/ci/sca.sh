@@ -31,17 +31,22 @@ command -v git >/dev/null || die "git not found"
 command -v docker >/dev/null || die "docker not found"
 command -v jq >/dev/null || die "jq not found"
 
-root=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a git repository"
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+root=$(git -C "$here" rev-parse --show-toplevel 2>/dev/null) || die "not inside a git repository"
 root=$(cd "$root" && pwd -P)
+# an explicit lockfile is relative to the caller's directory; the default is the repo's own
+lock=${1:-$root/pnpm-lock.yaml}
+[ -f "$lock" ] || die "lockfile not found: $lock"
+lock="$(cd "$(dirname "$lock")" && pwd -P)/$(basename "$lock")"
 cd "$root"
 config="$root/osv-scanner.toml"
 [ -f "$config" ] || die "osv-scanner.toml not found in $root"
-lock=${1:-pnpm-lock.yaml}
-[ -f "$lock" ] || die "lockfile not found: $lock"
-lock="$(cd "$(dirname "$lock")" && pwd -P)/$(basename "$lock")"
 [ "$(basename "$lock")" = pnpm-lock.yaml ] || die "expected a file named pnpm-lock.yaml, got $lock"
 
 out="${ONG_SEC_OUT:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/ong-sec}/sca"
+probe=$out # refuse before mkdir, so not even an empty directory lands in the repo
+while [ ! -d "$probe" ]; do probe=$(dirname "$probe"); done
+case "$(cd "$probe" && pwd -P)/" in "$root"/*) die "report dir must be outside the repo: $out" ;; esac
 mkdir -p "$out"
 out=$(cd "$out" && pwd -P)
 case "$out/" in "$root"/*) die "report dir must be outside the repo: $out" ;; esac
