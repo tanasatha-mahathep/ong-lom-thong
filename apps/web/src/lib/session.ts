@@ -28,7 +28,9 @@ export async function switchBranch(branchId: string) {
 export function signInErrorMessage(e: unknown, origin: string): string {
   const t = i18next.getFixedT(null, "auth");
   if (!(e instanceof ApiError)) return t("errors.failed");
-  if (e.status === 0 || e.status === 429) return errorMessage(e);
+  if (e.status === 0) return errorMessage(e);
+  // api จำกัด 20 ครั้ง/นาที/IP
+  if (e.status === 429) return t("errors.rateLimited");
   // บัญชีถูกปิด — databaseHooks ของ api ไม่ยอมสร้าง session
   if (e.code === "FAILED_TO_CREATE_SESSION") return t("errors.disabled");
   if (e.status === 400 || e.status === 401) return t("errors.invalidCredentials");

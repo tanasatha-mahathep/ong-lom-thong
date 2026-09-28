@@ -14,6 +14,7 @@ export default {
   errors: {
     invalidCredentials: "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
     disabled: "บัญชีนี้ถูกปิดใช้งาน ติดต่อผู้ดูแลระบบ",
+    rateLimited: "พยายามเข้าสู่ระบบบ่อยเกินไป รอสักครู่",
     forbiddenOrigin:
       "เซิร์ฟเวอร์ปฏิเสธ origin ของหน้านี้ — ตั้ง BETTER_AUTH_URL ของ api ให้ตรงกับ {{origin}} แล้วเปิด api ใหม่",
     failed: "เข้าสู่ระบบไม่สำเร็จ ลองใหม่อีกครั้ง",
