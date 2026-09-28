@@ -201,10 +201,15 @@ describe("quoteBuy — ตรวจตัวเลขต่อแถว (R3)", (
   });
   it.each([
     ["0", BUY_MSG.weightPositive],
-    ["-1", BUY_MSG.weightPositive],
+    ["-1", BUY_MSG.badNumber], // ไม่รับเครื่องหมาย
     ["1.2345", BUY_MSG.weightScale],
     ["abc", BUY_MSG.badNumber],
     ["", BUY_MSG.badNumber],
+    ["0x10", BUY_MSG.badNumber],
+    ["1e3", BUY_MSG.badNumber],
+    ["5,86", BUY_MSG.weightComma], // คอมมาแทนจุดทศนิยม — ไม่เดา
+    ["5,860", BUY_MSG.weightComma], // เคยถูกอ่านเป็น 5,860 กรัม (ราคา/กรัม 3.42)
+    ["1,250.500", BUY_MSG.weightComma], // น้ำหนักไม่คั่นหลักพัน
   ])("น้ำหนัก %j → %s", (w, msg) => {
     const r = quoteBuy(base({ lines: [{ metalId: GOLD, weightG: w, amount: "100" }] }));
     expect(messages(r)).toContain(msg);
@@ -215,11 +220,24 @@ describe("quoteBuy — ตรวจตัวเลขต่อแถว (R3)", (
     ["0", BUY_MSG.amountPositive],
     ["100.123", BUY_MSG.amountScale],
     ["x", BUY_MSG.badNumber],
+    ["20,03", BUY_MSG.badNumber],
+    ["-20030", BUY_MSG.badNumber],
   ])("ราคา %j → %s", (a, msg) => {
     const r = quoteBuy(base({ lines: [{ metalId: GOLD, weightG: "1", amount: a }] }));
     expect(messages(r)).toContain(msg);
     expect(r.errors).toContainEqual(err("lines.0.amount", msg));
   });
+  it("เงินคั่นหลักพันได้ (ราคา 20,030 · ชำระ 20,030) · น้ำหนักเป็นตัวเลขล้วน 1250.500", () => {
+    const r = quoteBuy(
+      base({
+        lines: [{ metalId: GOLD, weightG: "1250.500", amount: "20,030" }],
+        payments: [{ method: "cash", amount: "20,030" }],
+      }),
+    );
+    expect(r.ok).toBe(true);
+    expect(r.lines[0]).toMatchObject({ weightG: "1250.500", amount: "20030.00" });
+  });
+
   it("แถวที่ผิดไม่ถูกนับรวมยอด แต่แถวที่ถูกยังนับ", () => {
     const r = quoteBuy(
       base({
@@ -297,9 +315,10 @@ describe("quoteBuy — น้ำหนักต่อแถว (R3: > 0 · ท�
   it.each([
     ["0", BUY_MSG.weightPositive], // บนขอบล่างพอดี (ต้องมากกว่า 0)
     ["0.000", BUY_MSG.weightPositive], // ศูนย์ที่พิมพ์ทศนิยมครบ 3 ตำแหน่ง
-    ["-0", BUY_MSG.weightPositive], // ลบศูนย์
-    ["-0.001", BUY_MSG.weightPositive], // ต่ำกว่าขอบล่าง 1 หน่วยที่เล็กที่สุด (0.001 กรัม)
-    ["-0.0001", BUY_MSG.weightPositive], // ติดลบและทศนิยมเกิน → บอกข้อแรกที่ผิดข้อเดียว (ค่าบวกก่อนสเกล)
+    // ต่ำกว่าศูนย์: parser เข้ม (dev PR #53) ไม่รับเครื่องหมาย → "ตัวเลขไม่ถูกต้อง" ตั้งแต่ขั้น parse ไม่ถึงด่าน > 0
+    ["-0", BUY_MSG.badNumber], // ลบศูนย์
+    ["-0.001", BUY_MSG.badNumber], // ต่ำกว่าขอบล่าง 1 หน่วยที่เล็กที่สุด (0.001 กรัม)
+    ["-0.0001", BUY_MSG.badNumber], // ติดลบและทศนิยมเกิน → ยังบอกข้อเดียว
     ["0.0001", BUY_MSG.weightScale], // มากกว่า 0 แต่ 4 ตำแหน่ง → ผิดที่สเกล ไม่ใช่ "ต้องมากกว่า 0"
     ["1.2345", BUY_MSG.weightScale], // เกินขอบบนของสเกล 1 ตำแหน่ง
     ["", BUY_MSG.badNumber],
@@ -344,8 +363,9 @@ describe("quoteBuy — ราคาต่อแถว (R3: > 0 · ทศนิ�
   it.each([
     ["0", BUY_MSG.amountPositive], // บนขอบล่างพอดี
     ["0.00", BUY_MSG.amountPositive],
-    ["-0.01", BUY_MSG.amountPositive], // ต่ำกว่าขอบล่าง 1 สตางค์
-    ["-0.001", BUY_MSG.amountPositive], // ติดลบและทศนิยมเกิน → บอกข้อแรกที่ผิดข้อเดียว
+    // ต่ำกว่าศูนย์: parser เข้มไม่รับเครื่องหมาย → "ตัวเลขไม่ถูกต้อง" (ไม่ถึงด่าน > 0)
+    ["-0.01", BUY_MSG.badNumber], // ต่ำกว่าขอบล่าง 1 สตางค์
+    ["-0.001", BUY_MSG.badNumber], // ติดลบและทศนิยมเกิน → ยังบอกข้อเดียว
     ["0.001", BUY_MSG.amountScale], // มากกว่า 0 แต่ 3 ตำแหน่ง
     ["100.123", BUY_MSG.amountScale], // เกินขอบบนของสเกล 1 ตำแหน่ง
     ["", BUY_MSG.badNumber],
@@ -600,17 +620,18 @@ describe("quoteBuy — วิธีชำระซ้ำ (R5): กุญแจ�
       transfer("KBANK", "10030"),
       payRow(0, "transfer", "10000.00", "KBANK"),
     ],
+    // ไม่มีธนาคาร 3 แบบ (null · "" · ไม่ส่ง) เป็นกุญแจเดียวกัน — ใช้ได้เฉพาะเงินสด เพราะโอนต้องระบุธนาคาร (dev PR #53)
     [
-      "bank: null กับไม่ส่ง bank",
-      { method: "transfer", bank: null, amount: "10000" },
-      { method: "transfer", amount: "10030" },
-      payRow(0, "transfer", "10000.00"),
+      "เงินสด bank: null กับไม่ส่ง bank",
+      { method: "cash", bank: null, amount: "10000" },
+      { method: "cash", amount: "10030" },
+      payRow(0, "cash", "10000.00"),
     ],
     [
-      'bank: "" กับ bank: null',
-      { method: "transfer", bank: "", amount: "10000" },
-      { method: "transfer", bank: null, amount: "10030" },
-      payRow(0, "transfer", "10000.00"), // "" = ไม่มีธนาคาร → null
+      'เงินสด bank: "" กับ bank: null',
+      { method: "cash", bank: "", amount: "10000" },
+      { method: "cash", bank: null, amount: "10030" },
+      payRow(0, "cash", "10000.00"), // "" = ไม่มีธนาคาร → null
     ],
   ])("%s → ซ้ำ · ข้อผิดอยู่ที่แถวหลัง payments.1.method", (_label, first, second, kept) => {
     expect(quoteBuy(base({ payments: [first, second] }))).toStrictEqual({
@@ -632,29 +653,40 @@ describe("quoteBuy — วิธีชำระซ้ำ (R5): กุญแจ�
       [payRow(0, "transfer", "10000.00", "KBANK"), payRow(1, "transfer", "10030.00", "SCB")],
     ],
     [
-      "วิธีเดียวกัน แถวหนึ่งมีธนาคาร อีกแถวไม่มี",
-      transfer("KBANK", "10000"),
-      { method: "transfer", amount: "10030" },
-      [payRow(0, "transfer", "10000.00", "KBANK"), payRow(1, "transfer", "10030.00")],
-    ],
-    [
-      "คนละวิธี ไม่มีธนาคารทั้งคู่",
+      "คนละวิธี แต่ละแถวถูกกฎธนาคาร (เงินสดไม่มี · โอนมี)",
       cash("10000"),
-      { method: "transfer", amount: "10030" },
-      [payRow(0, "cash", "10000.00"), payRow(1, "transfer", "10030.00")],
+      transfer("KBANK", "10030"),
+      [payRow(0, "cash", "10000.00"), payRow(1, "transfer", "10030.00", "KBANK")],
     ],
   ])("%s → ไม่ซ้ำ ชำระครบ ok", (_label, first, second, payments) => {
     expect(quoteBuy(base({ payments: [first, second] }))).toStrictEqual({ ...REAL_OK, payments });
   });
 
-  // "คนละวิธี ธนาคารเดียวกัน" ต้องใช้เงินสด + ธนาคาร (วิธีที่รับได้มีแค่ cash/transfer) แต่ธนาคารบนแถวเงินสด
-  // ยังเป็นคำถาม product (เก็บ/ทิ้ง/ปฏิเสธ) — จึงตรวจเฉพาะเจตนาของกุญแจ: วิธีต่างกัน → แถวหลังไม่ขึ้น "ซ้ำ"
-  it("คนละวิธี ธนาคารเดียวกัน → ไม่ซ้ำ (ไม่ผูกผลของธนาคารบนแถวเงินสด)", () => {
-    const r = quoteBuy(
-      base({ payments: [transfer("KBANK", "10000"), { method: "cash", bank: "KBANK", amount: "10030" }] }),
-    );
-    expect(r.errors).not.toContainEqual(err("payments.1.method", BUY_MSG.paymentDup));
-    expect(r.payments[0]).toStrictEqual(payRow(0, "transfer", "10000.00", "KBANK"));
+  // เดิมเป็นคำถาม product (ธนาคารบนแถวเงินสด) — dev PR #53 ตอบแล้ว: เงินสดห้ามระบุธนาคาร · แถวที่ผิดไม่ถึงด่านวิธีซ้ำ
+  it("คนละวิธี ธนาคารเดียวกัน: แถวเงินสดที่ระบุธนาคารถูกปฏิเสธ ไม่ใช่ 'ซ้ำ' และไม่นับยอด", () => {
+    expect(
+      quoteBuy(base({ payments: [transfer("KBANK", "10000"), { method: "cash", bank: "KBANK", amount: "10030" }] })),
+    ).toStrictEqual({
+      ...REAL_OK,
+      ok: false,
+      errors: [err("payments.1.bank", BUY_MSG.cashNoBank), err("payments", BUY_MSG.unbalanced("10030.00"))],
+      payments: [payRow(0, "transfer", "10000.00", "KBANK")],
+      paid: "10000.00",
+      balance: "10030.00",
+    });
+  });
+
+  it("โอนไม่ระบุธนาคารถูกปฏิเสธก่อนด่านวิธีซ้ำ: แถวหลังได้ 'เลือกธนาคาร' ไม่ใช่ 'ซ้ำ'", () => {
+    expect(
+      quoteBuy(base({ payments: [transfer("KBANK", "10000"), { method: "transfer", amount: "10030" }] })),
+    ).toStrictEqual({
+      ...REAL_OK,
+      ok: false,
+      errors: [err("payments.1.bank", BUY_MSG.bankRequired), err("payments", BUY_MSG.unbalanced("10030.00"))],
+      payments: [payRow(0, "transfer", "10000.00", "KBANK")],
+      paid: "10000.00",
+      balance: "10030.00",
+    });
   });
 
   it("ซ้ำสามแถว → ข้อผิดที่แถว 1 และ 2 · นับเฉพาะแถวแรก", () => {
@@ -756,15 +788,20 @@ describe("quoteBuy — รายงานทุกข้อผิดในคร
       goldPriceSet: false,
       customer: card("invalid"),
       lines: [
-        line("abc", "-5"), // 0: น้ำหนักไม่ใช่ตัวเลข · ราคาติดลบ
+        line("abc", "0"), // 0: น้ำหนักไม่ใช่ตัวเลข · ราคาไม่มากกว่า 0 (ติดลบไม่ถึงด่านนี้แล้ว: parser เข้มตอบ badNumber)
         line("1.2345", "100.123"), // 1: ทศนิยมเกินทั้งสองช่อง
         line("2", "100"), // 2: ใช้ได้ → ยอด 100.00 · 100 ÷ 2 = 50.00/กรัม
+        line("5,860", "100000000"), // 3: น้ำหนักมีคอมมา · ราคาเกินเพดาน 99,999,999.99
+        line("1000000", "100"), // 4: น้ำหนักเกินเพดาน 999,999.999
       ],
       payments: [
         cash(""), // 0: ว่าง
         cash("0.001"), // 1: ทศนิยมเกิน (แถวที่ผิดไม่จองวิธี จึงไม่ซ้ำกับแถว 0)
         transfer("KBANK", "40"), // 2: ใช้ได้ → ชำระ 40.00
         transfer("KBANK", "60"), // 3: ซ้ำกับแถว 2 → ไม่นับ
+        { method: "transfer", amount: "10" }, // 4: โอนไม่ระบุธนาคาร
+        { method: "cash", bank: "KBANK", amount: "10" }, // 5: เงินสดระบุธนาคาร
+        { method: "cheque", amount: "10" }, // 6: วิธีที่ไม่รู้จัก
       ],
     });
     expect(r).toStrictEqual({
@@ -776,9 +813,15 @@ describe("quoteBuy — รายงานทุกข้อผิดในคร
         err("lines.0.amount", BUY_MSG.amountPositive),
         err("lines.1.weight_g", BUY_MSG.weightScale),
         err("lines.1.amount", BUY_MSG.amountScale),
+        err("lines.3.weight_g", BUY_MSG.weightComma),
+        err("lines.3.amount", BUY_MSG.amountMax),
+        err("lines.4.weight_g", BUY_MSG.weightMax),
         err("payments.0.amount", BUY_MSG.paymentAmount),
         err("payments.1.amount", BUY_MSG.amountScale),
         err("payments.3.method", BUY_MSG.paymentDup),
+        err("payments.4.bank", BUY_MSG.bankRequired),
+        err("payments.5.bank", BUY_MSG.cashNoBank),
+        err("payments.6.method", BUY_MSG.paymentMethod),
         err("payments", BUY_MSG.unbalanced("60.00")), // 100.00 − 40.00
       ],
       lines: [{ index: 2, metalId: GOLD, weightG: "2.000", amount: "100.00", pricePerG: "50.00" }],
@@ -859,9 +902,9 @@ describe("quoteBuy — เพดานต่อแถว: ค่าขอบ น
   it.each([
     ["1000000.000", BUY_MSG.weightMax], // เหนือเพดาน 1 ขั้น (0.001 g)
     ["1000000", BUY_MSG.weightMax], // ค่าเดียวกัน ไม่มีทศนิยม
-    ["1,000,000", BUY_MSG.weightMax], // คอมมาหลักพันถูกตัดก่อนตรวจ
+    ["1,000,000", BUY_MSG.weightComma], // น้ำหนักไม่รับคอมมาเลย (dev PR #53) — ไม่ถึงด่านเพดาน
     ["1000000.0001", BUY_MSG.weightScale], // เกินทั้งเพดานและสเกล → ตรวจสเกลก่อน บอกข้อเดียว
-    ["-1000000", BUY_MSG.weightPositive], // ติดลบ → ตรวจค่าบวกก่อน
+    ["-1000000", BUY_MSG.badNumber], // ติดลบ → parser เข้มไม่รับเครื่องหมาย
   ])("น้ำหนัก %j → %s ที่ lines.0.weight_g ข้อเดียว และไม่นับรวมยอด", (w, msg) => {
     expect(quoteBuy(base({ lines: [line(w, "100")], payments: [] }))).toStrictEqual({
       ok: false,
@@ -893,7 +936,7 @@ describe("quoteBuy — เพดานต่อแถว: ค่าขอบ น
     ["100000000", BUY_MSG.amountMax],
     ["100,000,000", BUY_MSG.amountMax],
     ["100000000.001", BUY_MSG.amountScale], // เกินทั้งเพดานและสเกล → ตรวจสเกลก่อน
-    ["-100000000", BUY_MSG.amountPositive],
+    ["-100000000", BUY_MSG.badNumber], // ติดลบ → parser เข้มไม่รับเครื่องหมาย
   ])("ราคา %j → %s ที่ lines.0.amount ข้อเดียว และไม่นับรวมยอด", (a, msg) => {
     expect(quoteBuy(base({ lines: [line("1", a)], payments: [] }))).toStrictEqual({
       ok: false,
@@ -966,11 +1009,15 @@ describe("quoteBuy — วิธีชำระ: กลุ่มสมมูล�
     expect(BUY_MSG.paymentMethod).toBe("กรุณาเลือกประเภทเงินที่ชำระ");
   });
 
-  it.each<[PaymentMethod]>([["cash"], ["transfer"]])("%s → วิธีที่รับได้ ชำระครบ ok", (method) => {
+  // เงินสดไม่มีธนาคาร · โอนต้องมีธนาคาร (dev PR #53)
+  it.each<[PaymentMethod, string | null]>([
+    ["cash", null],
+    ["transfer", "KBANK"],
+  ])("%s (ธนาคาร %s) → วิธีที่รับได้ ชำระครบ ok", (method, bank) => {
     expect(isPaymentMethod(method)).toBe(true);
-    expect(quoteBuy(base({ payments: [{ method, amount: "20030" }] }))).toStrictEqual({
+    expect(quoteBuy(base({ payments: [{ method, bank, amount: "20030" }] }))).toStrictEqual({
       ...REAL_OK,
-      payments: [payRow(0, method, "20030.00")],
+      payments: [payRow(0, method, "20030.00", bank)],
     });
   });
 
@@ -1241,6 +1288,27 @@ describe("quoteBuy — index · ราคาเฉลี่ย/กรัม · �
 });
 
 describe("quoteBuy — วิธีชำระ", () => {
+  it.each([
+    [{ method: "transfer", amount: "20030" }, BUY_MSG.bankRequired],
+    [{ method: "transfer", bank: "   ", amount: "20030" }, BUY_MSG.bankRequired],
+    [{ method: "cash", bank: "KBANK", amount: "20030" }, BUY_MSG.cashNoBank],
+  ])("ธนาคารไม่เข้ากับวิธี %j → %s · ไม่นับยอด", (p, message) => {
+    const r = quoteBuy(base({ payments: [p] }));
+    expect(r.errors[0]).toEqual({ field: "payments.0.bank", message });
+    expect(r.paid).toBe("0.00");
+    expect(r.ok).toBe(false);
+  });
+  it("โอนระบุธนาคาร · เงินสดไม่ระบุ → ผ่าน", () => {
+    const r = quoteBuy(
+      base({
+        payments: [
+          { method: "transfer", bank: "SCB", amount: "20000" },
+          { method: "cash", bank: null, amount: "30" },
+        ],
+      }),
+    );
+    expect(r.ok).toBe(true);
+  });
   it("วิธีที่ไม่รู้จัก → กรุณาเลือกประเภทเงินที่ชำระ (ข้อความระบบเดิม) ไม่นับยอด", () => {
     const r = quoteBuy(base({ payments: [{ method: "cheque", amount: "20030" }] }));
     expect(r.ok).toBe(false);

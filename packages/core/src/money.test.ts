@@ -13,6 +13,7 @@ import {
   halfUp,
   isBlank,
   parseDecimal,
+  parsePlainDecimal,
   requireDecimal,
 } from "./money";
 
@@ -126,12 +127,13 @@ describe("isBlank — ว่าง = ไม่มีค่า หรือ strin
 });
 
 describe("parseDecimal — ค่าที่ผู้ใช้กรอก ไม่ throw ใช้ไม่ได้ = null (ตารางตัดสินใจ · MC/DC ของด่านชนิดข้อมูล)", () => {
-  // | กฎ | ว่าง | ชนิด string/number/Decimal | D() throw | finite | ผล      |
-  // | R1 | ใช่  | –                          | –         | –      | null    |
-  // | R2 | ไม่  | ไม่                        | –         | –      | null    |
-  // | R3 | ไม่  | ใช่                        | ใช่       | –      | null    |
-  // | R4 | ไม่  | ใช่                        | ไม่       | ไม่    | null    |
-  // | R5 | ไม่  | ใช่                        | ไม่       | ใช่    | Decimal |
+  // parser เข้ม (dev PR #53): Decimal/number จากโค้ดผ่านถ้า finite · string ต้องเป็นตัวเลขล้วนหรือคั่นหลักพันถูกต้อง
+  // | กฎ | ชนิด                 | เงื่อนไข                                   | ผล      |
+  // | R1 | ว่าง/ช่องว่าง         | ไม่ตรงรูปแบบ                               | null    |
+  // | R2 | ไม่ใช่ string/number/Decimal | –                                  | null    |
+  // | R3 | string               | ไม่ตรงรูปแบบ (ขยะ · เครื่องหมาย · คอมมาผิด) | null    |
+  // | R4 | string/number/Decimal | ไม่ใช่จำนวนจำกัด                           | null    |
+  // | R5 | string/number/Decimal | ตรงรูปแบบ / finite                          | Decimal |
   it.each<[string, unknown]>([
     ["undefined", undefined],
     ["null", null],
@@ -142,8 +144,7 @@ describe("parseDecimal — ค่าที่ผู้ใช้กรอก ไ�
   });
 
   // MC/DC ของด่านชนิดข้อมูล: string · number · Decimal ผ่าน (แถว R5 ทีละชนิด) ชนิดอื่นตกหมด (แถวนี้)
-  // ชนิดทั่วไปจาก JSON (boolean · object · array) ต่อให้ไม่มีด่าน D() ก็ throw TypeError ที่ .replace แล้วตก catch อยู่ดี
-  // String object มี .replace/.trim เหมือน string — จึงเป็นแถวเดียวที่ผลเปลี่ยน (ได้ 5.86) ถ้าด่านนี้หายไป
+  // String object มี .trim และ regex แปลงเป็นข้อความให้ — ถ้าด่าน typeof หายไปจะได้ 5.86 จึงเป็นแถวที่จับด่านนี้
   it.each<[string, unknown]>([
     ["true", true],
     ["false", false],
@@ -178,11 +179,16 @@ describe("parseDecimal — ค่าที่ผู้ใช้กรอก ไ�
     ['"5.860"', "5.86", "5.860"],
     ['"67,850"', "67850", "67,850"],
     ['" 20,030.00 "', "20030", " 20,030.00 "],
-    ['"-1" (ค่าลบผ่าน — กฎ > 0 เป็นของผู้เรียก R3)', "-1", "-1"],
     ["number 5.86", "5.86", 5.86],
     ['Decimal "3418.09"', "3418.09", new Decimal("3418.09")],
   ])("R5 ใช้ได้: %s → %s", (_label, expected, v) => {
     expectDecimal(parseDecimal(v), expected);
+  });
+
+  // เดิม (parser หลวม) "-1" ผ่านแล้วให้ quoteBuy ตัดสิน > 0 เอง — parser เข้มไม่รับเครื่องหมายตั้งแต่ต้น
+  // ค่าติดลบบนเอกสาร (ยอดคงเหลือ) ไปทาง requireDecimal ซึ่งรับติดลบได้โดยตั้งใจ
+  it.each(["-1", "-0", "-0.01", "+5", " -1 "])("R3 มีเครื่องหมาย %j → null (ผู้ใช้กรอกได้เฉพาะตัวเลขไม่ติดลบ)", (v) => {
+    expect(parseDecimal(v)).toBeNull();
   });
 
   it.each<[string, unknown]>([
@@ -580,6 +586,63 @@ describe("formatMoney · formatWeight — ทุกค่ารอบขอบ�
   });
 });
 
+describe("parseDecimal — รับเฉพาะตัวเลขธรรมดา หรือคั่นหลักพันถูกต้อง", () => {
+  it.each([
+    ["20030", "20030"],
+    ["5.860", "5.86"],
+    ["0", "0"],
+    ["0.5", "0.5"],
+    ["007", "7"],
+    ["  67,850  ", "67850"], // ราคาทองที่ร้านพิมพ์แบบมีคอมมา
+    ["67,850.50", "67850.5"],
+    ["1,234,567.891", "1234567.891"],
+    ["5,860", "5860"], // เงินคั่นหลักพันได้ — น้ำหนักใช้ parsePlainDecimal (ไม่รับจุลภาค)
+  ])("%j → %s", (input, expected) => {
+    expect(parseDecimal(input)?.toString()).toBe(expected);
+  });
+
+  it.each([
+    "",
+    "   ",
+    "abc",
+    "12abc",
+    "0x10", // hex
+    "0b101",
+    "1e3", // exponent
+    "6.785E4",
+    "-1", // เครื่องหมาย
+    "+1",
+    "20,03", // คอมมาผิดตำแหน่ง
+    "1,2345",
+    "12,34,567",
+    ",123",
+    "123,",
+    "1,000.",
+    "0,123", // กลุ่มแรกขึ้นต้นด้วย 0 — ไม่ใช่การคั่นหลักพัน
+    "1.2.3",
+    ".5",
+    "5.",
+    "1 000",
+    "Infinity",
+    "NaN",
+    "๑๒๓", // เลขไทย
+    "1\u00005",
+  ])("ปฏิเสธ %j", (input) => {
+    expect(parseDecimal(input)).toBeNull();
+  });
+
+  it.each([null, undefined, {}, [], true])("ไม่ใช่ข้อความ %j → null", (input) => {
+    expect(parseDecimal(input)).toBeNull();
+  });
+
+  it("ค่า Decimal/number ที่มาจากโค้ดผ่านตามเดิม (finite เท่านั้น)", () => {
+    expect(parseDecimal(new Decimal("67850"))?.toString()).toBe("67850");
+    expect(parseDecimal(67850)?.toString()).toBe("67850");
+    expect(parseDecimal(Number.NaN)).toBeNull();
+    expect(parseDecimal(new Decimal(Infinity))).toBeNull();
+  });
+});
+
 describe("formatMoney / formatWeight — ตัวเลขบนใบพิมพ์", () => {
   it.each([
     ["20030", "20,030.00"],
@@ -615,5 +678,37 @@ describe("formatMoney / formatWeight — ตัวเลขบนใบพิม
     expect(() => formatMoney(bad)).toThrow(ReceiptDataError);
     expect(() => formatWeight(bad)).toThrow(ReceiptDataError);
     expect(() => requireDecimal(bad, "ยอดบิล")).toThrow(/ยอดบิลไม่ใช่ตัวเลข/);
+  });
+});
+
+describe("requireDecimal — ตัวเลขบนเอกสาร: รูปแบบเข้มเดียวกับ parseDecimal + ติดลบได้", () => {
+  it.each([
+    ["20030.00", "20030"],
+    ["-1234.5", "-1234.5"],
+    ["-67,850", "-67850"],
+  ])("%j → %s", (v, want) => {
+    expect(requireDecimal(v).toString()).toBe(want);
+  });
+
+  it.each(["0x10", "1e3", "- 5", "--5", "+5", "20,03"])("ไม่รับ %j → ReceiptDataError", (bad) => {
+    expect(() => requireDecimal(bad)).toThrow(ReceiptDataError);
+  });
+});
+
+describe("parsePlainDecimal — น้ำหนัก: ตัวเลขล้วน ไม่มีจุลภาค", () => {
+  it.each([
+    ["5.860", "5.86"],
+    [" 1250.500 ", "1250.5"],
+    ["0", "0"],
+  ])("%j → %s", (v, want) => {
+    expect(parsePlainDecimal(v)?.toString()).toBe(want);
+  });
+
+  it.each(["5,860", "1,250.500", "5,86", "", "-1", "1e3", "0x10", ".5", "abc"])("ปฏิเสธ %j", (v) => {
+    expect(parsePlainDecimal(v)).toBeNull();
+  });
+
+  it.each([5.86, null, undefined])("ไม่ใช่ข้อความ %j → null", (v) => {
+    expect(parsePlainDecimal(v)).toBeNull();
   });
 });

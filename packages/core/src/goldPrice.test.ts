@@ -100,6 +100,11 @@ describe("deriveGoldPrice — สูตรจากระบบเดิม ย�
     "-Infinity",
     "๖๗๘๕๐",
     "ุึคถจ",
+    // parseDecimal แบบเข้ม (dev PR #53): exponent · hex · คอมมาผิดตำแหน่ง ไม่ใช่ตัวเลขที่ผู้ใช้กรอก
+    "6.785e4",
+    "0x1090A",
+    "67,85",
+    "678,50",
   ])("ปฏิเสธค่าที่ใช้ไม่ได้: %j", (v) => {
     const e = thrownBy(() => deriveGoldPrice(v));
     expect(e).toBeInstanceOf(RangeError);
