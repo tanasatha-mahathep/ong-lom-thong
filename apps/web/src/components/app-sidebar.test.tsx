@@ -95,7 +95,8 @@ describe("sidebar ของแอป", () => {
     fakeApi({ "GET /api/me": () => json(makeMe("manager")) });
     renderApp("/");
 
-    const warning = await screen.findByRole("link", { name: "ยังไม่ได้ตั้งราคาทองวันนี้" });
+    // หน้าแรกโหลดทั้งหน้า (ราคา · ยอดวันนี้ · ตารางบิลวันนี้) ก่อนหัวหน้าจะแสดงป้าย — เผื่อเครื่องที่รันเทสต์ขนานกัน
+    const warning = await screen.findByRole("link", { name: "ยังไม่ได้ตั้งราคาทองวันนี้" }, { timeout: 10_000 });
     expect(warning).toHaveAttribute("href", "/settings/gold-price");
   });
 
