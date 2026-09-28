@@ -6,13 +6,6 @@ import { ApiError, apiFetch, decimalString } from "@/lib/api";
 export const ROLES = ["staff", "manager", "accounting", "admin"] as const;
 export type Role = (typeof ROLES)[number];
 
-export const ROLE_LABEL: Record<Role, string> = {
-  staff: "พนักงาน",
-  manager: "ผู้จัดการ",
-  accounting: "บัญชี",
-  admin: "ผู้ดูแลระบบ",
-};
-
 export const BranchSchema = z.object({ id: z.string(), code: z.string(), name: z.string() });
 export type Branch = z.infer<typeof BranchSchema>;
 
@@ -58,11 +51,6 @@ export const GoldPriceTodaySchema = z.object({
   source: z.enum(["branch", "central"]),
 });
 export type GoldPriceToday = z.infer<typeof GoldPriceTodaySchema>;
-
-export const GOLD_PRICE_SOURCE_LABEL: Record<GoldPriceToday["source"], string> = {
-  central: "ราคากลาง",
-  branch: "ราคาเฉพาะสาขา",
-};
 
 /** ราคาทองวันนี้ของสาขาปัจจุบัน — GET /api/gold-price/today · 404 = ยังไม่ได้ตั้ง → null */
 export const goldPriceTodayQueryOptions = queryOptions({

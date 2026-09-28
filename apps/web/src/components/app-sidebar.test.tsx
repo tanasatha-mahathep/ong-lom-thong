@@ -9,31 +9,17 @@ const titles = (role: Role) => navFor(role).flatMap((group) => group.items.map((
 
 describe("เมนูตาม role (spec §10)", () => {
   it.each<[Role, string[]]>([
-    ["staff", ["หน้าแรก", "ซื้อเข้า", "ค้นบิล", "ลูกค้า"]],
-    ["manager", ["หน้าแรก", "ซื้อเข้า", "ค้นบิล", "ลูกค้า", "ยอดซื้อ", "สต็อก", "ราคาทองวันนี้"]],
-    ["accounting", ["หน้าแรก", "ค้นบิล", "ลูกค้า", "ยอดซื้อ", "สต็อก", "ส่งบัญชีรายเดือน"]],
-    [
-      "admin",
-      [
-        "หน้าแรก",
-        "ซื้อเข้า",
-        "ค้นบิล",
-        "ลูกค้า",
-        "ยอดซื้อ",
-        "สต็อก",
-        "ส่งบัญชีรายเดือน",
-        "ราคาทองวันนี้",
-        "สาขา",
-        "ผู้ใช้",
-      ],
-    ],
+    ["staff", ["home", "buy", "bills", "customers"]],
+    ["manager", ["home", "buy", "bills", "customers", "purchase", "stock", "goldPrice"]],
+    ["accounting", ["home", "bills", "customers", "purchase", "stock", "export"]],
+    ["admin", ["home", "buy", "bills", "customers", "purchase", "stock", "export", "goldPrice", "branches", "users"]],
   ])("%s เห็นเฉพาะเมนูที่ทำได้", (role, expected) => {
     expect(titles(role)).toEqual(expected);
   });
 
   it("กลุ่มที่ไม่เหลือเมนูถูกซ่อนทั้งกลุ่ม — พนักงานไม่เห็นรายงานและตั้งค่า", () => {
     expect(navFor("staff").map((group) => group.title)).toEqual([undefined]);
-    expect(navFor("accounting").map((group) => group.title)).toEqual([undefined, "รายงาน"]);
+    expect(navFor("accounting").map((group) => group.title)).toEqual([undefined, "reports"]);
   });
 });
 

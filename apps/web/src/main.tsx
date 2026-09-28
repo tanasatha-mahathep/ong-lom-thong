@@ -3,10 +3,12 @@ import "./lib/zod-config";
 import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { listenForAppUpdates } from "@/lib/app-update";
 import { createAppRouter } from "@/router";
 import "./styles.css";
 
 const router = createAppRouter();
+listenForAppUpdates();
 const root = document.getElementById("root");
 if (!root) throw new Error("ไม่พบ #root ใน index.html");
 

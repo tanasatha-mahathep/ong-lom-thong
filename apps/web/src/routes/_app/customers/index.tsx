@@ -26,7 +26,7 @@ const SearchSchema = z.object({
 export const Route = createFileRoute("/_app/customers/")({
   validateSearch: SearchSchema,
   search: { middlewares: [stripSearchParams({ q: "", page: 1 })] },
-  staticData: { title: "ลูกค้า" },
+  staticData: { title: "customers" },
   component: CustomersPage,
 });
 

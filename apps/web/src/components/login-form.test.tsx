@@ -79,7 +79,7 @@ describe("หน้า login", () => {
 
   it.each([
     [401, { code: "INVALID_EMAIL_OR_PASSWORD", message: "Invalid email or password" }, "อีเมลหรือรหัสผ่านไม่ถูกต้อง"],
-    [429, { message: "Too many requests. Please try again later." }, "ลองใหม่อีกครั้งในอีกสักครู่"],
+    [429, { message: "Too many requests. Please try again later." }, "พยายามเข้าสู่ระบบบ่อยเกินไป รอสักครู่"],
     [403, { error: "forbidden origin" }, /BETTER_AUTH_URL.*http:\/\/localhost/],
     [401, { code: "FAILED_TO_CREATE_SESSION", message: "Failed to create session" }, "บัญชีนี้ถูกปิดใช้งาน"],
   ])("sign-in ตอบ %i → แสดงข้อความภาษาไทยและอยู่หน้าเดิม", async (status, body, message) => {
