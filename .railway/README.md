@@ -3,12 +3,12 @@
 `railway.ts` คือแหล่งเดียวของโครงสร้างบน Railway (Infrastructure as Code) — ใช้แทน `railway.json` ที่ถูก deprecate
 Railway **ไม่อ่านไฟล์นี้ตอน deploy** · แก้ไฟล์แล้วต้อง `pnpm railway:plan` → `pnpm railway:apply` เอง
 
-| resource    | ชนิด                                                            | หมายเหตุ                                                                                        |
-| ----------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `api`       | service (Dockerfile `apps/api/Dockerfile`, context = root repo) | เสิร์ฟ web + REST · pre-deploy: migrate (ที่ไม่ใช่ production: + seed) · healthcheck `/healthz` |
-| `gotenberg` | service (root `services/gotenberg`)                             | private เท่านั้น · `PORT=3000` · basic auth · healthcheck `/health`                             |
-| `Postgres`  | database (Postgres 18)                                          | `DATABASE_URL` อ้างจาก api                                                                      |
-| `files`     | bucket (region `sin`)                                           | private · virtual-hosted style · **ไม่มี versioning/object lock** → สำเนา off-site รายคืน       |
+| resource          | ชนิด                                                            | หมายเหตุ                                                                                        |
+| ----------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `Office`          | service (Dockerfile `apps/api/Dockerfile`, context = root repo) | เสิร์ฟ web + REST · pre-deploy: migrate (ที่ไม่ใช่ production: + seed) · healthcheck `/healthz` |
+| `PDF (Gotenberg)` | service (root `services/gotenberg`)                             | private เท่านั้น · `PORT=3000` · basic auth · healthcheck `/health`                             |
+| `Postgres`        | database (Postgres 18)                                          | `DATABASE_URL` อ้างจาก api                                                                      |
+| `Media`           | bucket (region `sin`)                                           | private · virtual-hosted style · **ไม่มี versioning/object lock** → สำเนา off-site รายคืน       |
 
 environment → branch: `dev` → `dev` · `testing` → `testing` · `staging` → `staging` · `production` → `main` · ทุกตัวรอ GitHub Actions ผ่านก่อน (Wait for CI)
 ชื่ออื่นไฟล์จะหยุดทันที · สร้าง environment เฉพาะที่ต้องใช้ (แต่ละตัวมี Postgres/bucket/gotenberg ของตัวเอง = ค่าใช้จ่ายเพิ่ม)
@@ -18,10 +18,10 @@ environment → branch: `dev` → `dev` · `testing` → `testing` · `staging` 
 
 | environment  | สถานะ                                                                                  | URL                                          |
 | ------------ | -------------------------------------------------------------------------------------- | -------------------------------------------- |
-| `staging`    | api · gotenberg · Postgres online · bucket `files`                                     | https://ong-lom-thong-staging.up.railway.app |
-| `production` | api · gotenberg · Postgres online · bucket `files` (แยก key จาก staging) · ยังไม่ seed | https://ong-lom-thong.up.railway.app         |
+| `staging`    | api · gotenberg · Postgres online · bucket `Media`                                     | https://ong-lom-thong-staging.up.railway.app |
+| `production` | api · gotenberg · Postgres online · bucket `Media` (แยก key จาก staging) · ยังไม่ seed | https://ong-lom-thong.up.railway.app         |
 
-staging สร้างจาก dashboard ก่อนมี IaC: rename bucket `bundled-taco` → `files` และ service `ong-lom-thong` → `api` ให้ IaC รับไปแก้ในที่ (ไม่มีการลบ)
+staging สร้างจาก dashboard ก่อนมี IaC: rename bucket `bundled-taco` → `Media` และ service `ong-lom-thong` → `api` ให้ IaC รับไปแก้ในที่ (ไม่มีการลบ)
 ล้างแล้ว 28 ก.ย.: volume `postgres-volume` และ `postgres-volume-GJW5` (detached · ถูกตั้งลบถาวร 29 ก.ย. — กู้ได้ก่อนนั้น) · service `@ong/web` `@ong/api` ไม่มีแล้ว
 staging: Pre-deploy Timeout ของ `api` = 300 วินาที (ตั้งผ่าน API `serviceInstanceUpdate`)
 
@@ -54,17 +54,17 @@ branch `staging` บน GitHub ต้องมีโค้ดชุดนี้�
    ```
 5. สร้าง domain สาธารณะให้ api (IaC ไม่จัดการ generated domain)
    ```bash
-   railway domain --service api
+   railway domain --service Office
    ```
-6. ตั้ง **Pre-deploy Timeout** ของ service `api` เป็น 300 วินาที ใน dashboard (Settings → Deploy) — IaC และ `railway environment edit` ตั้งค่านี้ไม่ได้ · ค่าเริ่มต้นไม่มีเวลาจำกัด (migration มี `lock_timeout` 10 วินาทีกันค้างอีกชั้น)
+6. ตั้ง **Pre-deploy Timeout** ของ service `Office` เป็น 300 วินาที ใน dashboard (Settings → Deploy) — IaC และ `railway environment edit` ตั้งค่านี้ไม่ได้ · ค่าเริ่มต้นไม่มีเวลาจำกัด (migration มี `lock_timeout` 10 วินาทีกันค้างอีกชั้น)
 7. ต่อจากนี้ push branch `staging` → CI ผ่าน → Railway deploy
 
 ## ตรวจหลัง deploy
 
 ```bash
-railway logs --service gotenberg     # ต้องเห็น "server started on [::]:3000" (ไม่ใช่ 8080)
-railway logs --service api           # pre-deploy: "migrations applied" + "seeded reference data"
-railway variable list --service api --kv  # GOTENBERG_URL ต้อง resolve เป็น http://gotenberg.railway.internal:3000
+railway logs --service "PDF (Gotenberg)"  # ต้องเห็น "server started on [::]:3000" (ไม่ใช่ 8080)
+railway logs --service Office        # pre-deploy: "migrations applied" + "seeded reference data"
+railway variable list --service Office --kv  # GOTENBERG_URL ต้อง resolve เป็น http://gotenberg.railway.internal:3000
 curl https://<domain>/healthz
 ```
 
@@ -73,7 +73,7 @@ curl https://<domain>/healthz
 ## หมุนค่าลับ
 
 export `RAILWAY_SET_*` ค่าใหม่แล้ว `pnpm railway:apply` — ไม่ export = `preserve()` คงค่าเดิม
-`RAILWAY_SET_GOTENBERG_PASSWORD` ใช้ทั้งใน `gotenberg` และ `api` — หมุนในการ apply ครั้งเดียวจึงตรงกันเสมอ
+`RAILWAY_SET_GOTENBERG_PASSWORD` ใช้ทั้งใน `PDF (Gotenberg)` และ `Office` — หมุนในการ apply ครั้งเดียวจึงตรงกันเสมอ
 
 ## production
 
@@ -83,5 +83,7 @@ export `RAILWAY_SET_*` ค่าใหม่แล้ว `pnpm railway:apply` �
 
 - **IaC สร้าง bucket ใน environment ที่สองไม่ได้** — apply ขึ้น ✓ แต่ไม่มี bucket · แก้ด้วย API `environmentPatchCommit` ใส่ `buckets.<bucket id> = { region: "sin", isCreated: true }` แล้ว plan กลับมา up to date
 - **Postgres ของ production ใช้ volume ชื่อ `postgres-volume` ซ้ำกับ instance ใน staging ที่ถูกตั้งลบ** (29 ก.ย.) · API แสดงว่าตั้งลบเฉพาะ instance ของ staging แต่เอกสารไม่ยืนยัน → **เจ้าของบัญชีกด restore ในอีเมล "volume deleted" ของ `postgres-volume`** กันไว้ก่อน
+- **ชื่อ service/bucket ผูกกับ IaC** — เปลี่ยนชื่อใน dashboard แล้วต้องแก้ค่าคงที่ใน `railway.ts` (`APP_SERVICE` `PDF_SERVICE` `BUCKET`) ก่อน apply ครั้งถัดไป ไม่งั้น plan จะสร้างใหม่แล้ว **ลบตัวเดิม** · Railway แก้ reference ใน variable ให้เองตอนเปลี่ยนชื่อ
+- **deploy รออนุมัติ (NEEDS_APPROVAL)** — push จากบัญชี GitHub ที่ไม่ผูกกับบัญชี Railway ที่เป็นสมาชิก project (เช่น `danglebz`) Railway จะไม่ deploy เองจนกว่าจะกด Approve · แก้ถาวร: สมัคร/ผูก Railway ด้วย GitHub นั้นแล้วเชิญเข้า workspace
 - ค่าที่ไม่ได้ประกาศใน `railway.ts` จะถูกล้างตอน apply (เช่น pre-deploy timeout) — ประกาศทุกค่าที่ต้องการไว้ในไฟล์
-  production ไม่ seed อัตโนมัติ — seed เองหลังได้รหัสสาขา 5 หลักจริง (`railway ssh --service api -- node dist/seed.js`)
+  production ไม่ seed อัตโนมัติ — seed เองหลังได้รหัสสาขา 5 หลักจริง (`railway ssh --service Office -- node dist/seed.js`)
