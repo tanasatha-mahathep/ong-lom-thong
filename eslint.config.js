@@ -70,6 +70,13 @@ export default defineConfig(
     files: ["packages/core/src/**/*.tsx"],
     extends: [reactHooks.configs.flat.recommended],
   },
+  {
+    // ด่าน coverage 100% ต่อไฟล์ของ packages/core (vitest.config.ts) — ห้ามข้ามด้วยคอมเมนต์ ignore
+    files: ["packages/core/src/**/*.{ts,tsx}"],
+    rules: {
+      "no-warning-comments": ["error", { terms: ["v8 ignore", "istanbul ignore", "c8 ignore"], location: "anywhere" }],
+    },
+  },
   { files: ["**/*.js"], extends: [tseslint.configs.disableTypeChecked] },
   prettier,
 );
