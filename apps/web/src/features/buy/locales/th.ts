@@ -34,6 +34,7 @@ export default {
       tooOld: "ย้อนหลังได้ไม่เกิน 7 วัน",
       badTime: "เวลาไม่ถูกต้อง — พิมพ์ ชช:นน เช่น 14:05",
       timeRequired: "บิลย้อนหลังต้องระบุเวลา",
+      dateNotConfirmed: "กด Enter เพื่อยืนยันวันที่",
     },
   },
 

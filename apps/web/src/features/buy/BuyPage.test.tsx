@@ -348,4 +348,39 @@ describe("/buy", () => {
       vi.useRealTimers();
     }
   });
+
+  it("blocks Ctrl+Enter while a backdate change is typed but not confirmed (B1)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-29T05:00:00Z")); // 12:00 เวลาไทย
+    try {
+      const { api, user } = setup({ role: "manager" });
+      await waitFor(() => expect(idBox()).toHaveFocus());
+      await user.click(screen.getByRole("switch", { name: t("backdate.toggle") }));
+      const date = screen.getByLabelText(t("backdate.date"));
+
+      // ยืนยันวันที่ 22 ก่อน
+      await user.clear(date);
+      await user.keyboard("22/9/2569{Enter}");
+      expect(date).toHaveValue("22/09/2569");
+      await waitFor(() => expect(quotes(api).at(-1)?.body).toMatchObject({ date: "2026-09-22" }));
+
+      // กลับไปแก้เป็นวันที่ 23 โดยยังไม่กด Enter/ออกจากช่อง
+      await user.click(date);
+      await user.clear(date);
+      await user.keyboard("23/09/2569");
+      expect(date).toHaveValue("23/09/2569");
+
+      const before = saves(api).length;
+      await user.keyboard("{Control>}{Enter}{/Control}");
+      expect(date).toHaveFocus();
+      expect(saves(api)).toHaveLength(before);
+      expect(saveButton()).toHaveAccessibleDescription(new RegExp(t("backdate.errors.dateNotConfirmed")));
+
+      // กด Enter ยืนยันแล้วค่อยบันทึกได้ ด้วยวันที่ใหม่ (23) ไม่ใช่วันที่เดิม (22)
+      await user.keyboard("{Enter}");
+      await waitFor(() => expect(quotes(api).at(-1)?.body).toMatchObject({ date: "2026-09-23" }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

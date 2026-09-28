@@ -134,6 +134,39 @@ describe("backdate", () => {
     expect(backdateIssue({ ...past, timeText: "09:30" })).toBeNull();
     expect(backdateIssue(initialBuyState.backdate)).toBeNull();
   });
+
+  it("blocks an uncommitted date change instead of silently keeping the old one (B1)", () => {
+    const committed = buyReducer(
+      buyReducer(buyReducer(initialBuyState, { type: "backdateToggled", enabled: true, today: "2026-09-29" }), {
+        type: "backdateDateTyped",
+        text: "22/09/2569",
+      }),
+      { type: "backdateDateCommitted", today: "2026-09-29" },
+    );
+    expect(committed.backdate.date).toBe("2026-09-22");
+
+    // พิมพ์วันที่ใหม่แล้วยังไม่กด Enter/blur — date ต้องไม่ใช่ทั้งค่าเดิม (22) และค่าที่พิมพ์ใหม่ (23) จนกว่าจะยืนยัน
+    const retyped = buyReducer(committed, { type: "backdateDateTyped", text: "23/09/2569" });
+    expect(retyped.backdate.date).toBeNull();
+    expect(retyped.backdate.dateText).toBe("23/09/2569");
+    expect(buildQuoteBody(retyped)).toBeNull();
+    expect(buildSaveBody(retyped, "k".repeat(16))).toBeNull();
+    expect(backdateIssue(retyped.backdate)).toEqual({ field: "date", error: "dateNotConfirmed" });
+
+    // ยืนยันแล้ว — date กลับมาเป็นค่าที่ตรวจแล้วอีกครั้ง (ปัญหาที่เหลือคือยังไม่กรอกเวลา ไม่ใช่วันที่อีกต่อไป)
+    const reCommitted = buyReducer(retyped, { type: "backdateDateCommitted", today: "2026-09-29" });
+    expect(reCommitted.backdate.date).toBe("2026-09-23");
+    expect(backdateIssue(reCommitted.backdate)).toEqual({ field: "time", error: "timeRequired" });
+  });
+
+  it("checks the typed time live, so an invalid time cannot slip through before it is committed (B1)", () => {
+    const past = commit("28/09/2569");
+    // เวลาที่พิมพ์ไว้ผิดรูปแบบแต่ยังไม่ได้ blur/Enter — timeError ในสถานะยังเป็น null แต่ backdateIssue ต้องจับได้
+    expect(backdateIssue({ ...past, timeText: "25:00", timeError: null })).toEqual({
+      field: "time",
+      error: "badTime",
+    });
+  });
 });
 
 describe("entry rows", () => {
