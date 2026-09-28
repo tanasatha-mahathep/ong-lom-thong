@@ -5,3 +5,4 @@ export * from "./card";
 export * from "./buy";
 export * from "./businessDate";
 export * from "./nationalId";
+export * from "./thai";
