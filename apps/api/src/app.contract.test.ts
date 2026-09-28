@@ -69,6 +69,12 @@ const NO_DELETE_ALLOWED = new Set<string>([
   "DELETE /api/gold-price/today/branches/:branchId",
 ]);
 
+/**
+ * เลข 13 หลักที่ไม่ใช่เลขบัตรของบุคคล — เลขผู้เสียภาษีของร้าน (นิติบุคคล · COMPANY_TAX_ID) ต้องพิมพ์บนใบรับซื้อ
+ * (เอกสารภาษี) และมากับบิลใน snapshot ของกิจการ (PR #68) · ยกเว้นเฉพาะเลขนี้ตัวเดียว เลขอื่นยังถูกจับ
+ */
+const notPersonalIds = () => [harness().env.COMPANY_TAX_ID];
+
 /** endpoint เดียวที่ส่งเลขบัตรเต็มได้ (R13 · spec §5 · CLAUDE.md กฎ 7) */
 const PII_EXCEPTION = "GET /api/customers/:id";
 
@@ -83,6 +89,10 @@ const BRANCHLESS_ALLOWED = new Map<string, (body: unknown) => void>([
       expect(me.branches, "GET /api/me: branches").toEqual([]);
     },
   ],
+  // PR #68: จัดการสาขา/ผู้ใช้ — requireRole("admin") ทั้ง router · เป็นข้อมูลระบบทั้งร้าน ไม่ใช่ข้อมูลของสาขา (spec §10:
+  // admin = ผู้ใช้/สาขา/ตั้งค่า) · admin ที่ยังไม่มีสาขาต้องเข้าได้เพื่อผูกสาขาให้คนอื่น (bootstrap) — ต้องได้รายการจริง
+  ["GET /api/admin/branches", (body) => expect((body as { items?: unknown }).items).toEqual(expect.any(Array))],
+  ["GET /api/admin/users", (body) => expect((body as { items?: unknown }).items).toEqual(expect.any(Array))],
 ]);
 
 /**
@@ -433,6 +443,14 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
     });
     if (bill.status !== 201) throw new Error(`เปิดบิลไม่สำเร็จ: ${bill.status} ${await bill.text()}`);
     receiptId = ((await bill.json()) as { id: string }).id;
+    // งานสร้าง PDF หลังบันทึก (renderer ปลอมของ harness) — ให้ /buy/:id/pdf และ /idcard มีไฟล์จริงให้ตรวจ ไม่ใช่ข้าม
+    await T.tasks.idle();
+    const [ready] = await T.db
+      .select({ pdf: buyReceipt.pdfStatus, idcard: buyReceipt.idcardStatus })
+      .from(buyReceipt)
+      .where(eq(buyReceipt.id, receiptId));
+    if (ready?.pdf !== "ready" || ready.idcard !== "ready")
+      throw new Error(`PDF ของบิลตั้งต้นไม่พร้อม: ${JSON.stringify(ready)}`);
   });
 
   describe("ทะเบียน route (API9:2023 inventory · ASVS 4.0.3 V13.2.1)", () => {
@@ -588,7 +606,14 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
           return typeof real === "function" ? explode : real;
         },
       });
-      const broken = createApp({ db: brokenDb, auth: T.auth, env: T.env, storage: T.storage, now: () => NOW });
+      const broken = createApp({
+        db: brokenDb,
+        auth: T.auth,
+        env: T.env,
+        storage: T.storage,
+        pdf: T.pdf,
+        now: () => NOW,
+      });
       const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
       try {
         for (const e of guarded) {
@@ -712,8 +737,9 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
               expect(isJson(r.type), where).toBe(true);
               expect(nationalIdsIn(r.text), where).toEqual([r.nationalId]);
               expect(r.cacheControl, where).toMatch(noStore);
-            } else if (!r.type?.startsWith("image/")) {
-              expectNoNationalId(r.text, where, KNOWN_IDS);
+            } else if (!r.type?.startsWith("image/") && !r.type?.startsWith("application/pdf")) {
+              // รูปบัตรและไฟล์ PDF ใบรับซื้อ/สำเนาบัตรมีเลขเต็มได้ (CLAUDE.md กฎ 7 · R13) — เสิร์ฟหลัง login + no-store เท่านั้น
+              expectNoNationalId(r.text, where, KNOWN_IDS, notPersonalIds());
             }
           }
         });
@@ -728,10 +754,17 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
 
     describe("เงิน/น้ำหนักใน JSON เป็น string · ไม่มี float (CLAUDE.md กฎ 1)", () => {
       for (const e of guardedGets) {
-        it(`${e.key} — JSON ทุกก้อนที่ตอบมาผ่าน expectMoneyAsStrings`, (ctx) => {
-          const json = responsesOf(e).filter((r) => isJson(r.type));
-          if (json.length === 0) return ctx.skip(`${e.key}: ไม่มี response ที่เป็น JSON`);
-          for (const r of json) expectMoneyAsStrings(JSON.parse(r.text), `${e.key} [${r.path}]`);
+        it(`${e.key} — JSON ทุกก้อนผ่าน expectMoneyAsStrings · ที่ไม่ใช่ JSON ต้องเป็นไฟล์ (PDF/รูป)`, () => {
+          const responses = responsesOf(e);
+          expect(responses, e.key).not.toEqual([]);
+          for (const r of responses) {
+            const where = `${e.key} [${r.path}]`;
+            if (isJson(r.type)) expectMoneyAsStrings(JSON.parse(r.text), where);
+            else
+              expect(r.type ?? "(ไม่มี Content-Type)", `${where}: ไม่ใช่ JSON ต้องเป็นไฟล์`).toMatch(
+                /^(application\/pdf|image\/)/,
+              );
+          }
         });
       }
 
