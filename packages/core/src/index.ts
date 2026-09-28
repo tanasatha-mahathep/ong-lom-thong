@@ -4,3 +4,4 @@ export * from "./docNo";
 export * from "./card";
 export * from "./buy";
 export * from "./businessDate";
+export * from "./nationalId";
