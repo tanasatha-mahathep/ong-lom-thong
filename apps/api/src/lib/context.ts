@@ -3,7 +3,7 @@ import { createMiddleware } from "hono/factory";
 import type { Auth } from "../auth";
 import type { Env } from "../env";
 import type { ReceiptPdfService } from "../services/receiptPdf";
-import { type Viewer, forUser } from "./scope";
+import { type Viewer, forUser, forUserHistory } from "./scope";
 import type { Storage } from "./storage";
 
 export interface AppEnv {
@@ -55,6 +55,16 @@ export const requireRole = (...roles: Role[]) =>
  */
 export const requireAnyBranch = createMiddleware<AppEnv>(async (c, next) => {
   const readable = await forUser(c.var.db, c.var.viewer);
+  if (readable.length === 0) return c.json(apiError("forbidden"), 403);
+  await next();
+});
+
+/**
+ * เหมือน requireAnyBranch แต่นับสาขาตาม forUserHistory — ใช้กับ router ของเอกสารย้อนหลัง (บิล)
+ * accounting/admin ที่สาขาถูกปิดหมดแล้วยังอ่านได้ · endpoint เขียนใน router เดียวกันต้องตรวจสาขาที่เปิดอยู่เอง
+ */
+export const requireAnyHistoryBranch = createMiddleware<AppEnv>(async (c, next) => {
+  const readable = await forUserHistory(c.var.db, c.var.viewer);
   if (readable.length === 0) return c.json(apiError("forbidden"), 403);
   await next();
 });

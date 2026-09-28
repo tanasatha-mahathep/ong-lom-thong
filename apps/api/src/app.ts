@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import type { Auth } from "./auth";
 import type { Env } from "./env";
 import { type AppEnv, apiError } from "./lib/context";
+import { loggableError } from "./lib/log";
 import { sameOriginOnly } from "./lib/origin";
 import type { Storage } from "./lib/storage";
 import type { ReceiptPdfService } from "./services/receiptPdf";
@@ -54,7 +55,8 @@ export function createApp({ db, auth, env, storage, pdf, now = () => new Date() 
   app.route("/api", api);
 
   app.onError((err, c) => {
-    console.error(err);
+    // ห้าม log ค่า params ของ query — มีข้อมูลลูกค้า (lib/log.ts)
+    console.error(loggableError(err));
     return c.json(apiError("internal error"), 500);
   });
   return app;

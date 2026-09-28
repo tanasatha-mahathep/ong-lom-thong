@@ -9,10 +9,12 @@ import {
   goldPrice,
   metal,
   payment,
+  session,
   stockMovement,
 } from "@ong/db";
 import { type SQL, and, asc, eq, ne, sql } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { format } from "node:util";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { type TestApp, databaseAvailable, startTestApp } from "../test/harness";
 
 const available = await databaseAvailable();
@@ -22,6 +24,7 @@ const PW = "correct-horse-battery";
 const ID_A = "1103700123458";
 const ID_B = "3100500987657";
 const ID_C = "5109900112237";
+const ID_D = "3101200456789";
 
 // 10:00 น. วันที่ 5 ต.ค. 2569 เวลาไทย → งวดเลขที่ 6910
 const NOW = new Date("2026-10-05T03:00:00Z");
@@ -112,6 +115,7 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
   let custA = "";
   let custB = "";
   let custC = "";
+  let custD = "";
   let keySeq = 0;
 
   beforeAll(async () => {
@@ -121,7 +125,11 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       { who: "staff1", branch: "00001" },
       { who: "staff2", branch: "00002" },
       { who: "acct", branch: "00000", role: "accounting" as const },
+      { who: "mgr", branch: "00000", role: "manager" as const }, // บิลย้อนหลังได้เฉพาะผู้จัดการขึ้นไป
       { who: "boss", role: "admin" as const, viewAll: true }, // เห็นทุกสาขา แต่ยังไม่ได้เลือกสาขาที่ทำงาน
+      { who: "mgrall", role: "manager" as const, viewAll: true }, // เห็นทุกสาขาที่เปิดอยู่ (ไม่ใช่ role อ่านย้อนหลัง)
+      { who: "acct2", branch: "00002", role: "accounting" as const },
+      { who: "mgr2", branch: "00002", role: "manager" as const },
       { who: "nobranch" },
     ];
     for (const a of accounts) {
@@ -130,11 +138,16 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       cookies[a.who] = await t.login(`${a.who}@ong.test`, PW);
     }
     metals = Object.fromEntries((await t.db.select().from(metal)).map((m) => [m.code, m.id]));
+    // seed ตั้งรหัสสาขาสรรพากรให้เฉพาะสำนักงานใหญ่ — สาขาอื่นต้องมีรหัสก่อนขายได้ (ดูเทสต์รหัสสาขาข้างล่าง)
+    for (const code of ["00001", "00002"]) {
+      await t.db.update(branch).set({ taxBranchCode: code }).where(eq(branch.code, code));
+    }
 
     // ราคากลางของวันนี้และของวันย้อนหลัง · สาขา 00001 มีราคาของตัวเองวันนี้ · 3 ต.ค. ไม่มีราคา
     await t.db.insert(goldPrice).values([
       { date: TODAY, barSell: "67850", barBuy: "67650", jewelryBuy: "64268" },
       { date: "2026-09-30", barSell: "67000", barBuy: "66800", jewelryBuy: "63460" },
+      { date: "2026-09-28", barSell: "66500", barBuy: "66300", jewelryBuy: "62985" }, // ย้อนหลัง 7 วันพอดี
       { branchId: t.branches["00001"], date: TODAY, barSell: "68000", barBuy: "67800", jewelryBuy: "64410" },
     ]);
 
@@ -173,6 +186,8 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     payments: [{ method: "cash", amount: "20030" }],
     ...over,
   });
+  /** เหตุผลของบิลย้อนหลัง (บังคับ · ลง audit) */
+  const REASON = { backdate_reason: "ระบบล่ม คีย์ใบเขียนมือ" };
   const newKey = () => `test-key-${String(++keySeq).padStart(8, "0")}`;
   // async = คืน Promise เสมอ (app.request อาจคืน Response ตรง ๆ) — ใช้กับ Promise.all ได้
   const quote = async (body: unknown, who = "staff") => t.request("/api/buy/quote", { cookie: cookies[who], body });
@@ -185,6 +200,18 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     const res = await get(qs ? `?${qs}` : "", who);
     expect(res.status).toBe(200);
     return (await res.json()) as ListRes;
+  };
+  /** ยอดที่ควรได้ คิดจากแถวใน DB ด้วย decimal.js — เฉพาะบิลที่ยังไม่ยกเลิก */
+  const expectedTotals = async (where?: SQL): Promise<Totals> => {
+    const rows = await t.db
+      .select({ weight: buyReceipt.totalWeight, amount: buyReceipt.totalAmount })
+      .from(buyReceipt)
+      .where(and(where, eq(buyReceipt.status, "active")));
+    return {
+      count: String(rows.length),
+      total_weight: fmtWeight(rows.reduce((sum, r) => sum.plus(r.weight), ZERO)),
+      total_amount: fmtMoney(rows.reduce((sum, r) => sum.plus(r.amount), ZERO)),
+    };
   };
   const receiptCount = async () => (await t.db.select({ id: buyReceipt.id }).from(buyReceipt)).length;
   /** เลขที่ของสาขาในงวด เรียงจากน้อยไปมาก */
@@ -246,6 +273,8 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     [{ lines: "gold" }, "lines"],
     [{ payments: undefined }, "payments"],
     [{ date: "2026-02-30" }, "date"],
+    [{ date: "0000-01-01" }, "date"], // เคยเป็น 500 (Postgres ไม่มีปี 0)
+    [{ date: "1999-12-31" }, "date"],
     [{ customer_id: "not-a-uuid" }, "customer_id"],
     [{ lines: Array.from({ length: 51 }, () => ({ metal_id: "x", weight_g: "1", amount: "1" })) }, "lines"],
   ])("payload ผิดรูป %j → 400 ชี้ %s (ตัวเลข JSON ถูกปฏิเสธ — ต้องเป็น string)", async (over, field) => {
@@ -271,6 +300,57 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     });
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ field });
+  });
+
+  it.each([
+    [{ detail: "สร้อย\u0000ขาด" }, "detail"],
+    [{ detail: "bell\u0007" }, "detail"],
+    [{ payments: [{ method: "transfer", bank: "KBANK\u0001", amount: "20030" }] }, "payments.0.bank"],
+    [{ detail: "สร้อย\uD800ขาด" }, "detail"], // surrogate เดี่ยว (UTF-16 ไม่สมบูรณ์)
+    [{ date: "2026-09-30", time: "16:30", backdate_reason: "ระบบล่ม\uDC00คีย์ใบเขียนมือ" }, "backdate_reason"],
+  ])("อักขระที่ใช้ไม่ได้ในข้อความ %j → 400 ชี้ %s", async (over, field) => {
+    const res = await save(bill(over));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "มีอักขระที่ใช้ไม่ได้", field });
+  });
+
+  it("tab · ขึ้นบรรทัดใหม่ ในรายละเอียดใช้ได้ (ผ่านการตรวจ ไปติดที่ quote แทน)", async () => {
+    const res = await save(bill({ customer_id: null, detail: "สร้อย\tขาด\r\nแหวนเงิน\n" }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ field: "customer_id" });
+  });
+
+  it("บิลย้อนหลังต้องระบุเวลา (400 ชี้ time) · ไม่บันทึก", async () => {
+    const res = await save(bill({ date: "2026-09-30", ...REASON }), "mgr");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "บิลย้อนหลังต้องระบุเวลา", field: "time" });
+    expect(await receiptCount()).toBe(0);
+  });
+
+  it("บิลวันนี้: เวลาล่วงหน้าเกิน 5 นาที = 400 ชี้ time", async () => {
+    const res = await save(bill({ time: "10:06" })); // ตอนนี้ 10:00
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "เวลาต้องไม่เกินเวลาปัจจุบัน", field: "time" });
+    expect(await receiptCount()).toBe(0);
+  });
+
+  it('ช่องว่าง = ไม่ได้กรอก: customer_id "" → quote 200 ok:false (ไม่ใช่ 400) · POST 409', async () => {
+    for (const customer_id of ["", "  ", null]) {
+      const q = await quote(bill({ customer_id }));
+      expect(q.status).toBe(200);
+      expect(((await q.json()) as QuoteRes).errors[0]).toEqual({ field: "customer_id", message: BUY_MSG.noCustomer });
+    }
+    // time "" ก็ไม่ใช่ 400 — ไปติด quote (ไม่มีลูกค้า) = 409
+    const res = await save(bill({ customer_id: "", time: "" }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ field: "customer_id" });
+  });
+
+  it('ช่องว่าง = ไม่ได้กรอก: date "" / null → วันนี้', async () => {
+    for (const date of ["", null]) {
+      const q = (await (await quote(bill({ date }))).json()) as QuoteRes;
+      expect(q).toMatchObject({ ok: true, date: TODAY });
+    }
   });
 
   it("body ไม่ใช่ JSON / ไม่ใช่ object = 400", async () => {
@@ -332,16 +412,39 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
   });
 
   // override เป็นฟังก์ชัน — id ลูกค้า/โลหะ มีค่าหลัง beforeAll
-  const cases: [string, () => Record<string, unknown>, string, string][] = [
+  // [ชื่อ · override · field · ข้อความ · ผู้ใช้ (ค่าเริ่มต้น staff)]
+  const cases: [string, () => Record<string, unknown>, string, string, string?][] = [
     ["ไม่มีลูกค้า (R1)", () => ({ customer_id: null }), "customer_id", BUY_MSG.noCustomer],
     ["ลูกค้าที่ไม่มีอยู่", () => ({ customer_id: NO_UUID }), "customer_id", BUY_MSG.noCustomer],
     ["บัตรหมดอายุ ณ วันที่บิล (R2)", () => ({ customer_id: custB }), "customer_id", "บัตรประชาชนหมดอายุแล้ว"],
     ["ไม่มีวันหมดอายุบัตร (R2)", () => ({ customer_id: custC }), "customer_id", "ยังไม่ได้กรอกวันที่บัตรหมดอายุ"],
     [
       "ไม่มีราคาทองของวันบิล (R7)",
-      () => ({ date: "2026-10-03" }),
+      () => ({ date: "2026-10-03", ...REASON }),
       "gold_price",
       "ยังไม่ได้ตั้งราคาทองของวันที่ 03/10/2569",
+      "mgr",
+    ],
+    [
+      "staff เปิดบิลย้อนหลัง",
+      () => ({ date: "2026-10-04", ...REASON }),
+      "date",
+      "เปิดบิลย้อนหลังได้เฉพาะผู้จัดการขึ้นไป",
+    ],
+    ["ย้อนหลังเกิน 7 วัน", () => ({ date: "2026-09-27", ...REASON }), "date", "ย้อนหลังได้ไม่เกิน 7 วัน", "mgr"],
+    [
+      "ย้อนหลังไม่มีเหตุผล",
+      () => ({ date: "2026-09-30" }),
+      "backdate_reason",
+      "กรุณาระบุเหตุผลที่บันทึกย้อนหลัง",
+      "mgr",
+    ],
+    [
+      "เหตุผลสั้นเกินไป",
+      () => ({ date: "2026-09-30", backdate_reason: " ล่ม " }),
+      "backdate_reason",
+      "เหตุผลที่บันทึกย้อนหลังต้องยาวอย่างน้อย 5 ตัวอักษร",
+      "mgr",
     ],
     [
       "ชำระไม่ครบ (R4)",
@@ -368,6 +471,18 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       "กรุณาเลือกประเภทเงินที่ชำระ",
     ],
     [
+      "โอนเงินไม่ระบุธนาคาร",
+      () => ({ payments: [{ method: "transfer", bank: "", amount: "20030" }] }),
+      "payments.0.bank",
+      "กรุณาเลือกธนาคาร",
+    ],
+    [
+      "เงินสดระบุธนาคาร",
+      () => ({ payments: [{ method: "cash", bank: "KBANK", amount: "20030" }] }),
+      "payments.0.bank",
+      "เงินสดไม่ต้องระบุธนาคาร",
+    ],
+    [
       "โลหะที่ไม่รู้จัก",
       () => ({ lines: [{ metal_id: NO_UUID, weight_g: "5.860", amount: "20030" }] }),
       "lines.0.metal_id",
@@ -382,6 +497,12 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       BUY_MSG.badNumber,
     ],
     [
+      "น้ำหนักใส่จุลภาค (5,860 ที่ตั้งใจพิมพ์ 5.860)",
+      () => ({ lines: [line("gold", "5,860", "20030")], payments: [] }),
+      "lines.0.weight_g",
+      "น้ำหนักห้ามใส่จุลภาค — เช่น 5.860 หรือ 1250.500",
+    ],
+    [
       "เลขบัตรหลุดลงช่องราคา",
       () => ({ lines: [line("gold", "5.860", ID_A)], payments: [] }),
       "lines.0.amount",
@@ -389,17 +510,17 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     ],
   ];
 
-  it.each(cases)("%s → quote ok:false · POST 409 ไม่บันทึก", async (_name, over, field, message) => {
+  it.each(cases)("%s → quote ok:false · POST 409 ไม่บันทึก", async (_name, over, field, message, who = "staff") => {
     const body = bill(over());
     const before = await receiptCount();
 
-    const q = await quote(body);
+    const q = await quote(body, who);
     expect(q.status).toBe(200);
     const qBody = (await q.json()) as QuoteRes;
     expect(qBody.ok).toBe(false);
     expect(qBody.errors[0]).toEqual({ field, message });
 
-    const res = await save(body);
+    const res = await save({ time: "09:00", ...body }, who);
     expect(res.status).toBe(409);
     // 409 แนบผล quote ทั้งก้อน (ตัวเดียวกับ /quote) ให้จอแสดง error ต่อช่องได้
     expect(await res.json()).toMatchObject({ error: message, field, ok: false, errors: qBody.errors });
@@ -407,8 +528,45 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
   });
 
   it("บัตรคิด ณ วันที่ของบิล: บัตรหมดอายุ 1 ต.ค. ใช้กับบิลย้อนหลัง 30 ก.ย. ได้", async () => {
-    const q = (await (await quote(bill({ customer_id: custB, date: "2026-09-30" }))).json()) as QuoteRes;
+    const res = await quote(bill({ customer_id: custB, date: "2026-09-30", ...REASON }), "mgr");
+    const q = (await res.json()) as QuoteRes;
     expect(q).toMatchObject({ ok: true, date: "2026-09-30", gold_price_snapshot: "67000.00" });
+  });
+
+  it("ย้อนหลัง 7 วันพอดีได้ (ผู้จัดการ + เหตุผล) · บิลวันนี้ไม่ต้องมีเหตุผล", async () => {
+    const q = (await (await quote(bill({ date: "2026-09-28", ...REASON }), "mgr")).json()) as QuoteRes;
+    expect(q).toMatchObject({ ok: true, date: "2026-09-28", gold_price_snapshot: "66500.00" });
+    expect(((await (await quote(bill())).json()) as QuoteRes).ok).toBe(true);
+  });
+
+  it("Siam ID พิมพ์วันหมดอายุเป็นชื่อเดือนไทย ('31 ธันวาคม 2574') → เพิ่มลูกค้าแล้วเปิดบิลได้ (สถานะบัตร ok)", async () => {
+    const form = new FormData();
+    form.append("national_id", ID_D);
+    form.append("name_th", "นายสยาม ไอดี");
+    form.append("card_expire_text", "31 ธันวาคม 2574");
+    const created = await t.request("/api/customers", { cookie: cookies.staff, body: form });
+    expect(created.status).toBe(201);
+    custD = ((await created.json()) as { id: string }).id;
+    const detail = await t.request(`/api/customers/${custD}`, { cookie: cookies.staff });
+    expect(await detail.json()).toMatchObject({ card_status: "ok", card_expire_date: "2031-12-31" });
+
+    const q = (await (await quote(bill({ customer_id: custD }))).json()) as QuoteRes;
+    expect(q).toMatchObject({ ok: true, errors: [], total_amount: "20030.00" });
+  });
+
+  // ลูกค้าระบบเดิมย้ายมาพร้อมข้อความตามที่พิมพ์ไว้ — สถานะบัตรคิดจากข้อความ ณ วันที่ของบิล (5 ต.ค. 2569)
+  it.each([
+    ["1 ม.ค. 2570", null],
+    ["5 Oct. 2026", null], // หมดอายุวันนี้ยังใช้ได้
+    ["LIFELONG", null],
+    ["99999999", null], // บัตรตลอดชีพ ค่าดิบจากชิป
+    ["4 ต.ค. 2569", "บัตรประชาชนหมดอายุแล้ว"],
+    ["1 มกรา 2570", "รูปแบบวันที่บัตรหมดอายุไม่ถูกต้อง"],
+  ])("วันหมดอายุ %j → quote ผ่าน / บล็อกด้วย %s (R2)", async (cardExpireText, message) => {
+    await t.db.update(customer).set({ cardExpireText }).where(eq(customer.id, custD));
+    const q = (await (await quote(bill({ customer_id: custD }))).json()) as QuoteRes;
+    expect(q.errors).toEqual(message ? [{ field: "customer_id", message }] : []);
+    expect(q.ok).toBe(message === null);
   });
 
   // ---------- บันทึก ----------
@@ -555,9 +713,13 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
   });
 
   let backdatedId = "";
+  const backKey = "test-key-backdated-0001";
 
   it("บิลย้อนหลังข้ามเดือน → เลขงวดของวันบิล RC6909-0001 · ราคาของวันนั้น · สต็อกลงวันบิล · audit", async () => {
-    const res = await save(bill({ customer_id: custB, date: "2026-09-30", time: "16:30" }));
+    const res = await save(
+      bill({ customer_id: custB, date: "2026-09-30", time: "16:30", ...REASON, idempotency_key: backKey }),
+      "mgr",
+    );
     expect(res.status).toBe(201);
     const saved = (await res.json()) as SavedRes;
     expect(saved.doc_no).toBe("RC6909-0001");
@@ -572,10 +734,16 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     const audits = await t.db.select().from(auditLog).where(eq(auditLog.rowId, saved.id));
     expect(audits).toHaveLength(1);
     expect(audits[0]).toMatchObject({
-      userId: userIds.staff,
+      userId: userIds.mgr,
       action: "buy.backdate",
       tableName: "buy_receipt",
-      diff: { doc_no: "RC6909-0001", date: "2026-09-30", time: "16:30", entered_on: TODAY },
+      diff: {
+        doc_no: "RC6909-0001",
+        date: "2026-09-30",
+        time: "16:30",
+        entered_on: TODAY,
+        reason: "ระบบล่ม คีย์ใบเขียนมือ",
+      },
     });
   });
 
@@ -636,6 +804,119 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       .from(docSequence)
       .where(and(eq(docSequence.branchId, t.branches["00000"] ?? ""), eq(docSequence.period, "6910")));
     expect(counter?.lastNo).toBe(16);
+  });
+
+  it("idempotency ผูกกับเนื้อบิลทั้งใบ: key เดิมแต่เนื้อต่างทุกมิติ = 409 พร้อมบิลที่บันทึกแล้ว", async () => {
+    const key = newKey();
+    const first = await saveWithKey(key);
+    expect(first.status).toBe(201);
+    const saved = (await first.json()) as SavedRes;
+    const other: [string, Record<string, unknown>][] = [
+      ["ยอดต่าง", bill({ lines: [line("gold", "5.860", "20031")], payments: [{ method: "cash", amount: "20031" }] })],
+      ["น้ำหนักต่าง", bill({ lines: [line("gold", "5.861", "20030")] })],
+      ["ลูกค้าต่าง", bill({ customer_id: custB })],
+      ["ไม่มีลูกค้า", bill({ customer_id: null })],
+      ["โลหะต่าง น้ำหนัก/ราคาเท่าเดิม", bill({ lines: [line("silver", "5.860", "20030")] })],
+      ["แบ่งแถวต่าง ยอดรวมเท่าเดิม", bill({ lines: [line("gold", "2.930", "10015"), line("gold", "2.930", "10015")] })],
+      [
+        "แบ่งชำระต่าง ยอดรวมเท่าเดิม",
+        bill({
+          payments: [
+            { method: "cash", amount: "10030" },
+            { method: "transfer", bank: "KBANK", amount: "10000" },
+          ],
+        }),
+      ],
+      ["รายละเอียดต่าง", bill({ detail: "สร้อยขาด 1 เส้น" })],
+      ["ใบกำกับเต็มรูปต่าง", bill({ full_tax: true })],
+      ["ส่งวันที่ต่าง", bill({ date: "2026-10-04", time: "10:00", ...REASON })],
+    ];
+    for (const [name, body] of other) {
+      const res = await t.request("/api/buy", { cookie: cookies.staff, body: { ...body, idempotency_key: key } });
+      expect({ name, status: res.status }).toEqual({ name, status: 409 });
+      expect(await res.json()).toEqual({
+        error: "idempotency_key นี้ใช้กับบิลอื่นแล้ว",
+        field: "idempotency_key",
+        existing: { id: saved.id, doc_no: saved.doc_no },
+      });
+    }
+    expect(await t.db.select().from(buyReceipt).where(eq(buyReceipt.idempotencyKey, key))).toHaveLength(1);
+  });
+
+  it("idempotency: เนื้อเดิมทุกอย่าง = บิลเดิม (200) แม้เขียนตัวเลขคนละรูป · ส่งวันที่วันนี้ · เวลาบิลวันนี้ไม่เทียบ", async () => {
+    const key = newKey();
+    const saved = (await (await saveWithKey(key)).json()) as SavedRes;
+    const exact = await t.request("/api/buy", {
+      cookie: cookies.staff,
+      body: {
+        ...bill({ lines: [line("gold", "5.86", "20,030.00")], date: TODAY, time: "09:59" }),
+        idempotency_key: key,
+      },
+    });
+    expect(exact.status).toBe(200);
+    expect(await exact.json()).toEqual(saved);
+
+    // ชำระหลายแถว: เทียบแบบไม่สนลำดับ
+    const key2 = newKey();
+    const split = [
+      { method: "cash", amount: "10030" },
+      { method: "transfer", bank: "KBANK", amount: "10000" },
+    ];
+    const created = await t.request("/api/buy", {
+      cookie: cookies.staff,
+      body: { ...bill({ payments: split }), idempotency_key: key2 },
+    });
+    expect(created.status).toBe(201);
+    const reordered = await t.request("/api/buy", {
+      cookie: cookies.staff,
+      body: { ...bill({ payments: [split[1], { method: "cash", amount: "10,030.00" }] }), idempotency_key: key2 },
+    });
+    expect(reordered.status).toBe(200);
+    expect(await reordered.json()).toEqual(await created.json());
+  });
+
+  it("idempotency บิลย้อนหลัง: เทียบวันที่และเวลา · ส่งบิลวันนี้ซ้ำเป็นบิลย้อนหลัง = 409", async () => {
+    const backdated = bill({ customer_id: custB, date: "2026-09-30", time: "16:30", ...REASON });
+    const replay = async (over: Record<string, unknown>) =>
+      t.request("/api/buy", { cookie: cookies.mgr, body: { ...backdated, ...over, idempotency_key: backKey } });
+    const exact = await replay({});
+    expect(exact.status).toBe(200);
+    expect(((await exact.json()) as SavedRes).id).toBe(backdatedId);
+    for (const over of [{ time: "16:31" }, { time: undefined }, { date: "2026-09-29" }]) {
+      const res = await replay(over);
+      expect({ over, status: res.status }).toEqual({ over, status: 409 });
+      expect(await res.json()).toMatchObject({ existing: { id: backdatedId, doc_no: "RC6909-0001" } });
+    }
+
+    const key = newKey();
+    const today = await t.request("/api/buy", { cookie: cookies.mgr, body: { ...bill(), idempotency_key: key } });
+    expect(today.status).toBe(201);
+    const saved = (await today.json()) as SavedRes;
+    const asBackdated = await t.request("/api/buy", {
+      cookie: cookies.mgr,
+      body: { ...bill({ date: "2026-09-30", time: "16:30", ...REASON }), idempotency_key: key },
+    });
+    expect(asBackdated.status).toBe(409);
+    expect(await asBackdated.json()).toMatchObject({ existing: { id: saved.id, doc_no: saved.doc_no } });
+  });
+
+  it("idempotency: session ที่เสียสาขาปัจจุบันไปแล้วยังได้บิลเดิม · บิลใหม่ยังต้องเลือกสาขา", async () => {
+    const key = newKey();
+    const first = await saveWithKey(key);
+    expect(first.status).toBe(201);
+    const saved = (await first.json()) as SavedRes;
+    const mine = eq(session.userId, userIds.staff ?? "");
+    await t.db.update(session).set({ currentBranchId: null }).where(mine);
+    try {
+      const again = await saveWithKey(key);
+      expect(again.status).toBe(200);
+      expect(await again.json()).toEqual(saved);
+      const fresh = await save(bill());
+      expect(fresh.status).toBe(403);
+      expect(await fresh.json()).toEqual({ error: "ยังไม่ได้เลือกสาขาที่ทำงาน", field: "branch" });
+    } finally {
+      await t.db.update(session).set({ currentBranchId: t.branches["00000"] }).where(mine);
+    }
   });
 
   it("R15: snapshot ลูกค้าไม่เปลี่ยนเมื่อแก้ข้อมูลลูกค้าทีหลัง · บิลใหม่ใช้ข้อมูลใหม่", async () => {
@@ -746,24 +1027,65 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     expect((await get(`/${firstId}`, "acct")).status).toBe(200);
   });
 
-  it("can_view_all เห็นทุกสาขา · กรองสาขาได้ · สาขาที่ถูกปิดหายจากทั้งรายการและหน้าบิล", async () => {
+  it("can_view_all เห็นทุกสาขา · กรองสาขาได้ · สาขาที่ถูกปิดหายจากรายการและหน้าบิลของ role ทั่วไป", async () => {
     const res = await save(bill(), "staff2");
     expect(res.status).toBe(201); // ราคากลางใช้ได้ทุกสาขา
     const closedId = ((await res.json()) as SavedRes).id;
 
-    const all = await list("", "boss");
+    const all = await list("", "mgrall");
     expect(new Set(all.items.map((i) => i.branch.code))).toEqual(new Set(["00000", "00001", "00002"]));
-    expect((await list(`branch_id=${t.branches["00001"]}`, "boss")).items.map((i) => i.branch.code)).toEqual(["00001"]);
-    expect((await get(`/${closedId}`, "boss")).status).toBe(200);
+    expect((await list(`branch_id=${t.branches["00001"]}`, "mgrall")).items.map((i) => i.branch.code)).toEqual([
+      "00001",
+    ]);
+    expect((await get(`/${closedId}`, "mgrall")).status).toBe(200);
 
     await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
     try {
-      expect((await list("", "boss")).items.some((i) => i.branch.code === "00002")).toBe(false);
-      expect((await get(`/${closedId}`, "boss")).status).toBe(404);
-      expect((await get("", "staff2")).status).toBe(403);
-      expect((await save(bill(), "staff2")).status).toBe(403);
+      expect((await list("", "mgrall")).items.some((i) => i.branch.code === "00002")).toBe(false);
+      expect((await get(`/${closedId}`, "mgrall")).status).toBe(404);
+      for (const who of ["staff2", "mgr2"]) {
+        expect((await get("", who)).status).toBe(403);
+        expect((await get(`/${closedId}`, who)).status).toBe(403);
+        expect((await save(bill(), who)).status).toBe(403);
+      }
     } finally {
       await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
+    }
+  });
+
+  it("สาขาที่ถูกปิด: accounting/admin ยังอ่านบิลเดิมได้ (อ่านอย่างเดียว) · ไม่มีใครเปิดบิลที่นั่นได้", async () => {
+    const b2 = t.branches["00002"] ?? "";
+    const [old] = await t.db.select().from(buyReceipt).where(eq(buyReceipt.branchId, b2)).limit(1);
+    const closedId = old?.id ?? "";
+    // admin กำลังทำงานที่สาขา 00002 อยู่ตอนสาขาถูกปิด
+    expect((await t.request("/api/me/branch", { cookie: cookies.boss, body: { branch_id: b2 } })).status).toBe(200);
+    await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
+    try {
+      for (const who of ["acct2", "boss"]) {
+        const l = await list(`branch_id=${b2}`, who);
+        expect(l.items.map((i) => i.id)).toContain(closedId);
+        expect(l.items.every((i) => i.branch.code === "00002")).toBe(true);
+        expect(l.totals).toEqual(await expectedTotals(eq(buyReceipt.branchId, b2)));
+        const d = await get(`/${closedId}`, who);
+        expect(d.status).toBe(200);
+        expect(((await d.json()) as DetailRes).branch.code).toBe("00002");
+      }
+      // เขียนไม่ได้: สาขาที่ทำงานต้องยังเปิดอยู่ · เลือกสาขาที่ปิดเป็นสาขาที่ทำงานไม่ได้
+      for (const who of ["acct2", "boss"]) {
+        const q = await quote(bill(), who);
+        expect(q.status).toBe(403);
+        expect(await q.json()).toEqual({ error: "ยังไม่ได้เลือกสาขาที่ทำงาน", field: "branch" });
+      }
+      expect((await save(bill(), "boss")).status).toBe(403);
+      expect((await save(bill(), "acct2")).status).toBe(403); // accounting อ่านอย่างเดียว
+      expect((await t.request("/api/me/branch", { cookie: cookies.boss, body: { branch_id: b2 } })).status).toBe(404);
+      expect(await t.db.select().from(buyReceipt).where(eq(buyReceipt.branchId, b2))).toHaveLength(1);
+    } finally {
+      await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
+      await t.db
+        .update(session)
+        .set({ currentBranchId: null })
+        .where(eq(session.userId, userIds.boss ?? ""));
     }
   });
 
@@ -828,9 +1150,14 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
   });
 
   it.each([
+    ["q=%00%00", "q"],
+    ["q=ab%1B", "q"],
+    ["metal=gold%00", "metal"],
     ["q=ก", "q"],
     ["page=0", "page"],
     ["date_from=2026-13-01", "date_from"],
+    ["date_from=0000-01-01", "date_from"],
+    ["date_to=1999-12-31", "date_to"],
     ["date_to=yesterday", "date_to"],
   ])("query ผิด %s → 400 ชี้ %s", async (qs, field) => {
     const res = await get(`?${qs}`);
@@ -863,19 +1190,6 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
   });
 
   // ---------- totals (การ์ด "ยอดซื้อวันนี้" · หน้าค้นบิล) ----------
-
-  /** ยอดที่ควรได้ คิดจากแถวใน DB ด้วย decimal.js — เฉพาะบิลที่ยังไม่ยกเลิก */
-  const expectedTotals = async (where?: SQL): Promise<Totals> => {
-    const rows = await t.db
-      .select({ weight: buyReceipt.totalWeight, amount: buyReceipt.totalAmount })
-      .from(buyReceipt)
-      .where(and(where, eq(buyReceipt.status, "active")));
-    return {
-      count: String(rows.length),
-      total_weight: fmtWeight(rows.reduce((sum, r) => sum.plus(r.weight), ZERO)),
-      total_amount: fmtMoney(rows.reduce((sum, r) => sum.plus(r.amount), ZERO)),
-    };
-  };
 
   it("totals = ผลรวมของบิลทุกหน้าตามตัวกรองเดียวกับรายการ (ตรงกับ DB และกับผลรวมของรายการ)", async () => {
     const own = await expectedTotals(eq(buyReceipt.branchId, t.branches["00000"] ?? ""));
@@ -921,7 +1235,7 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     expect((await list(qs)).totals).toEqual(ONE_BILL);
   });
 
-  it("totals ตามสิทธิ์สาขา: สาขาอื่นไม่ถูกนับ · branch_id ที่ไม่มีสิทธิ์ = ศูนย์ · สาขาที่ปิดไม่นับ", async () => {
+  it("totals ตามสิทธิ์สาขา: สาขาอื่นไม่ถูกนับ · branch_id ที่ไม่มีสิทธิ์ = ศูนย์ · สาขาที่ปิดไม่นับ (role ทั่วไป)", async () => {
     const b1 = t.branches["00001"] ?? "";
     expect((await list("", "staff1")).totals).toEqual(ONE_BILL);
     expect((await list(`branch_id=${t.branches["00000"]}`, "staff1")).totals).toEqual(ZERO_TOTALS);
@@ -931,12 +1245,67 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
 
     await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
     try {
-      expect((await list("", "boss")).totals).toEqual(
+      expect((await list("", "mgrall")).totals).toEqual(
         await expectedTotals(ne(buyReceipt.branchId, t.branches["00002"] ?? "")),
       );
+      // admin อ่านย้อนหลังได้ → ยอดรวมยังนับสาขาที่ปิด
+      expect((await list("", "boss")).totals).toEqual(await expectedTotals());
     } finally {
       await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
     }
+  });
+
+  it("เวลาในบิลวันนี้: ล่วงหน้าได้ไม่เกิน 5 นาที · ช่วงก่อนเที่ยงคืนเลือกเวลาท้ายวันได้", async () => {
+    expect((await save(bill({ time: "10:05" }))).status).toBe(201);
+    clock = new Date("2026-10-05T16:58:00Z"); // 23:58 น. — อีก 5 นาทีข้ามวันแล้ว
+    try {
+      expect((await save(bill({ time: "23:59" }))).status).toBe(201);
+    } finally {
+      clock = NOW;
+    }
+  });
+
+  it("query ที่ล้มไม่พาข้อมูลลูกค้าลง log — เห็นแค่ SQL + code ของ Postgres (PDPA)", async () => {
+    const logged: string[] = [];
+    const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      logged.push(format(...args));
+    });
+    // บังคับให้ insert หัวบิลล้ม — params ของ query นั้นมี snapshot ลูกค้าทั้งก้อน
+    await t.db.execute(sql`alter table buy_receipt add constraint test_reject_all check (false) not valid`);
+    try {
+      const res = await save(bill());
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({ error: "internal error" });
+    } finally {
+      await t.db.execute(sql`alter table buy_receipt drop constraint test_reject_all`);
+      spy.mockRestore();
+    }
+    const text = logged.join("\n");
+    expect(text).toContain('insert into "buy_receipt"');
+    expect(text).toContain("23514");
+    for (const pii of [ID_A, "0812345678", "นายทดสอบ ซื้อทอง", "Mr. Test Buyer", "photos/a/card.png"]) {
+      expect(text).not.toContain(pii);
+    }
+  });
+
+  it("สาขาที่ยังไม่มีรหัสสาขาสรรพากร ขายไม่ได้ (quote ok:false · POST 409) · ตั้งรหัสแล้วขายได้ · สำนักงานใหญ่ขายได้", async () => {
+    const b1 = eq(branch.code, "00001");
+    const message = "สาขานี้ยังไม่ได้ตั้งรหัสสาขาของกรมสรรพากร — ติดต่อผู้ดูแลระบบ";
+    expect(((await (await quote(bill())).json()) as QuoteRes).ok).toBe(true); // 00000 (seed มีรหัส)
+    await t.db.update(branch).set({ taxBranchCode: null }).where(b1);
+    try {
+      const q = (await (await quote(bill(), "staff1")).json()) as QuoteRes;
+      expect(q.ok).toBe(false);
+      expect(q.errors[0]).toEqual({ field: "branch", message });
+      const before = await receiptCount();
+      const res = await save(bill(), "staff1");
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ error: message, field: "branch" });
+      expect(await receiptCount()).toBe(before);
+    } finally {
+      await t.db.update(branch).set({ taxBranchCode: "00001" }).where(b1);
+    }
+    expect(((await (await quote(bill(), "staff1")).json()) as QuoteRes).ok).toBe(true);
   });
 
   it("customer_snapshot เก็บเป็น jsonb object (ค้นด้วย ->> ได้ ไม่ใช่ string ซ้อน)", async () => {
@@ -944,5 +1313,37 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       sql`select distinct jsonb_typeof(${buyReceipt.customerSnapshot}) as kind from ${buyReceipt}`,
     );
     expect(rows.map((r) => r.kind)).toEqual(["object"]);
+  });
+
+  it("อักษรนำเลขที่ของสาขา: PT-RC6910-0002 · ตัวนับเดิมของสาขา · ค้นเจอ · (สาขา, เลขที่) ยังห้ามซ้ำ", async () => {
+    const b1 = t.branches["00001"] ?? "";
+    const setPrefix = (docPrefix: string | null) => t.db.update(branch).set({ docPrefix }).where(eq(branch.id, b1));
+    await setPrefix("PT");
+    try {
+      const res = await save(bill(), "staff1");
+      expect(res.status).toBe(201);
+      expect(((await res.json()) as SavedRes).doc_no).toBe("PT-RC6910-0002"); // ต่อจาก RC6910-0001 ของสาขา
+      for (const q of ["PT-RC6910", "pt-rc6910-0002"]) {
+        expect((await list(`q=${q}`, "staff1")).items.map((i) => i.doc_no)).toEqual(["PT-RC6910-0002"]);
+      }
+      // สาขาอื่นไม่มีอักษรนำ
+      const other = (await (await save(bill())).json()) as SavedRes;
+      expect(other.doc_no).toMatch(/^RC6910-\d{4}$/);
+
+      // ตัวนับถูกตั้งถอยหลัง (ใช้ runbook ผิด) → เลขชน → 409 ไม่บันทึกซ้ำ
+      const counter = and(eq(docSequence.branchId, b1), eq(docSequence.prefix, "RC"), eq(docSequence.period, "6910"));
+      await t.db.update(docSequence).set({ lastNo: 1 }).where(counter);
+      const dup = await save(bill(), "staff1");
+      expect(dup.status).toBe(409);
+      expect(await dup.json()).toMatchObject({ field: "doc_no" });
+      const [after] = await t.db.select().from(docSequence).where(counter);
+      expect(after?.lastNo).toBe(1); // rollback คืนเลข
+      await t.db.update(docSequence).set({ lastNo: 2 }).where(counter);
+    } finally {
+      await setPrefix(null);
+    }
+    const plain = await save(bill(), "staff1");
+    expect(((await plain.json()) as SavedRes).doc_no).toBe("RC6910-0003");
+    expect(await docNos("00001", "6910")).toEqual(["RC6910-0001", "RC6910-0003"]);
   });
 });
