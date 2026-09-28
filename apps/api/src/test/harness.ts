@@ -150,6 +150,7 @@ export async function startTestApp(
     fonts: await loadPdfFonts(TEST_FONT_DIR),
     tasks,
     now: options.now ?? (() => new Date()),
+    watermark: env.RECEIPT_WATERMARK,
   });
   const app = createApp({ db, auth, env, storage, pdf, now: options.now });
   const branches = Object.fromEntries((await db.select().from(branch)).map((b) => [b.code, b.id]));

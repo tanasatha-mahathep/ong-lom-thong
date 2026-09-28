@@ -22,6 +22,7 @@ const pdf = createReceiptPdfService({
   fonts: await loadPdfFonts(env.PDF_FONT_DIR),
   tasks: createBackgroundTasks(),
   now: () => new Date(),
+  watermark: env.RECEIPT_WATERMARK,
 });
 const app = createApp({ db, auth: createAuth(db, env), env, storage, pdf });
 app.use(logger());

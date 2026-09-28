@@ -3,7 +3,7 @@ import { auditLog, branch, buyLine, buyReceipt, customer, goldPrice, metal, stoc
 import { and, asc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createManualTasks } from "../lib/background";
-import { type PdfRenderer, createGotenbergClient } from "../lib/gotenberg";
+import { type HtmlToPdfInput, type PdfRenderer, createGotenbergClient } from "../lib/gotenberg";
 import { idcardPdfKey, receiptPdfKey, sha256Hex } from "../lib/pdfArchive";
 import {
   companyFromEnv,
@@ -553,6 +553,33 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
     expect((await post(`/${bill.id}/void`, "admin", { reason: "x" })).status).toBe(404);
     expect((await post(`/${bill.id}/pdf/retry`, "admin")).status).toBe(404);
     expect((await row(bill.id)).status).toBe("active");
+  });
+
+  it("ลายน้ำระบบทดสอบ (RECEIPT_WATERMARK) ลงทั้งใบรับซื้อและสำเนาบัตร", async () => {
+    t.fake.failNext(2); // ใบ + สำเนาบัตรของบิลนี้ยังไม่มีไฟล์
+    const bill = await save();
+    await t.tasks.idle();
+    const seen: HtmlToPdfInput[] = [];
+    const recording: PdfRenderer = {
+      htmlToPdf(input) {
+        seen.push(input);
+        return Promise.resolve(enc("%PDF-1.4\n% watermarked\n%%EOF\n"));
+      },
+      health: () => Promise.resolve({ up: true, status: 200 }),
+    };
+    const staging = createReceiptPdfService({
+      db: t.db,
+      storage: t.storage,
+      renderer: recording,
+      company: companyFromEnv(t.env),
+      fonts: await loadPdfFonts(TEST_FONT_DIR),
+      tasks: createManualTasks(),
+      now: () => NOW,
+      watermark: "ตัวอย่าง — ระบบทดสอบ ไม่ใช่ใบรับซื้อจริง",
+    });
+    expect(await staging.archive(bill.id)).toMatchObject({ pdf_status: "ready", idcard_status: "ready" });
+    expect(seen).toHaveLength(2);
+    for (const input of seen) expect(input.html).toContain("ตัวอย่าง — ระบบทดสอบ ไม่ใช่ใบรับซื้อจริง");
   });
 
   it("ไฟล์ที่เก็บไม่เคยถูกเขียนซ้ำ (ทุก key ถูก PUT ครั้งเดียว)", () => {

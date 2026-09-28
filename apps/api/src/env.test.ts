@@ -46,6 +46,9 @@ describe("loadEnv — Gotenberg + หัวใบรับซื้อ", () => {
     expect(env.COMPANY_FAX).toBeUndefined();
     expect(loadEnv({ ...EXAMPLE, COMPANY_FAX: undefined }).COMPANY_FAX).toBeUndefined();
     expect(loadEnv({ ...EXAMPLE, COMPANY_FAX: " 076-000000 " }).COMPANY_FAX).toBe("076-000000");
+    // ลายน้ำ: ไม่ตั้ง/ว่าง = ไม่มี (production) · มีค่า = ตัดช่องว่าง
+    expect(loadEnv(EXAMPLE).RECEIPT_WATERMARK).toBeUndefined();
+    expect(loadEnv({ ...EXAMPLE, RECEIPT_WATERMARK: " ตัวอย่าง " }).RECEIPT_WATERMARK).toBe("ตัวอย่าง");
   });
 
   it("ขาดค่าที่ต้องพิมพ์บนใบ → ไม่ start", () => {

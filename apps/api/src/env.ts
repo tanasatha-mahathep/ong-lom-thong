@@ -36,6 +36,12 @@ const EnvSchema = z
       }, "ห้ามใส่ user/password ใน URL — ใช้ GOTENBERG_USERNAME / GOTENBERG_PASSWORD"),
     GOTENBERG_USERNAME: z.string().trim().min(1),
     GOTENBERG_PASSWORD: z.string().min(1),
+    // ลายน้ำแนวทแยงบนใบรับซื้อ/สำเนาบัตร — ทุก environment ยกเว้น production (ใบจากระบบทดสอบต้องไม่ดูเหมือนใบจริง)
+    RECEIPT_WATERMARK: z
+      .string()
+      .trim()
+      .optional()
+      .transform((v) => v || undefined),
     // Sarabun ที่แนบไปกับทุกใบ — image ของ api มีที่ ./public/fonts (build ของ apps/web) · dev: ../web/public/fonts
     PDF_FONT_DIR: z.string().trim().min(1).default("public/fonts"),
     // หัวใบรับซื้อ — ข้อมูลกิจการที่พิมพ์บนใบทุกใบ (ไม่ใช่ค่าลับ) · ค่าจริงจากหน้า "ข้อมูลบริษัท" ของระบบเดิม

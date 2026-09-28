@@ -124,7 +124,7 @@ export async function loadReceiptSource(db: Queryable, receiptId: string): Promi
 export function toReceiptData(
   src: ReceiptSource,
   company: CompanyInfo,
-  opts: { nationalId: "full" | "masked"; status?: "active" | "void" },
+  opts: { nationalId: "full" | "masked"; status?: "active" | "void"; watermark?: string },
 ): ReceiptData {
   const r = src.receipt;
   const snap = r.customerSnapshot;
@@ -153,13 +153,16 @@ export function toReceiptData(
     })),
     status,
     voidReason: status === "void" ? r.voidReason : null,
+    ...(opts.watermark ? { watermark: opts.watermark } : {}),
   };
 }
 
-/** `receipt` ใน GET /api/buy/:id — mapper ตัวเดียวกับ PDF แต่เลขบัตรมาสก์ (R13) */
+/** `receipt` ใน GET /api/buy/:id — mapper ตัวเดียวกับ PDF แต่เลขบัตรมาสก์ (R13) · ลายน้ำเดียวกับ PDF */
 export async function receiptForScreen(db: Db, env: Env, receiptId: string): Promise<ReceiptData | null> {
   const src = await loadReceiptSource(db, receiptId);
-  return src ? toReceiptData(src, companyFromEnv(env), { nationalId: "masked" }) : null;
+  return src
+    ? toReceiptData(src, companyFromEnv(env), { nationalId: "masked", watermark: env.RECEIPT_WATERMARK })
+    : null;
 }
 
 // ---------- ฟอนต์ ----------
@@ -247,6 +250,8 @@ export interface ReceiptPdfDeps {
   fonts: readonly PdfAsset[];
   tasks: BackgroundTasks;
   now: () => Date;
+  /** RECEIPT_WATERMARK — ทุก environment ยกเว้น production */
+  watermark?: string;
   log?: Pick<Console, "error" | "info">;
 }
 
@@ -268,7 +273,7 @@ export interface ReceiptPdfService {
 }
 
 export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService {
-  const { db, storage, renderer, company, fonts, tasks, now } = deps;
+  const { db, storage, renderer, company, fonts, tasks, now, watermark } = deps;
   const log = deps.log ?? console;
 
   async function render(kind: PdfKind, src: ReceiptSource): Promise<Uint8Array<ArrayBuffer>> {
@@ -281,13 +286,20 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
       const ext = PHOTO_EXT[photo.contentType];
       if (!ext) throw new PermanentPdfError(`unsupported photo type ${photo.contentType}`);
       const name = `card.${ext}`;
-      const html = renderIdCardHtml({ docNo, date, companyName: header.name, photoSrc: name }, { fontBaseUrl: "" });
+      const html = renderIdCardHtml(
+        { docNo, date, companyName: header.name, photoSrc: name, watermark },
+        { fontBaseUrl: "" },
+      );
       const files = [...fonts, { name, data: photo.body, contentType: photo.contentType }];
       return renderer.htmlToPdf({ html, files, trace: `${docNo}-idcard` });
     }
     assertCompleteHeader(header, docNo);
     // ฉบับเดิมพิมพ์เป็นบิลปกติเสมอ (แม้ถูกยกเลิกไปแล้ว) · ฉบับยกเลิกมีตรา + เหตุผล
-    const data = toReceiptData(src, company, { nationalId: "full", status: kind === "void" ? "void" : "active" });
+    const data = toReceiptData(src, company, {
+      nationalId: "full",
+      status: kind === "void" ? "void" : "active",
+      watermark,
+    });
     const html = renderReceiptHtml(data, { fontBaseUrl: "" });
     return renderer.htmlToPdf({ html, files: fonts, trace: kind === "void" ? `${docNo}-void` : docNo });
   }
