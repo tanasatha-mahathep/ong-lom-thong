@@ -55,6 +55,31 @@ test.describe("SPA shell — the api serves apps/web on the same origin", () => 
   });
 });
 
+test.describe("unknown paths — a real 404, never the SPA shell", () => {
+  const NOWHERE = "/api/this-route-does-not-exist";
+
+  test("an unknown /api path is a JSON 404, not cached", async ({ site }) => {
+    const res = await site.get(NOWHERE);
+    expect((await expectApiError(res, 404)).error).toBe("not found");
+    expect(res.headers()["cache-control"]).toBe("no-store");
+    const head = await site.head(NOWHERE);
+    expect(head.status()).toBe(404);
+    expect(head.headers()["content-type"]).toContain("application/json");
+  });
+
+  test("a cross-site write to an unknown /api path is refused as CSRF before routing", async ({ site }) => {
+    expect((await expectApiError(await site.foreignWrite("POST", NOWHERE), 403)).error).toBe("forbidden origin");
+  });
+
+  test("a missing /assets file is a 404 — never the shell, never cached for a year", async ({ site }) => {
+    // a tab left open across a redeploy asks for the old hashed chunk: it must fail loudly, not get HTML
+    const res = await site.get("/assets/index-0000dead.js");
+    expect(res.status()).toBe(404);
+    expect(res.headers()["content-type"] ?? "").not.toContain("text/html");
+    expect(res.headers()["cache-control"] ?? "").not.toContain("immutable");
+  });
+});
+
 test.describe("access control — fail closed without a session (spec §10 · ASVS V4)", () => {
   for (const path of ["/api/me", "/api/customers", "/api/metals", "/api/gold-price/today", "/api/buy"]) {
     test(`GET ${path} without a session is 401`, async ({ site }) => {

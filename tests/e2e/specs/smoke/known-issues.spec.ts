@@ -8,24 +8,6 @@ import { expect, test } from "./site";
  */
 
 test.fail(
-  "an unknown /api path answers JSON 404 instead of the SPA shell",
-  {
-    tag: "@known-issue",
-    annotation: {
-      type: "issue",
-      description:
-        "apps/api/src/index.ts registers the SPA fallback (GET /* → index.html) after createApp, so " +
-        "api.notFound never runs: GET /api/nope → 200 text/html. Clients and monitors see success.",
-    },
-  },
-  async ({ site }) => {
-    const res = await site.get("/api/this-route-does-not-exist");
-    expect(res.status()).toBe(404);
-    expect(res.headers()["content-type"]).toContain("application/json");
-  },
-);
-
-test.fail(
   "responses carry the OWASP security headers",
   {
     tag: "@known-issue",
