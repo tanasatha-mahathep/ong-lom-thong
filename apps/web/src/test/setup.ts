@@ -1,6 +1,9 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
+
+// เทสต์ทั้งแอปรอ router + query หลายชั้น — เครื่อง CI ที่รันเทสต์ api ขนานกันช้ากว่า 1 วินาทีเริ่มต้นได้
+configure({ asyncUtilTimeout: 3000 });
 
 // ไม่ได้เปิด globals ของ vitest — Testing Library จึงไม่ cleanup ให้เอง
 afterEach(() => {
