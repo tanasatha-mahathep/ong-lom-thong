@@ -51,6 +51,11 @@ export default defineConfig(
     files: ["apps/web/src/routes/**/*.tsx"],
     rules: { "react-refresh/only-export-components": "off" },
   },
+  {
+    // @ong/core/receipt — component ที่ render ทั้งบนเว็บและใน API (PDF) · ไม่ใช่แอป vite จึงไม่ใช้ react-refresh
+    files: ["packages/core/src/**/*.tsx"],
+    extends: [reactHooks.configs.flat.recommended],
+  },
   { files: ["**/*.js"], extends: [tseslint.configs.disableTypeChecked] },
   prettier,
 );

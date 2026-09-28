@@ -172,6 +172,18 @@ importers:
         specifier: ^10.5
         version: 10.6.0
     devDependencies:
+      '@types/react':
+        specifier: ^19
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: ^19
+        version: 19.3.0(@types/react@19.3.0)
+      react:
+        specifier: ^19
+        version: 19.3.0
+      react-dom:
+        specifier: ^19
+        version: 19.3.0(react@19.3.0)
       typescript:
         specifier: ^5.9
         version: 5.9.3
