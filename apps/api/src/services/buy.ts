@@ -6,6 +6,7 @@ import {
   ZERO,
   avgPricePerG,
   businessDate,
+  businessTime,
   cardStatus,
   fmtMoney,
   fmtWeight,
@@ -41,6 +42,8 @@ export const BUY_API_MSG = {
   backdateWindow: "ย้อนหลังได้ไม่เกิน 7 วัน",
   backdateReason: "กรุณาระบุเหตุผลที่บันทึกย้อนหลัง",
   backdateReasonShort: "เหตุผลที่บันทึกย้อนหลังต้องยาวอย่างน้อย 5 ตัวอักษร",
+  backdateTime: "บิลย้อนหลังต้องระบุเวลา",
+  futureTime: "เวลาต้องไม่เกินเวลาปัจจุบัน",
   unknownMetal: "ไม่พบประเภทโลหะ",
   keyTaken: "idempotency_key นี้ถูกใช้แล้ว",
   keyReused: "idempotency_key นี้ใช้กับบิลอื่นแล้ว — สร้าง key ใหม่ต่อบิล",
@@ -71,7 +74,7 @@ export class BuyError extends Error {
   constructor(
     message: string,
     readonly field: string,
-    readonly status: 403 | 409,
+    readonly status: 400 | 403 | 409,
     readonly extra: Record<string, unknown> = {},
   ) {
     super(message);
@@ -370,7 +373,6 @@ export async function saveBuy(
   viewer: Viewer,
   body: SaveBody,
   now: Date,
-  time: string,
 ): Promise<{ replay: boolean; receipt: SavedBuy }> {
   // ตรวจ key ก่อนทุกอย่าง — กดซ้ำหลังบันทึกไปแล้ว (ข้ามเที่ยงคืน · session เสียสาขาปัจจุบัน) ต้องได้บิลเดิม
   const existing = await findReplay(db, viewer, body);
@@ -378,6 +380,7 @@ export async function saveBuy(
   const prepared = await prepareBuy(db, viewer, body, now);
   const first = prepared.errors[0];
   if (first) throw new BuyError(first.message, first.field, 409, quoteJson(prepared));
+  const time = billTime(body.time, prepared, now);
   try {
     return { replay: false, receipt: await insertBuy(db, viewer, prepared, body, time) };
   } catch (e) {
@@ -392,6 +395,23 @@ export async function saveBuy(
     }
     throw e;
   }
+}
+
+/** นาทีที่ยอมให้เวลาในบิลล่วงหน้านาฬิกาเซิร์ฟเวอร์ (นาฬิกาเครื่องหน้าร้านเดินไม่ตรง) */
+const FUTURE_TIME_GRACE_MS = 5 * 60_000;
+
+/** เวลาของบิล: ย้อนหลังต้องระบุเอง · วันนี้ไม่ระบุ = เวลาตอนบันทึก · วันนี้ห้ามล่วงหน้าเกิน 5 นาที */
+function billTime(time: string | undefined, p: PreparedBuy, now: Date): string {
+  if (!time) {
+    if (p.date < p.today) throw new BuyError(BUY_API_MSG.backdateTime, "time", 400);
+    return businessTime(now);
+  }
+  const limit = new Date(now.getTime() + FUTURE_TIME_GRACE_MS);
+  // 5 นาทีนั้นข้ามเที่ยงคืนไปแล้ว = ทุกเวลาของวันนี้ยังไม่เกิน
+  if (p.date === p.today && businessDate(limit) === p.today && time > businessTime(limit)) {
+    throw new BuyError(BUY_API_MSG.futureTime, "time", 400);
+  }
+  return time;
 }
 
 // ---------- อ่าน (scoped ตามสาขาที่อ่านได้) ----------

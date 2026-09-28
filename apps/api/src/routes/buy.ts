@@ -1,4 +1,3 @@
-import { businessTime } from "@ong/core";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { z } from "zod";
@@ -65,15 +64,8 @@ export const buyRoutes = new Hono<AppEnv>()
   .post("/", requireRole("staff", "manager", "admin"), jsonLimit, async (c) => {
     const body = SaveBody.safeParse(await readJson(c));
     if (!body.success) return c.json(invalid(body.error), 400);
-    const now = c.var.now();
     try {
-      const { replay, receipt } = await saveBuy(
-        c.var.db,
-        c.var.viewer,
-        body.data,
-        now,
-        body.data.time ?? businessTime(now),
-      );
+      const { replay, receipt } = await saveBuy(c.var.db, c.var.viewer, body.data, c.var.now());
       return c.json(receipt, replay ? 200 : 201);
     } catch (e) {
       if (e instanceof BuyError) return c.json({ ...apiError(e.message, e.field), ...e.extra }, e.status);

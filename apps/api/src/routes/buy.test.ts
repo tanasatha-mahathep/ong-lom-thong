@@ -177,6 +177,8 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     payments: [{ method: "cash", amount: "20030" }],
     ...over,
   });
+  /** เหตุผลของบิลย้อนหลัง (บังคับ · ลง audit) */
+  const REASON = { backdate_reason: "ระบบล่ม คีย์ใบเขียนมือ" };
   const newKey = () => `test-key-${String(++keySeq).padStart(8, "0")}`;
   // async = คืน Promise เสมอ (app.request อาจคืน Response ตรง ๆ) — ใช้กับ Promise.all ได้
   const quote = async (body: unknown, who = "staff") => t.request("/api/buy/quote", { cookie: cookies[who], body });
@@ -293,6 +295,20 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     expect(await res.json()).toMatchObject({ field: "customer_id" });
   });
 
+  it("บิลย้อนหลังต้องระบุเวลา (400 ชี้ time) · ไม่บันทึก", async () => {
+    const res = await save(bill({ date: "2026-09-30", ...REASON }), "mgr");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "บิลย้อนหลังต้องระบุเวลา", field: "time" });
+    expect(await receiptCount()).toBe(0);
+  });
+
+  it("บิลวันนี้: เวลาล่วงหน้าเกิน 5 นาที = 400 ชี้ time", async () => {
+    const res = await save(bill({ time: "10:06" })); // ตอนนี้ 10:00
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "เวลาต้องไม่เกินเวลาปัจจุบัน", field: "time" });
+    expect(await receiptCount()).toBe(0);
+  });
+
   it("body ไม่ใช่ JSON / ไม่ใช่ object = 400", async () => {
     const raw = await t.app.request("/api/buy/quote", {
       method: "POST",
@@ -352,7 +368,6 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
   });
 
   // override เป็นฟังก์ชัน — id ลูกค้า/โลหะ มีค่าหลัง beforeAll
-  const REASON = { backdate_reason: "ระบบล่ม คีย์ใบเขียนมือ" };
   // [ชื่อ · override · field · ข้อความ · ผู้ใช้ (ค่าเริ่มต้น staff)]
   const cases: [string, () => Record<string, unknown>, string, string, string?][] = [
     ["ไม่มีลูกค้า (R1)", () => ({ customer_id: null }), "customer_id", BUY_MSG.noCustomer],
@@ -1042,6 +1057,16 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       );
     } finally {
       await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
+    }
+  });
+
+  it("เวลาในบิลวันนี้: ล่วงหน้าได้ไม่เกิน 5 นาที · ช่วงก่อนเที่ยงคืนเลือกเวลาท้ายวันได้", async () => {
+    expect((await save(bill({ time: "10:05" }))).status).toBe(201);
+    clock = new Date("2026-10-05T16:58:00Z"); // 23:58 น. — อีก 5 นาทีข้ามวันแล้ว
+    try {
+      expect((await save(bill({ time: "23:59" }))).status).toBe(201);
+    } finally {
+      clock = NOW;
     }
   });
 
