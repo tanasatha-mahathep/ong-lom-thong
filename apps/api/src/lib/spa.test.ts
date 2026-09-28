@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { Hono } from "hono";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { serveSpa } from "./spa";
+import { ASSET_CACHE, serveSpa } from "./spa";
 
 const INDEX = '<!doctype html><script type="module" src="/assets/index-NEW123.js"></script>';
 
@@ -27,33 +27,40 @@ describe("serveSpa — tab เก่าข้าม redeploy ต้องไม�
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("asset ที่มีอยู่ได้ไฟล์จริง · HEAD ด้วย", async () => {
+  it("asset ที่มีอยู่ cache ได้ 1 ปี (ชื่อไฟล์มี hash) · HEAD ด้วย", async () => {
     for (const method of ["GET", "HEAD"]) {
       const res = await app.request("/assets/index-NEW123.js", { method });
       expect(res.status, method).toBe(200);
       expect(res.headers.get("content-type"), method).toMatch(/javascript/);
+      expect(res.headers.get("cache-control"), method).toBe(ASSET_CACHE);
     }
   });
 
-  it("asset ที่ไม่มี (chunk ของ build ก่อน) = 404 ไม่ใช่ index.html", async () => {
+  it("asset ที่ไม่มี (chunk ของ build ก่อน) = 404 ไม่ใช่ index.html และไม่ถูก cache", async () => {
     for (const path of ["/assets/index-OLD999.js", "/assets/nested/gone.css"]) {
       const res = await app.request(path);
       expect(res.status, path).toBe(404);
       expect(res.headers.get("content-type"), path).not.toMatch(/text\/html/);
       expect(await res.text(), path).not.toContain("<!doctype html>");
+      expect(res.headers.get("cache-control"), path).toBeNull();
     }
   });
 
-  it("index.html ทุกทาง (/ · /index.html · route ของ SPA)", async () => {
+  it("index.html ทุกทาง (/ · /index.html · route ของ SPA) = no-cache", async () => {
     for (const path of ["/", "/index.html", "/customers/0f8e9a3c-1234-4234-8234-123456789012", "/buy"]) {
       const res = await app.request(path);
       expect(res.status, path).toBe(200);
       expect(await res.text(), path).toBe(INDEX);
+      expect(res.headers.get("cache-control"), path).toBe("no-cache");
     }
   });
 
-  it("ไฟล์อื่นนอก /assets ได้ไฟล์จริง · route ที่ลงก่อนไม่ถูกแตะ", async () => {
-    expect((await app.request("/fonts/Sarabun-Regular.woff2")).status).toBe(200);
-    expect(await (await app.request("/api/healthz")).json()).toEqual({ ok: true });
+  it("ไฟล์อื่นนอก /assets (ชื่อไม่มี hash) ไม่ได้ cache ยาว · route ที่ลงก่อนไม่ถูกแตะ", async () => {
+    const font = await app.request("/fonts/Sarabun-Regular.woff2");
+    expect(font.status).toBe(200);
+    expect(font.headers.get("cache-control")).toBeNull();
+    const api = await app.request("/api/healthz");
+    expect(await api.json()).toEqual({ ok: true });
+    expect(api.headers.get("cache-control")).toBeNull();
   });
 });
