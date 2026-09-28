@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { ApiError, apiFetch, errorMessage } from "./api";
+import { ApiError, apiBlob, apiFetch, errorMessage } from "./api";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -98,5 +98,27 @@ describe("apiFetch — error เป็น ApiError เสมอ", () => {
 
   it("error ที่ไม่ใช่ ApiError ได้ข้อความกลาง", () => {
     expect(errorMessage(new Error("boom"))).toBe("เกิดข้อผิดพลาด ลองใหม่อีกครั้ง");
+  });
+});
+
+describe("apiBlob — ไฟล์ส่วนตัวผ่าน cookie session", () => {
+  it("ได้ Blob · origin เดียวกันพร้อม cookie · ไม่ใช้ HTTP cache", async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    const fetchMock = stubFetch(new Response(png, { status: 200, headers: { "Content-Type": "image/png" } }));
+    const blob = await apiBlob("/api/customers/c1/photo");
+    expect(blob.type).toBe("image/png");
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(png);
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe("/api/customers/c1/photo");
+    expect(init?.credentials).toBe("same-origin");
+    expect(init?.cache).toBe("no-store");
+  });
+
+  it("error เป็น ApiError รูปเดียวกับ apiFetch", async () => {
+    stubFetch(json({ error: "not found" }, 404));
+    expect(await caught(apiBlob("/api/customers/c1/photo"))).toMatchObject({ status: 404, error: "not found" });
+
+    stubFetch(() => Promise.reject(new TypeError("Failed to fetch")));
+    expect(await caught(apiBlob("/api/customers/c1/photo"))).toMatchObject({ status: 0 });
   });
 });
