@@ -30,11 +30,15 @@ async function settle(job: Job, log: Log): Promise<void> {
 export function createBackgroundTasks({
   concurrency = 2,
   log = console,
-}: { concurrency?: number; log?: Log } = {}): BackgroundTasks & { size(): number } {
+}: { concurrency?: number; log?: Log } = {}): BackgroundTasks & {
+  size(): number;
+  close(maxWaitMs?: number): Promise<void>;
+} {
   const queue: Job[] = [];
   const active = new Set<Promise<void>>();
   const keys = new Set<string>();
   let waiters: (() => void)[] = [];
+  let closed = false;
 
   const pump = () => {
     while (active.size < concurrency && queue.length > 0) {
@@ -55,6 +59,7 @@ export function createBackgroundTasks({
 
   return {
     run(name, task, key) {
+      if (closed) return false;
       if (key !== undefined) {
         if (keys.has(key)) return false;
         keys.add(key);
@@ -63,12 +68,29 @@ export function createBackgroundTasks({
       pump();
       return true;
     },
-    idle() {
-      if (active.size === 0 && queue.length === 0) return Promise.resolve();
-      return new Promise<void>((resolve) => waiters.push(resolve));
-    },
+    idle,
     size: () => active.size + queue.length,
+    /**
+     * ปิดเครื่อง: ไม่รับงานใหม่ · งานที่ยังไม่เริ่มถูกทิ้ง (บิลยัง pending — retry หลัง start ใหม่)
+     * รองานที่กำลังทำไม่เกิน maxWaitMs (lease ของงานที่ไม่ทันหมดเองใน 3 นาที)
+     */
+    async close(maxWaitMs = 5_000) {
+      closed = true;
+      for (const job of queue.splice(0)) if (job.key) keys.delete(job.key);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const limit = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, maxWaitMs);
+        timer.unref();
+      });
+      await Promise.race([idle(), limit]);
+      clearTimeout(timer);
+    },
   };
+
+  function idle(): Promise<void> {
+    if (active.size === 0 && queue.length === 0) return Promise.resolve();
+    return new Promise<void>((resolve) => waiters.push(resolve));
+  }
 }
 
 /**

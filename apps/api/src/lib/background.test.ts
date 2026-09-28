@@ -50,6 +50,21 @@ describe("createBackgroundTasks — คิวงานเบื้องหล�
     expect(tasks.size()).toBe(0);
   });
 
+  it("ปิดเครื่อง: ไม่รับงานใหม่ · ทิ้งงานที่ยังไม่เริ่ม · รองานที่กำลังทำไม่เกินเวลาที่ให้", async () => {
+    const tasks = createBackgroundTasks({ log: quiet });
+    const slow = gate();
+    const ran: string[] = [];
+    tasks.run("a", () => slow.done.then(() => ran.push("a")));
+    tasks.run("b", () => new Promise<void>(() => {})); // ค้างตลอด
+    tasks.run("c", () => Promise.resolve(ran.push("c"))); // ยังไม่เริ่ม (คิวเต็ม 2)
+    setTimeout(slow.open, 10);
+    const started = Date.now();
+    await tasks.close(200);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(ran).toEqual(["a"]);
+    expect(tasks.run("d", () => Promise.resolve())).toBe(false);
+  });
+
   it("โหมดเทสต์ (manual): เก็บไว้จน flush · dedupe เหมือนกัน", async () => {
     const tasks = createManualTasks(quiet);
     let runs = 0;
