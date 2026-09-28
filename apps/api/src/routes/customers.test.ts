@@ -1,3 +1,4 @@
+import { isValidNationalId, maskNationalId } from "@ong/core";
 import { auditLog, branch, customer } from "@ong/db";
 import { and, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -10,6 +11,8 @@ const PW = "correct-horse-battery";
 const ID_A = "1103700123458";
 const ID_B = "3100500987657";
 const ID_C = "5109900112237";
+// เลขคนละเลขกับ ID_A แต่มาสก์ออกมาเหมือนกัน ("1 XXXX XXXXX 45 8") — checksum ถูก
+const ID_A_TWIN = "1103700997458";
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46]);
 
@@ -305,6 +308,30 @@ describe.skipIf(!available)("ลูกค้า (Siam ID · R12 · R13) — /api
       has_photo: true,
     });
     expect(((await (await get(`/${idA}`)).json()) as Detail).national_id).toBe(ID_A);
+  });
+
+  it("เปลี่ยนเลขบัตรเป็นเลขที่มาสก์ออกมาเหมือนเดิม ต้องลง audit (เทียบค่าดิบ) · audit เก็บแบบมาสก์", async () => {
+    expect(isValidNationalId(ID_A_TWIN)).toBe(true);
+    expect(maskNationalId(ID_A_TWIN)).toBe(maskNationalId(ID_A));
+    const updates = () =>
+      t.db
+        .select()
+        .from(auditLog)
+        .where(and(eq(auditLog.action, "customer.update"), eq(auditLog.rowId, idA)))
+        .orderBy(auditLog.id);
+    const count = (await updates()).length;
+    const same = { mobile: "0899999999", card_expire_text: "31/12/2574" };
+
+    expect((await put(idA, form({ ...same, national_id: ID_A_TWIN }))).status).toBe(200);
+    const rows = await updates();
+    expect(rows).toHaveLength(count + 1);
+    const masked = maskNationalId(ID_A);
+    expect(rows.at(-1)?.diff).toEqual({ national_id: { before: masked, after: masked } });
+    expect(JSON.stringify(rows.at(-1)?.diff)).not.toMatch(/\d{13}/);
+
+    // คืนเลขเดิม (เทสต์ถัดไปใช้ ID_A) — ก็ลง audit เช่นกัน
+    expect((await put(idA, form(same))).status).toBe(200);
+    expect(await updates()).toHaveLength(count + 2);
   });
 
   it("แก้เลขบัตรไปชนคนอื่น = 409 · ข้อมูลเดิมไม่เปลี่ยน", async () => {

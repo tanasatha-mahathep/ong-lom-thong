@@ -171,9 +171,9 @@ const columns = (input: CustomerInput) => ({
   phone2: input.phone2,
 });
 
-/** ค่าที่ลง audit — เลขบัตรมาสก์ (PDPA) · รูปบันทึกแค่ว่าเปลี่ยน */
-const auditView = (row: CustomerRow) => ({
-  national_id: maskNationalId(row.nationalId),
+/** ค่าดิบของช่องที่ลง audit — ใช้เทียบว่าช่องไหนเปลี่ยน (เทียบก่อนมาสก์ ไม่งั้นเลขบัตรใหม่ที่มาสก์ออกมาเหมือนเดิมหลุด audit) */
+const auditFields = (row: CustomerRow) => ({
+  national_id: row.nationalId,
   name_th: row.nameTh,
   name_en: row.nameEn,
   birthday_text: row.birthdayText,
@@ -183,8 +183,18 @@ const auditView = (row: CustomerRow) => ({
   card_expire_text: row.cardExpireText,
   mobile: row.mobile,
   phone2: row.phone2,
-  photo: row.photoKey ? "set" : null,
+  photo: row.photoKey,
 });
+type AuditField = keyof ReturnType<typeof auditFields>;
+
+/** ค่าที่ลง audit — เลขบัตรมาสก์ (PDPA) · รูปบันทึกแค่ว่ามี ไม่เก็บ key */
+const auditValue = (field: AuditField, value: string | null) =>
+  value === null ? null : field === "national_id" ? maskNationalId(value) : field === "photo" ? "set" : value;
+
+const auditView = (row: CustomerRow) => {
+  const raw = auditFields(row);
+  return Object.fromEntries((Object.keys(raw) as AuditField[]).map((k) => [k, auditValue(k, raw[k])]));
+};
 
 export async function createCustomer(db: Db, storage: Storage, input: CustomerInput, photo: unknown, userId: string) {
   await assertNationalIdFree(db, input.national_id);
@@ -230,12 +240,12 @@ export async function updateCustomer(
         .where(eq(customer.id, before.id))
         .returning();
       if (!row) throw new Error("update customer returned nothing");
-      const a = auditView(before);
-      const b = auditView(row);
+      const a = auditFields(before);
+      const b = auditFields(row);
       const changed = Object.fromEntries(
-        (Object.keys(b) as (keyof typeof b)[])
-          .filter((k) => a[k] !== b[k] || (k === "photo" && row.photoKey !== before.photoKey))
-          .map((k) => [k, { before: a[k], after: k === "photo" ? "replaced" : b[k] }]),
+        (Object.keys(b) as AuditField[])
+          .filter((k) => a[k] !== b[k])
+          .map((k) => [k, { before: auditValue(k, a[k]), after: k === "photo" ? "replaced" : auditValue(k, b[k]) }]),
       );
       if (Object.keys(changed).length) {
         await tx.insert(auditLog).values({
