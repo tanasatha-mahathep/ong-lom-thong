@@ -28,6 +28,11 @@ export function Receipt({ data }: { data: ReceiptData }): JSX.Element {
     <div className={isVoid ? "ong-receipt void" : "ong-receipt"}>
       <style dangerouslySetInnerHTML={{ __html: RECEIPT_CSS }} />
       {isVoid && <div className="void-stamp">ยกเลิก</div>}
+      {data.watermark && (
+        <div className="ong-watermark" aria-hidden="true">
+          <span>{data.watermark}</span>
+        </div>
+      )}
 
       <div className="company">
         <div className="name">{company.name}</div>

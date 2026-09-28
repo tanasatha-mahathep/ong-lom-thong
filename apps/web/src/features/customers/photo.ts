@@ -1,24 +1,22 @@
+import type { CustomersKey } from "./i18n";
+
 /**
  * รูปลูกค้า (ช่องที่ 9) — เกณฑ์เดียวกับ API (`apps/api/src/lib/image.ts`): JPEG · PNG · WebP ไม่เกิน 5 MB
- * API ตรวจจาก byte จริงอีกชั้น · ฝั่งนี้ตรวจก่อนส่งเพื่อบอกพนักงานทันทีด้วยข้อความเดียวกัน
+ * API ตรวจจาก byte จริงอีกชั้น · ฝั่งนี้ตรวจก่อนส่งเพื่อบอกพนักงานทันทีด้วยข้อความเดียวกัน (locale `photo.*`)
  */
 export const PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
 export const PHOTO_MAX_BYTES = 5 * 1024 * 1024;
 
-export const PHOTO_TYPE_MESSAGE = "รับเฉพาะรูป JPEG · PNG · WebP";
-export const PHOTO_SIZE_MESSAGE = "รูปใหญ่เกิน 5 MB";
-export const PHOTO_EMPTY_MESSAGE = "ไฟล์รูปว่างเปล่า — คัดลอกหรือเลือกรูปใหม่";
-
 const isPhotoType = (type: string) => (PHOTO_TYPES as readonly string[]).includes(type);
 
 /**
- * ปัญหาของไฟล์ที่จะใช้เป็นรูปลูกค้า (null = ใช้ได้)
+ * ปัญหาของไฟล์ที่จะใช้เป็นรูปลูกค้า เป็น key ของข้อความ (null = ใช้ได้)
  * ไฟล์ที่ browser ไม่รู้ชนิด (type ว่าง) ปล่อยให้ API ตัดสินจาก byte จริง
  */
-export function photoProblem(file: File): string | null {
-  if (file.type !== "" && !isPhotoType(file.type)) return PHOTO_TYPE_MESSAGE;
-  if (file.size === 0) return PHOTO_EMPTY_MESSAGE;
-  if (file.size > PHOTO_MAX_BYTES) return PHOTO_SIZE_MESSAGE;
+export function photoProblem(file: File): CustomersKey | null {
+  if (file.type !== "" && !isPhotoType(file.type)) return "photo.wrongType";
+  if (file.size === 0) return "photo.emptyFile";
+  if (file.size > PHOTO_MAX_BYTES) return "photo.tooLarge";
   return null;
 }
 

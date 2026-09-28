@@ -7,6 +7,10 @@ import type { Env } from "./env";
 /** กะทำงานหน้าร้าน — session หมดอายุใน 12 ชม. และต่ออายุเมื่อใช้งานทุกชั่วโมง */
 const SESSION_SECONDS = 60 * 60 * 12;
 
+/** ความยาวรหัสผ่าน — ใช้ร่วมกับการสร้าง/รีเซ็ตโดยผู้ดูแล (services/users) · 128 = ค่าเริ่มต้นของ better-auth */
+export const PASSWORD_MIN_LENGTH = 10;
+export const PASSWORD_MAX_LENGTH = 128;
+
 /**
  * IP ของ client สำหรับ rate limit (sign-in ต่อ IP) และ session.ipAddress — เชื่อ X-Real-IP อย่างเดียว
  * Railway edge เขียน X-Real-IP เป็น IP จริงของ client ค่าเดียว ทับค่าที่ client ส่งมาเสมอ (ทดสอบกับ edge sin1 แล้ว)
@@ -32,9 +36,10 @@ export function createAuth(db: Db, env: Env) {
     database: drizzleAdapter(db, { provider: "pg", schema: { user, session, account, verification } }),
     emailAndPassword: {
       enabled: true,
-      // ไม่มีสมัครเอง — ผู้ดูแลสร้างบัญชีให้ (scripts/create-user)
+      // ไม่มีสมัครเอง — ผู้ดูแลสร้างบัญชีให้ (/api/admin/users หรือ scripts/create-user)
       disableSignUp: true,
-      minPasswordLength: 10,
+      minPasswordLength: PASSWORD_MIN_LENGTH,
+      maxPasswordLength: PASSWORD_MAX_LENGTH,
     },
     user: {
       additionalFields: {
