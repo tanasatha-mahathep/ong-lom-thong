@@ -77,7 +77,7 @@
 /*
  * สว่าง (ค่าเริ่มต้น · ตอนพิมพ์ · กล่อง .theme-light) — shadcn new-york · neutral ต่างจากเดิม 3 จุดเพื่อ WCAG 2.2 AA
  * --muted-foreground เข้มขึ้น (0.556 → 0.52): ตัวอักษรรองบนพื้น muted/sidebar ได้ ≥ 4.5:1
- * --input เข้มขึ้น (0.922 → 0.64): ขอบช่องกรอก/radio ≥ 3:1 บนขาว sidebar และ muted (1.4.11) · --border ยังอ่อนเพราะแค่ตกแต่ง
+ * --input เข้มขึ้น (0.922 → 0.60): ขอบช่องกรอก/radio ≥ 3.3:1 บนขาว sidebar และ muted (1.4.11 + กันขอบ gamut) · --border ยังอ่อนเพราะแค่ตกแต่ง
  * --ring เป็นสีน้ำเงินโฟกัส (#0071e3 · 4.7:1 บนพื้นขาว): หน้าร้านใช้คีย์บอร์ดล้วน โฟกัสต้องเห็นชัด
  * --warning* / --success* สำหรับป้าย/กล่องเตือน (ยังไม่ได้ตั้งราคาทอง) และสำเร็จ (ชำระเงินครบ) — หน้าใช้ bg-warning / bg-success
  *   ไม่ใช้สี amber/emerald ตรง ๆ · ทั้งสองธีม: ตัวอักษรบนพื้นของมัน ≥ 9:1 · ขอบ ≥ 3:1 ทั้งกับพื้นหน้าและพื้นของมัน
@@ -102,7 +102,7 @@
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
-  --input: oklch(0.64 0 0);
+  --input: oklch(0.6 0 0);
   --ring: oklch(0.563 0.187 257.5);
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
@@ -114,7 +114,7 @@
   --sidebar-ring: oklch(0.563 0.187 257.5);
   --warning: oklch(0.987 0.022 95.277);
   --warning-foreground: oklch(0.279 0.077 45.635);
-  --warning-border: oklch(0.666 0.179 58.318);
+  --warning-border: oklch(0.636 0.145 58.318);
   --success: oklch(0.979 0.021 166.113);
   --success-foreground: oklch(0.378 0.077 168.94);
   --success-border: oklch(0.596 0.145 163.225);
