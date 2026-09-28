@@ -207,21 +207,6 @@ export interface CustomerSnapshot {
   photo_key: string | null;
 }
 
-/**
- * หัวใบ ณ ตอนเปิดบิล (R15) — PDF ทุกฉบับของบิล (รวมฉบับยกเลิกที่สร้างทีหลัง) พิมพ์ข้อมูลกิจการ/สาขาชุดนี้
- * ไม่ใช่ค่า COMPANY_* หรือชื่อสาขาปัจจุบัน · null = บิลที่บันทึกก่อนมีคอลัมน์นี้
- */
-export interface CompanySnapshot {
-  name: string;
-  address: string;
-  tel: string;
-  fax: string | null;
-  tax_id: string;
-  branch_name: string;
-  /** รหัสสาขา 5 หลักของสรรพากร ("00000" = สำนักงานใหญ่) */
-  tax_branch_code: string | null;
-}
-
 export const buyReceipt = pgTable(
   "buy_receipt",
   {
@@ -236,7 +221,6 @@ export const buyReceipt = pgTable(
       .notNull()
       .references(() => customer.id),
     customerSnapshot: jsonb("customer_snapshot").$type<CustomerSnapshot>().notNull(),
-    companySnapshot: jsonb("company_snapshot").$type<CompanySnapshot>(),
     /** ราคาทองแท่งขายออก ณ วันเปิดบิล (ระบบเดิม sold_out) — ติดบิล ไม่ใช้คำนวณ */
     goldPriceSnapshot: money("gold_price_snapshot").notNull(),
     detail: text("detail"),
