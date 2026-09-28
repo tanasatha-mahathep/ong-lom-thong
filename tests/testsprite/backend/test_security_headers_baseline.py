@@ -1,8 +1,8 @@
-"""baseline ของ header ป้องกันฝั่ง browser — known failure F2 (ดู testsprite.json): แอปยังไม่ตั้ง header เหล่านี้เลย
+"""baseline ของ header ป้องกันฝั่ง browser — กันถดถอยของ F2 (แก้ใน PR #61: hono/secure-headers + /api no-store)
 
-ผ่านเมื่อ api ตั้ง header ครบ (เช่น hono/secure-headers) แล้วให้ถอด F2 ออกจาก testsprite.json เพื่อ sync ขึ้น TestSprite
-HSTS ตรวจเฉพาะ URL https (ในเครื่องเป็น http = ข้าม)
-มาตรฐาน: OWASP ASVS 5.0 V3.4 · OWASP Secure Headers Project · MDN HTTP Observatory
+nosniff ทุก response · กัน framing (X-Frame-Options/CSP frame-ancestors) · CSP ที่ไม่ยอม inline/eval script ·
+Referrer-Policy ที่ไม่ส่ง path ข้ามเว็บ · COOP · /api ไม่ให้ cache (ข้อมูลลูกค้า/บิล) · HSTS ≥ 1 ปี (เฉพาะ https)
+มาตรฐาน: OWASP ASVS 5.0 V3.4 · V14.3 (ไม่ cache ข้อมูลอ่อนไหว) · OWASP Secure Headers Project · MDN HTTP Observatory
 """
 
 import os
@@ -14,6 +14,7 @@ BASE_URL = os.environ.get("ONG_BASE_URL", "").rstrip("/")
 TIMEOUT = 20
 HEADERS = {"User-Agent": "ong-probe/1 (read-only; tests/testsprite)"}
 PRIVATE_REFERRER = {"no-referrer", "same-origin", "strict-origin", "strict-origin-when-cross-origin"}
+SAMPLES = (("/", "text/html"), ("/api/healthz", "application/json"), ("/api/me", "application/json"))
 
 
 class NotApplicable(Exception):
@@ -37,8 +38,18 @@ def get(path, accept):
     return requests.get(url(path), headers={**HEADERS, "Accept": accept}, timeout=TIMEOUT, allow_redirects=False)
 
 
+def csp_directives(value):
+    """ "a b; c d" → {"a": ["b"], "c": ["d"]} (ชื่อ directive ตัวเล็ก)"""
+    directives = {}
+    for part in value.split(";"):
+        tokens = part.split()
+        if tokens:
+            directives[tokens[0].lower()] = tokens[1:]
+    return directives
+
+
 def test_nosniff_everywhere():
-    for path, accept in (("/", "text/html"), ("/api/healthz", "application/json"), ("/api/me", "application/json")):
+    for path, accept in SAMPLES:
         value = get(path, accept).headers.get("X-Content-Type-Options", "")
         assert value.lower() == "nosniff", f"GET {path}: X-Content-Type-Options = {value!r} ควรเป็น nosniff"
 
@@ -46,21 +57,37 @@ def test_nosniff_everywhere():
 def test_html_cannot_be_framed():
     headers = get("/", "text/html").headers
     frame_options = headers.get("X-Frame-Options", "").upper()
-    csp = headers.get("Content-Security-Policy", "")
-    assert frame_options in ("DENY", "SAMEORIGIN") or "frame-ancestors" in csp, (
-        f"GET /: ไม่มี X-Frame-Options/CSP frame-ancestors (clickjacking) — XFO={frame_options!r} CSP={csp!r}"
+    ancestors = csp_directives(headers.get("Content-Security-Policy", "")).get("frame-ancestors")
+    assert frame_options in ("DENY", "SAMEORIGIN") or ancestors, (
+        f"GET /: ไม่มี X-Frame-Options/CSP frame-ancestors (clickjacking) — XFO={frame_options!r} ancestors={ancestors!r}"
     )
 
 
-def test_html_has_content_security_policy():
+def test_html_csp_blocks_inline_and_eval_script():
     csp = get("/", "text/html").headers.get("Content-Security-Policy", "")
-    assert "default-src" in csp or "script-src" in csp, f"GET /: Content-Security-Policy = {csp!r}"
+    directives = csp_directives(csp)
+    script = directives.get("script-src", directives.get("default-src"))
+    assert script, f"GET /: CSP ไม่มี script-src/default-src — {csp!r}"
+    unsafe = {"'unsafe-inline'", "'unsafe-eval'", "*", "data:", "http:", "https:"} & {s.lower() for s in script}
+    assert not unsafe, f"GET /: CSP ยอม script จาก {sorted(unsafe)} — {csp!r}"
+    assert directives.get("object-src") == ["'none'"], f"GET /: CSP object-src ควรเป็น 'none' — {csp!r}"
 
 
 def test_referrer_policy_is_private():
     value = get("/", "text/html").headers.get("Referrer-Policy", "").lower()
     policies = {p.strip() for p in value.split(",") if p.strip()}
     assert policies & PRIVATE_REFERRER, f"GET /: Referrer-Policy = {value!r}"
+
+
+def test_html_isolates_its_browsing_context():
+    value = get("/", "text/html").headers.get("Cross-Origin-Opener-Policy", "").lower()
+    assert value == "same-origin", f"GET /: Cross-Origin-Opener-Policy = {value!r} ควรเป็น same-origin"
+
+
+def test_api_responses_are_not_cached():
+    for path in ("/api/healthz", "/api/me", "/api/probe-not-cached"):
+        value = get(path, "application/json").headers.get("Cache-Control", "").lower()
+        assert "no-store" in value, f"GET {path}: Cache-Control = {value!r} ควรมี no-store"
 
 
 def test_hsts_on_https():
@@ -77,8 +104,10 @@ if os.environ.get("ONG_PROBE_RUNNER") != "pytest":
     for test in (
         test_nosniff_everywhere,
         test_html_cannot_be_framed,
-        test_html_has_content_security_policy,
+        test_html_csp_blocks_inline_and_eval_script,
         test_referrer_policy_is_private,
+        test_html_isolates_its_browsing_context,
+        test_api_responses_are_not_cached,
         test_hsts_on_https,
     ):
         try:

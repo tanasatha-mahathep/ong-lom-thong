@@ -38,9 +38,18 @@ describe("testsprite.json (ของจริงใน repo)", () => {
     mutate(m);
     return () => parseManifest(m, io);
   };
-  it("known failure ที่ตั้ง sync: true = ปฏิเสธ", () => {
+  // manifest จริงไม่มี known failure แล้ว (F1/F2 แก้ใน PR #61) — สร้างเองบนไฟล์ test_health.py
+  const markKnownFailure = (m, sync, tests = ["test_root_healthz"]) => {
+    const entry = m.tests.find((t) => t.file === "backend/test_health.py");
+    entry.known_failure = { id: "F9", title: "ทดสอบ", tests };
+    entry.sync = sync;
+  };
+  it("known failure ที่ไม่ sync = ผ่าน · ตั้ง sync: true = ปฏิเสธ", () => {
+    const m = realManifest();
+    markKnownFailure(m, false);
+    assert.equal(parseManifest(m, io).tests.find((t) => t.knownFailure)?.knownFailure.id, "F9");
     assert.throws(
-      broken((m) => (m.tests.find((t) => t.known_failure).sync = true)),
+      broken((x) => markKnownFailure(x, true)),
       /known_failure ห้าม sync/,
     );
   });
@@ -54,7 +63,7 @@ describe("testsprite.json (ของจริงใน repo)", () => {
       /name ต้องเป็น ong-/,
     );
     assert.throws(
-      broken((m) => m.tests.find((t) => t.known_failure).known_failure.tests.push("test_nope")),
+      broken((m) => markKnownFailure(m, false, ["test_nope"])),
       /test_nope/,
     );
   });

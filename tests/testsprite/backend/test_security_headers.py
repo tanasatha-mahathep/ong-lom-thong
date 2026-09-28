@@ -2,8 +2,8 @@
 
 assert เฉพาะสิ่งที่ต้องไม่ถดถอย: ไม่บอกชื่อ/เวอร์ชันซอฟต์แวร์ (X-Powered-By · Server มีเลขเวอร์ชัน) · cookie ต้อง HttpOnly+SameSite
 (+Secure บน https) · JSON ต้องประกาศ Content-Type ถูก · ไม่มี CORS wildcard
-header ป้องกันฝั่ง browser ที่ยังขาด (nosniff · frame-ancestors · Referrer-Policy · HSTS · CSP)
-อยู่ที่ test_security_headers_baseline.py (known failure F2)
+header ป้องกันฝั่ง browser (nosniff · frame-ancestors · CSP · Referrer-Policy · COOP · no-store · HSTS)
+ตรวจละเอียดที่ test_security_headers_baseline.py
 มาตรฐาน: OWASP ASVS 5.0 V3.3 (cookie) · V3.4 (security headers) · V13.4 (version disclosure)
 · OWASP Secure Headers Project
 """

@@ -48,30 +48,14 @@
     {
       "file": "backend/test_unknown_api_route.py",
       "name": "ong-probe-unknown-api-route",
-      "description": "path ที่ไม่มีใต้ /api = 404 JSON {error: not found}",
-      "sync": false,
-      "known_failure": {
-        "id": "F1",
-        "title": "GET /api/<ไม่มี> ได้หน้า SPA 200 text/html · POST ได้ 404 text/plain — api.notFound() ของ sub-app ไม่ถูกเรียก",
-        "tests": ["test_unknown_api_get_is_json_404", "test_unknown_api_post_is_json_404"]
-      }
+      "description": "path ที่ไม่มีใต้ /api = 404 JSON {error: not found} ทุก method · path ย่อยใต้ route ที่ต้อง login หยุดที่ 401",
+      "sync": true
     },
     {
       "file": "backend/test_security_headers_baseline.py",
       "name": "ong-probe-security-headers-baseline",
-      "description": "nosniff · กัน framing · CSP · Referrer-Policy · HSTS (https)",
-      "sync": false,
-      "known_failure": {
-        "id": "F2",
-        "title": "api ไม่ตั้ง security header ใดเลย (ไม่มี hono/secure-headers)",
-        "tests": [
-          "test_nosniff_everywhere",
-          "test_html_cannot_be_framed",
-          "test_html_has_content_security_policy",
-          "test_referrer_policy_is_private",
-          "test_hsts_on_https"
-        ]
-      }
+      "description": "nosniff · กัน framing · CSP ไม่ยอม inline script · Referrer-Policy · COOP · /api no-store · HSTS (https)",
+      "sync": true
     }
   ]
 }
