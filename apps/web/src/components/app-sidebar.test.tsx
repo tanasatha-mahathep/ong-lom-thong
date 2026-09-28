@@ -56,6 +56,10 @@ describe("sidebar ของแอป", () => {
   it("ฝ่ายบัญชีไม่มีปุ่ม/เมนูซื้อเข้า แต่มีส่งบัญชีรายเดือน", async () => {
     renderShell("accounting");
     const nav = await screen.findByRole("navigation", { name: "เมนูหลัก" });
+    // ทั้งแถบ (หัว · เมนู · เมนูผู้ใช้) อยู่ใน landmark เดียว
+    const sidebar = screen.getByRole("complementary", { name: "แถบเมนู" });
+    expect(sidebar).toContainElement(nav);
+    expect(sidebar).toContainElement(screen.getByRole("button", { name: /ทดสอบ accounting/ }));
 
     expect(within(nav).queryByRole("link", { name: "ซื้อเข้า" })).not.toBeInTheDocument();
     expect(within(nav).getByRole("link", { name: "ส่งบัญชีรายเดือน" })).toHaveAttribute("href", "/reports/export");
