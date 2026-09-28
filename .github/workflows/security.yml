@@ -1,0 +1,124 @@
+name: security
+
+# สแกนความปลอดภัยรายสัปดาห์บน branch หลัก (main = production) + สั่งรันเองได้ทุก branch
+# advisory: ไม่ใช่ ci.yml → make promote / Railway ไม่รอ workflow นี้ · แต่ fail แล้วดัง:
+#   run แดง + อีเมลถึงคนที่แก้ cron ล่าสุด + เปิด/คอมเมนต์ issue "Security scan failing on <branch>"
+# ของบน ring 0/1 (ci.yml) ตรวจตอน push — ตัวนี้จับ advisory ที่เพิ่งประกาศกับโค้ดที่ขึ้น production ไปแล้ว
+# สคริปต์ชุดเดียวกับ make ci-lint / sca / sast / secret-scan (image ปัก digest) — ผลอยู่ใน step summary + artifact 14 วัน
+on:
+  schedule:
+    - cron: "17 1 * * 1" # จันทร์ 08:17 เวลาไทย (01:17 UTC) — นอกต้นชั่วโมงที่คิว GitHub แน่น · ก่อนเปิดร้าน
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: false
+
+# actions ปักที่ commit SHA (กัน tag ถูกย้าย) — Renovate (helpers:pinGitHubActionDigests) อัปเดตให้พร้อมคอมเมนต์เวอร์ชัน
+jobs:
+  sca:
+    name: sca (osv-scanner · pnpm-lock.yaml)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: scripts/ci/sca.sh
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sca-report
+          path: ${{ runner.temp }}/ong-sec/sca
+          retention-days: 14
+          if-no-files-found: ignore
+
+  sast:
+    name: sast (semgrep CE · apps + packages)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: scripts/ci/sast.sh
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sast-report
+          path: ${{ runner.temp }}/ong-sec/sast
+          retention-days: 14
+          if-no-files-found: ignore
+
+  ci-lint:
+    name: ci-lint (actionlint · zizmor online · shellcheck)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # audit ออนไลน์ (known-vulnerable-actions · impostor-commit) ขึ้นกับ advisory ที่ออกใหม่ → ตรวจซ้ำทุกสัปดาห์
+      - run: scripts/ci/ci-lint.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-lint-report
+          path: ${{ runner.temp }}/ong-sec/ci-lint
+          retention-days: 14
+          if-no-files-found: ignore
+
+  secret-scan:
+    name: secret-scan (gitleaks · tree + full history)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # ประวัติทั้งหมด — สคริปต์ปฏิเสธ shallow clone
+          persist-credentials: false
+      - run: scripts/ci/secret-scan.sh
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: secret-scan-report # ค่า secret ถูก redact แล้ว (gitleaks --redact)
+          path: ${{ runner.temp }}/ong-sec/secret-scan
+          retention-days: 14
+          if-no-files-found: ignore
+
+  alert:
+    name: open or update the tracking issue
+    needs: [ci-lint, sca, sast, secret-scan]
+    # timeout-minutes ทำให้ job เป็น cancelled ไม่ใช่ failure — นับทั้งสองแบบ
+    if: always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write # เปิด/คอมเมนต์ issue เท่านั้น — job นี้ไม่ checkout และไม่รันโค้ดจาก repo
+    steps:
+      # inline เกิน 5 บรรทัดโดยตั้งใจ: job นี้ถือ issues: write จึงไม่ checkout และไม่รันสคริปต์จาก repo
+      - name: open or update "Security scan failing on <branch>"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BRANCH: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+          RESULTS: "ci-lint: ${{ needs.ci-lint.result }} · sca: ${{ needs.sca.result }} · sast: ${{ needs.sast.result }} · secret-scan: ${{ needs.secret-scan.result }}"
+        run: |
+          export TITLE="Security scan failing on $BRANCH"
+          body=$(printf '%s\n\n- run: %s\n- commit: %s\n- jobs: %s\n\n%s\n' \
+            "The scheduled/manual security scan failed." "$RUN_URL" "$SHA" "$RESULTS" \
+            "Reports: the run's step summary and artifacts (14 days). Fix or upgrade; ignore only with a reason and an expiry (osv-scanner.toml · .gitleaks.toml · .semgrepignore).")
+          number=$(gh issue list --state open --search "\"$TITLE\" in:title" --json number,title \
+            --jq 'map(select(.title == env.TITLE)) | .[0].number // empty')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "$body"
+          else
+            gh issue create --title "$TITLE" --body "$body"
+          fi
