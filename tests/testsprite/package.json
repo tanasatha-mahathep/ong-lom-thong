@@ -2,7 +2,7 @@
   "name": "@ong/testsprite",
   "version": "0.0.0",
   "private": true,
-  "description": "TestSprite (cloud · advisory) — backend probes อ่านอย่างเดียวที่รันได้ทั้ง pytest ของเราและ TestSprite",
+  "description": "TestSprite (cloud · advisory) — backend probes อ่านอย่างเดียว + ตัวห่อ CLI ที่มี guard แบบ fail-closed",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tanasatha-mahathep/ong-lom-thong.git",
@@ -11,6 +11,14 @@
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {
-    "probe": "bash scripts/probe.sh"
+    "classify": "node scripts/testsprite.js classify",
+    "doctor": "node scripts/testsprite.js doctor",
+    "probe": "bash scripts/probe.sh",
+    "run": "node scripts/testsprite.js run",
+    "sync": "node scripts/testsprite.js sync",
+    "test": "node --test scripts/lib.test.js"
+  },
+  "devDependencies": {
+    "@testsprite/testsprite-cli": "0.13.0"
   }
 }
