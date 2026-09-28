@@ -11,6 +11,7 @@ import { customerRoutes } from "./routes/customers";
 import { goldPriceRoutes } from "./routes/goldPrice";
 import { me } from "./routes/me";
 import { metalRoutes } from "./routes/metals";
+import { reportRoutes } from "./routes/reports";
 
 export interface AppDeps {
   db: Db;
@@ -46,6 +47,7 @@ export function createApp({ db, auth, env, storage, now = () => new Date() }: Ap
   api.route("/metals", metalRoutes);
   api.route("/customers", customerRoutes);
   api.route("/buy", buyRoutes);
+  api.route("/reports", reportRoutes);
 
   api.notFound((c) => c.json(apiError("not found"), 404));
   app.route("/api", api);
