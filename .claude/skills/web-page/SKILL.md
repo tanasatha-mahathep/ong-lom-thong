@@ -9,10 +9,27 @@ description: สร้างหรือแก้หน้าใน apps/web (Vi
 
 - route แบบ file-based ใน `apps/web/src/routes/` (TanStack Router plugin generate `routeTree.gen.ts` — commit ไฟล์ที่ generate) · server state ผ่าน TanStack Query
 - ทุกหน้าหลัง login อยู่ใต้ `_app.tsx` (guard + shell ของ dashboard-01) — route ทั้งหมดใน spec §3 **มีไฟล์แล้ว** เป็น stub (`component: PagePlaceholder`) → งานหน้า = แทน `component` ในไฟล์เดิม ไม่สร้าง route ใหม่ (routeTree ไม่ชนกัน)
-- ชื่อหน้า: `staticData: { title, crumbs? }` ของ route → หัวหน้า breadcrumb และ `document.title` ใช้ค่านี้ · หัวเรื่องในเนื้อหาใช้ `<PageHeader description? actions? />` (h1 เดียวของหน้า ชื่อมาจาก staticData)
+- ชื่อหน้า: `staticData: { title: "<key>", crumbs? }` — key ใน `shell.routes` (`src/i18n/locales/th.ts`) · หัวหน้า breadcrumb และ `document.title` แปลเอง · หัวเรื่องในเนื้อหาใช้ `<PageHeader description? actions? />` (h1 เดียวของหน้า)
 - ไฟล์เทสต์ห้ามอยู่ใน `src/routes/` (plugin จะนับเป็น route) — วางข้าง component หรือใน `src/test/`
 - API origin เดียวกับ SPA (`/api/...`, cookie session ของ better-auth) · dev: vite proxy `/api` → `http://localhost:${API_PORT:-8787}` · หลายชุดพร้อมกัน: `WEB_PORT=5181 API_PORT=8791 make dev`
 - สัญญา API: `../Work_2026-09-27/05-spec-vite-tanstack.md` §5 และโค้ดจริงใน `apps/api/src/routes/*.ts`
+
+## ข้อความ (i18n) — ภาษาไทยอย่างเดียวตอนนี้ ภาษาอังกฤษภายหลัง
+
+- **ห้ามมีข้อความไทย/อังกฤษใน JSX** รวม `aria-label` · placeholder · toast · error — ทุกคำอยู่ในไฟล์ locale แล้วเรียก `t()`
+- namespace ตาม feature: `src/features/<ns>/locales/th.ts` → `export default { … }` (object ธรรมดา **ห้าม `as const`**) · ลงทะเบียนไว้แล้วใน `src/i18n/resources.ts`: `common` `shell` `auth` `home` `goldPrice` `customers` `buy` `bills` `reports` `settings` — namespace ใหม่ = import หนึ่งบรรทัด + key หนึ่งตัวในไฟล์นั้น
+- ใช้: `const { t } = useTranslation("buy"); t("save")` · ข้าม namespace: `t("retry", { ns: "common" })` · ตัวแปร: `"ยอด {{amount}} บาท"` → `t("total", { amount: formatMoney(x) })` · นอก component: `i18next.getFixedT(null, "buy")` (import จาก `@/i18n`)
+- key ถูกตรวจตอน typecheck (`src/i18n/i18next.d.ts`) — พิมพ์ผิด = compile error
+- คำกลางอยู่ใน `common` แล้ว: `retry` `saving` `baht` `noBranch` `branchCode` `loadFailed` `goldPrice.*` `roles.*` `errors.*` — อย่าสร้างซ้ำใน namespace ของหน้า
+- ข้อความจาก API เป็นไทย (`@ong/core`) แสดงผ่าน `errorMessage(e)` · ตอนเพิ่มภาษาอังกฤษต้อง map `field` + status เป็นคำแปล (ยังไม่ได้ทำ)
+- ภาษาอังกฤษภายหลัง: `en.ts` ข้าง `th.ts` ทุกไฟล์ (`import type th from "./th"; export default { … } satisfies typeof th;`) + `en` ใน resources และ supportedLngs + ตัวเลือกภาษา — `format.ts` ยังเป็น th-TH
+
+## ธีม (สว่าง · มืด · ตามระบบ)
+
+- ใช้ **token เท่านั้น**: `bg-background` `text-foreground` `text-muted-foreground` `bg-card` `bg-muted` `border` `border-input` `bg-primary` `text-destructive` · เตือน `bg-warning text-warning-foreground border-warning-border` · สำเร็จ (เช่น "ชำระเงินครบถ้วน") `bg-success text-success-foreground border-success-border` — **ห้ามสีดิบ** (`bg-white` `text-black` `gray-500` `amber-50` …) เพราะโหมดมืดจะไม่เปลี่ยนตาม
+- สิ่งที่ต้องต่างกันจริงระหว่างธีมใช้ `dark:` (ทำงานบนจอเท่านั้น) · WCAG 2.2 AA ทั้งสองธีม: ตัวอักษร ≥ 4.5:1 · ขอบช่องกรอก/โฟกัส ≥ 3:1 (token ผ่านแล้ว)
+- **พิมพ์ = สว่างเสมอ** (token มืดอยู่ใน `@media screen`) · ใบรับซื้อ/สำเนาบัตรที่แสดงบนจอ ครอบด้วย `className="theme-light"` ให้สว่างแม้แอปเป็นโหมดมืด
+- ธีมเก็บใน localStorage `ong.theme` · `public/theme-init.js` ตั้ง `.dark` ก่อนวาดหน้า (CSP ห้าม inline script — ห้ามเพิ่ม `<script>` แบบ inline ใน index.html)
 
 ## data layer (`src/lib/`)
 
@@ -20,7 +37,8 @@ description: สร้างหรือแก้หน้าใน apps/web (Vi
 - query options ใช้ `queryOptions()` ของ TanStack Query v5 ต่อ endpoint (ดู `meQueryOptions` / `goldPriceTodayQueryOptions` ใน `queries.ts`) · loader: `context.queryClient.ensureQueryData(x)` · component: `useQuery(x)` / `useSuspenseQuery(x)`
 - ผู้ใช้ปัจจุบัน: `useMe()` (role · branch · branches) — ห้ามอ่าน me จาก route context (ไม่อัปเดตหลังสลับสาขา)
 - 401 จาก query/mutation ใดก็ได้ → ตัวดักกลางใน `router.tsx` พาไป `/login?redirect=…` เอง · ยกเว้นตั้ง `meta: { handlesUnauthorized: true }`
-- error ใต้ช่อง: `ApiError.field` → `<FieldError id=…>` + `aria-describedby` ที่ input · ข้อความรวม: `errorMessage(e)`
+- error ใต้ช่อง: `ApiError.field` → `<FieldError id=…>` + `aria-describedby` ที่ input · ข้อความรวม: `errorMessage(e)` (ไทยเสมอ — ข้อความอังกฤษจาก API แปลตาม status)
+- deploy ใหม่ระหว่างเปิดแท็บ: chunk เก่าหาย → `ErrorPage` บอก "มีเวอร์ชันใหม่" + reload เองครั้งเดียว · preload ล้ม → toast ปุ่มรีเฟรช (`src/lib/app-update.ts`) — หน้าไม่ต้องทำอะไรเพิ่ม
 - สลับสาขาแล้ว **reset** ทุก query ยกเว้น `me` (ข้อมูลสาขาเดิมหายทันที ไม่ค้างใต้หัวสาขาใหม่) — query key ไม่ต้องใส่ branch id แต่หน้าต้องรับสถานะ "ยังไม่มีข้อมูล" (skeleton) ได้เสมอ
 
 ## shadcn/ui
@@ -47,7 +65,7 @@ description: สร้างหรือแก้หน้าใน apps/web (Vi
 
 ## UX / a11y (WCAG 2.2 AA)
 
-- ภาษาไทยทั้งหมด · ฟอนต์ Sarabun (`/fonts`) · การ์ด/ตาราง/ฟอร์มเงินพื้นทึบ (`bg-card` / `bg-background` ห้ามโปร่ง) · `:focus-visible` เส้นน้ำเงิน 2px มาจาก `styles.css` อยู่แล้ว
+- ภาษาไทยทั้งหมด (ผ่าน `t()`) · ฟอนต์ Sarabun (`/fonts`) · การ์ด/ตาราง/ฟอร์มเงินพื้นทึบ (`bg-card` / `bg-background` ห้ามโปร่ง) · `:focus-visible` เส้นน้ำเงิน 2px มาจาก `styles.css` อยู่แล้ว
 - ทุก input มี `<label>` ที่เห็นได้ · error ผูก `aria-describedby` · ใช้ `<button>` `<a>` `<table>` จริง · เป้ากด ≥ 24px · ไม่มี dark mode
 - คีย์บอร์ดล้วน: Tab/Enter ไล่ช่อง · `Ctrl+Enter` = บันทึก · `Esc` = ล้างแถวที่กำลังกรอก (สเปก §3.1)
 - ปุ่มบันทึกกันกดซ้ำ (disable ระหว่างส่ง + idempotency key)
@@ -56,5 +74,6 @@ description: สร้างหรือแก้หน้าใน apps/web (Vi
 
 - vitest + Testing Library (jsdom) ใน apps/web — ทดสอบพฤติกรรม: ลำดับ Tab ของฟอร์ม · payload ที่ส่ง · การแสดงเงิน · สถานะ error
 - ทั้งแอป: `fakeApi({ "GET /api/me": () => json(makeMe("staff")) , … })` + `renderApp("/path")` จาก `src/test/app.ts`
-- e2e: `WEB_PORT=… E2E_EMAIL=… E2E_PASSWORD=… pnpm --filter @ong/web e2e` (Playwright + axe · ไม่อยู่ใน `make check`)
+- e2e: `WEB_PORT=… E2E_EMAIL=… E2E_PASSWORD=… pnpm --filter @ong/web e2e` (Playwright + axe ทั้งธีมสว่างและมืด · ไม่อยู่ใน `make check`)
+- เทสต์ใช้ i18n ตัวจริง (ข้อความไทย) — query ด้วยข้อความไทยได้เหมือนเดิม
 - `make check` เขียว

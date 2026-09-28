@@ -16,7 +16,7 @@ export const Route = createFileRoute("/login")({
     );
     if (signedIn) throw redirect({ href: safeRedirect(search.redirect) ?? "/", replace: true });
   },
-  staticData: { title: "เข้าสู่ระบบ" },
+  staticData: { title: "login" },
   component: LoginPage,
 });
 

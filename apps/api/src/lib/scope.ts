@@ -62,3 +62,19 @@ function grantedOf(viewer: Viewer, branches: BranchRef[]): BranchRef[] {
 export function currentBranch(viewer: Viewer, readable: BranchRef[]): BranchRef | null {
   return readable.find((b) => b.id === viewer.currentBranchId) ?? null;
 }
+
+/**
+ * สาขาปัจจุบัน "ที่ถูกปิดไปแล้ว" — แยกจาก currentBranch()=null ซึ่งดูเหมือนกันหมดไม่ว่าจะยังไม่ได้เลือก/ไม่มีสิทธิ์/ถูกปิด
+ * ไม่ใช่ null ก็ต่อเมื่อ currentBranchId ชี้สาขาที่มีอยู่จริง ปิดแล้ว (is_active=false) และยังอยู่ในสิทธิ์เดิมของผู้ใช้
+ * fail-closed (CLAUDE.md กฎ 4): สาขาที่ไม่เคยมีสิทธิ์ (แม้ถูกปิด) = null เหมือนไม่ได้เลือก — ห้ามรั่วชื่อสาขาที่ไม่ใช่ของผู้ใช้
+ */
+export async function currentBranchClosed(db: Db, viewer: Viewer): Promise<BranchRef | null> {
+  if (!viewer.currentBranchId) return null;
+  const [row] = await db
+    .select({ id: branch.id, code: branch.code, name: branch.name, isActive: branch.isActive })
+    .from(branch)
+    .where(eq(branch.id, viewer.currentBranchId))
+    .limit(1);
+  if (!row || row.isActive) return null;
+  return grantedOf(viewer, [{ id: row.id, code: row.code, name: row.name }])[0] ?? null;
+}

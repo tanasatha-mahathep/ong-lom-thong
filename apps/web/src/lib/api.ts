@@ -1,4 +1,6 @@
 import { z } from "zod";
+import i18next from "@/i18n";
+import type { resources } from "@/i18n/resources";
 
 /** เงิน/น้ำหนักจาก API เป็นข้อความทศนิยมเสมอ (CLAUDE.md กฎ 1) — ตรวจรูปแต่ไม่แปลงเป็น number */
 export const decimalString = z.string().regex(/^-?\d+(\.\d+)?$/, "ต้องเป็นข้อความตัวเลขทศนิยม");
@@ -109,25 +111,33 @@ export async function apiBlob(path: ApiPath, { signal }: { signal?: AbortSignal 
 }
 
 const THAI = /[\u0E00-\u0E7F]/;
-const FALLBACK = "เกิดข้อผิดพลาด ลองใหม่อีกครั้ง";
-const STATUS_MESSAGE: Readonly<Record<number, string>> = {
-  0: "ติดต่อเซิร์ฟเวอร์ไม่ได้ ตรวจการเชื่อมต่อแล้วลองใหม่",
-  400: "ข้อมูลไม่ถูกต้อง",
-  401: "หมดเวลาใช้งาน เข้าสู่ระบบใหม่อีกครั้ง",
-  403: "ไม่มีสิทธิ์",
-  404: "ไม่พบข้อมูล",
-  409: "ข้อมูลขัดแย้งกับที่มีอยู่",
-  413: "ไฟล์ใหญ่เกินไป",
-  415: "รูปแบบข้อมูลไม่ถูกต้อง",
-  429: "ลองใหม่อีกครั้งในอีกสักครู่",
-};
+
+/** status → key ใน common.errors */
+const STATUS_ERROR = {
+  0: "network",
+  400: "badRequest",
+  401: "unauthorized",
+  403: "forbidden",
+  404: "notFound",
+  409: "conflict",
+  413: "tooLarge",
+  415: "unsupported",
+  429: "rateLimited",
+} as const satisfies Record<number, keyof (typeof resources)["th"]["common"]["errors"]>;
 
 /**
- * ข้อความภาษาไทยสำหรับแสดงผู้ใช้จาก error ใด ๆ — ที่เดียวของทั้งแอป
- * ข้อความจาก API แสดงตรง ๆ เฉพาะเมื่อเป็นภาษาไทย (เช่น "branch_id ไม่ถูกต้อง") · อังกฤษ/ไม่มีข้อความ = แปลตาม status
+ * ข้อความสำหรับแสดงผู้ใช้จาก error ใด ๆ — ที่เดียวของทั้งแอป (ข้อความอยู่ใน common.errors)
+ * ข้อความจาก API แสดงตรง ๆ เฉพาะเมื่อเป็นภาษาไทย (API ส่งข้อความไทยของช่อง/กฎธุรกิจ) · อื่น ๆ แปลตาม status
+ * ภาษาอังกฤษภายหลัง: ข้อความไทยจาก API ต้อง map ด้วย `field` + status เป็นคำแปล — ยังไม่ได้ทำ
  */
 export function errorMessage(e: unknown): string {
-  if (!(e instanceof ApiError)) return FALLBACK;
+  if (!(e instanceof ApiError)) return i18next.t("errors.fallback", { ns: "common" });
   if (e.status !== 0 && THAI.test(e.error)) return e.error;
-  return STATUS_MESSAGE[e.status] ?? (e.status >= 500 ? "เซิร์ฟเวอร์ขัดข้อง ลองใหม่อีกครั้ง" : FALLBACK);
+  const key: keyof (typeof resources)["th"]["common"]["errors"] =
+    e.status in STATUS_ERROR
+      ? STATUS_ERROR[e.status as keyof typeof STATUS_ERROR]
+      : e.status >= 500
+        ? "server"
+        : "fallback";
+  return i18next.t(`errors.${key}`, { ns: "common" });
 }
