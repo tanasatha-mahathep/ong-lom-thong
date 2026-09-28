@@ -10,6 +10,7 @@ import { customerRoutes } from "./routes/customers";
 import { goldPriceRoutes } from "./routes/goldPrice";
 import { me } from "./routes/me";
 import { metalRoutes } from "./routes/metals";
+import { adminRoutes } from "./routes/admin";
 
 export interface AppDeps {
   db: Db;
@@ -45,6 +46,8 @@ export function createApp({ db, auth, env, storage, now = () => new Date() }: Ap
   api.route("/metals", metalRoutes);
   api.route("/customers", customerRoutes);
   api.route("/buy", buyRoutes);
+  // สาขา · ผู้ใช้ — admin เท่านั้น
+  api.route("/admin", adminRoutes);
 
   api.notFound((c) => c.json(apiError("not found"), 404));
   app.route("/api", api);
