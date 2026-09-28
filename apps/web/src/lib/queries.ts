@@ -48,7 +48,7 @@ export function useMe(): Me {
   return useSuspenseQuery(meQueryOptions).data;
 }
 
-const GoldPriceTodaySchema = z.object({
+export const GoldPriceTodaySchema = z.object({
   date: z.iso.date(),
   bar_sell: decimalString,
   bar_buy: decimalString,
@@ -58,6 +58,11 @@ const GoldPriceTodaySchema = z.object({
   source: z.enum(["branch", "central"]),
 });
 export type GoldPriceToday = z.infer<typeof GoldPriceTodaySchema>;
+
+export const GOLD_PRICE_SOURCE_LABEL: Record<GoldPriceToday["source"], string> = {
+  central: "ราคากลาง",
+  branch: "ราคาเฉพาะสาขา",
+};
 
 /** ราคาทองวันนี้ของสาขาปัจจุบัน — GET /api/gold-price/today · 404 = ยังไม่ได้ตั้ง → null */
 export const goldPriceTodayQueryOptions = queryOptions({

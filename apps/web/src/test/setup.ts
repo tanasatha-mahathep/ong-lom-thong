@@ -10,7 +10,7 @@ configure({ asyncUtilTimeout: 10_000 });
 // ไม่ได้เปิด globals ของ vitest — Testing Library จึงไม่ cleanup ให้เอง
 afterEach(() => {
   cleanup();
-  // toast ของ sonner อยู่ใน store กลางของ module — Toaster ของเทสต์ถัดไปจะเล่นซ้ำถ้าไม่ปิดทิ้ง
+  // sonner เก็บ toast ไว้ใน store ระดับโมดูลและ replay ให้ Toaster ที่ mount ใหม่ — ปิดทิ้งไม่ให้ค้างไปเทสต์ถัดไป
   toast.dismiss();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
