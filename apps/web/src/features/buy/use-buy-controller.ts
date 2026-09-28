@@ -13,7 +13,7 @@ import { ApiError, apiFetch, errorMessage } from "@/lib/api";
 import { normalizeDecimalInput } from "@/lib/decimal-input";
 import { type Me, meQueryOptions } from "@/lib/queries";
 import { todayIso } from "@/lib/thai-date";
-import { useBuyT } from "./i18n";
+import { useTranslation } from "./i18n";
 import {
   type BuyAction,
   type EntryError,
@@ -114,7 +114,7 @@ function entryErrorOf<F extends string>(
  * ค้นลูกค้า · บันทึก + idempotency key · โฟกัส — ตัวเลขเงินทั้งหมดมาจาก API
  */
 export function useBuyController(me: Me, metals: readonly Metal[]) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [state, dispatch] = useReducer(buyReducer, initialBuyState);
@@ -174,7 +174,7 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
 
   function fieldError(field: string): string | undefined {
     if (saveIssue?.field === field) return saveIssue.message;
-    if (quoteProblem instanceof ApiError && quoteProblem.field === field) return quoteProblem.error;
+    if (quoteProblem instanceof ApiError && quoteProblem.field === field) return errorMessage(quoteProblem);
     return errorFor(errors, field)?.message;
   }
 
@@ -192,7 +192,7 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
     if (quoteProblem instanceof ApiError) {
       if (quoteProblem.status === 0 || quoteProblem.status >= 500) return { message: t("save.offline"), target: null };
       const target = quoteProblem.field ? focusTargetForField(quoteProblem.field, customer !== null) : null;
-      return { message: quoteProblem.error, target };
+      return { message: errorMessage(quoteProblem), target };
     }
     if (!fresh || !quote) return { message: t("save.calculating"), target: null };
     const first = quote.errors[0];
@@ -438,9 +438,9 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
       const parsed = QuoteSchema.safeParse(e.body);
       if (parsed.success) qc.setQueryData(buyQuoteQuery(quoteBody).queryKey, parsed.data);
     } else {
-      setSaveIssue({ field: e.field, message: e.error });
+      setSaveIssue({ field: e.field, message: errorMessage(e) });
     }
-    toast.error(t("save.failed", { error: e.error }));
+    toast.error(t("save.failed", { error: errorMessage(e) }));
     focusOn((e.field && focusTargetForField(e.field, customer !== null)) || "save");
   }
 

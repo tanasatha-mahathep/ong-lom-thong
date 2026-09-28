@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { useBuyT } from "../i18n";
+import { useTranslation } from "../i18n";
 import type { BuyController } from "../use-buy-controller";
 import { useSiamIdCapture } from "../use-siam-id-capture";
 import { CustomerSearch } from "./CustomerSearch";
@@ -17,7 +17,7 @@ const NEW_CUSTOMER_HREF = "/customers/new?from=buy";
 const editCustomerHref = (id: string) => `/customers/${id}?mode=edit&from=buy`;
 
 export function CustomerCard({ c }: { c: BuyController }) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const { state, register } = c;
 
   return (
@@ -60,7 +60,7 @@ export function CustomerCard({ c }: { c: BuyController }) {
 
 /** ช่องเลขบัตร — โฟกัสเมื่อเปิดหน้า (autofocus แบบระบบเดิม) · เสียบบัตร Siam ID แล้วค้นให้เอง */
 function NationalIdBox({ c }: { c: BuyController }) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const id = useId();
   const { state, actions, register } = c;
   const capture = useSiamIdCapture({
@@ -119,7 +119,7 @@ function NationalIdBox({ c }: { c: BuyController }) {
 
 /** ลูกค้าที่เลือก — เลขบัตรมาสก์เสมอ (R13) · บัตรใช้ไม่ได้ = บล็อกการบันทึก แต่ไม่ล้างลูกค้า (แก้บัตรแล้วกลับมาได้) */
 function CustomerSummary({ c }: { c: BuyController }) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const { state, register, actions, customerBlock, cardStatus } = c;
   const customer = state.customer;
   if (!customer) return null;

@@ -20,14 +20,14 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { formatMoney, formatWeight } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { useBuyT } from "../i18n";
+import { useTranslation } from "../i18n";
 import { rowErrors } from "../model";
 import type { BuyController } from "../use-buy-controller";
 import { describedBy, isPlainEnter } from "./field-helpers";
 
 /** ของเก่าที่รับซื้อ: เลือกโลหะ → ปริมาณ → ราคา → Enter เพิ่มแถว (API ตรวจแถวก่อนเพิ่ม) */
 export function LinesCard({ c }: { c: BuyController }) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const id = useId();
   const { state, actions, register, metals, metalId } = c;
   const entry = state.lineEntry;
@@ -186,11 +186,11 @@ export function LinesCard({ c }: { c: BuyController }) {
  * ราคาต่อหน่วยและ error ต่อแถวแสดงเฉพาะผลล่าสุด (ลบแถวแล้ว index เลื่อน ผลเก่าจะวางผิดแถว)
  */
 function LinesTable({ c }: { c: BuyController }) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const { state, actions, quote, fresh, metals } = c;
   const errors = fresh && quote ? quote.errors : [];
   const nameOf = (metalId: string) => metals.find((m) => m.id === metalId)?.name_th ?? metalId;
-  const stale = !fresh && "opacity-60";
+  const stale = !fresh && "text-muted-foreground";
 
   return (
     <div className="overflow-hidden rounded-lg border">
@@ -271,7 +271,7 @@ function LineRowView(props: {
   problems: string[];
   onRemove: () => void;
 }) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const invalid = props.problems.length > 0;
   return (
     <>

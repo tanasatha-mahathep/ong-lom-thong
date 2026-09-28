@@ -10,7 +10,7 @@ import { CustomerCard } from "./components/CustomerCard";
 import { LinesCard } from "./components/LinesCard";
 import { PaymentsCard } from "./components/PaymentsCard";
 import { ConflictDialog, SaveBar } from "./components/SaveBar";
-import { useBuyT } from "./i18n";
+import { useTranslation } from "./i18n";
 import { metalsQuery } from "./queries";
 import { useBuyController } from "./use-buy-controller";
 
@@ -19,7 +19,7 @@ import { useBuyController } from "./use-buy-controller";
  * ไม่มี <form>: Enter ท้ายการเสียบบัตรของ Siam ID จึงไม่มีทางกดบันทึก · บันทึก = ปุ่มหรือ Ctrl+Enter
  */
 export function BuyPage() {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const me = useMe();
 
   if (me.role === "accounting") {
@@ -54,7 +54,7 @@ export function BuyPage() {
 }
 
 function NoBranchAlert() {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   return (
     <Alert variant="destructive">
       <TriangleAlert aria-hidden="true" />
@@ -65,7 +65,7 @@ function NoBranchAlert() {
 }
 
 function BuyForm({ me }: { me: Me }) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const { data: metals } = useSuspenseQuery(metalsQuery);
   const c = useBuyController(me, metals);
 
@@ -89,7 +89,7 @@ function BuyForm({ me }: { me: Me }) {
 }
 
 function KeyHints() {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   return (
     <section aria-label={t("hints.title")} className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground">
       <span className="flex items-center gap-1.5">

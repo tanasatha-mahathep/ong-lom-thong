@@ -7,7 +7,7 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { cn } from "@/lib/utils";
 import { type CustomerListItem, normalizeQuery } from "@/features/customers/model";
 import { customerListQuery } from "@/features/customers/queries";
-import { useBuyT } from "../i18n";
+import { useTranslation } from "../i18n";
 import type { BuyController } from "../use-buy-controller";
 import { useSiamIdCapture } from "../use-siam-id-capture";
 
@@ -19,7 +19,7 @@ const SEARCH_DEBOUNCE_MS = 250;
  * ถ้าข้อความกลายเป็นเลข 13 หลักพอดี (Siam ID พิมพ์ลงช่องนี้) ค้นด้วยเลขบัตรแบบเดียวกับช่องเลขบัตร
  */
 export function CustomerSearch({ c }: { c: BuyController }) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const id = useId();
   const { state, actions, register } = c;
   const [open, setOpen] = useState(false);

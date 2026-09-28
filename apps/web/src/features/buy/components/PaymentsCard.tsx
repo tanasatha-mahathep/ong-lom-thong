@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/table";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { useBuyT } from "../i18n";
+import { useTranslation } from "../i18n";
 import { type PaymentMethod, balanceView, isNegativeMoney, isZeroMoney, rowErrors } from "../model";
 import type { BuyController } from "../use-buy-controller";
 import { isPlainEnter } from "./field-helpers";
@@ -36,7 +36,7 @@ const TONE: Record<ReturnType<typeof balanceView>["tone"], string> = {
 
 /** ชำระเงิน: วิธี (เงินสด/โอนเงิน+ธนาคาร) → จำนวนเงิน → Enter · "เต็มจำนวน" ใช้ยอดคงเหลือจาก API */
 export function PaymentsCard({ c }: { c: BuyController }) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const id = useId();
   const { state, actions, register, quote, fresh } = c;
   const entry = state.paymentEntry;
@@ -176,7 +176,7 @@ export function PaymentsCard({ c }: { c: BuyController }) {
               type="button"
               variant="outline"
               aria-disabled={!balanceLeft}
-              className="aria-disabled:opacity-50"
+              className="aria-disabled:cursor-not-allowed aria-disabled:text-muted-foreground"
               onClick={() => void actions.payFull()}
             >
               {t("payments.payFull")}
@@ -191,7 +191,7 @@ export function PaymentsCard({ c }: { c: BuyController }) {
 }
 
 function PaymentsTable({ c }: { c: BuyController }) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const { state, actions, quote, fresh } = c;
   const errors = fresh && quote ? quote.errors : [];
   if (state.payments.length === 0) {
@@ -229,7 +229,7 @@ function PaymentsTable({ c }: { c: BuyController }) {
         </TableBody>
         {quote && (
           <TableFooter>
-            <TableRow className={cn("hover:bg-transparent", !fresh && "opacity-60")}>
+            <TableRow className={cn("hover:bg-transparent", !fresh && "text-muted-foreground")}>
               <TableCell colSpan={2} className="px-3 text-right">
                 {t("payments.total")}
               </TableCell>
@@ -253,7 +253,7 @@ function PaymentRowView(props: {
   problems: string[];
   onRemove: () => void;
 }) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const invalid = props.problems.length > 0;
   return (
     <>

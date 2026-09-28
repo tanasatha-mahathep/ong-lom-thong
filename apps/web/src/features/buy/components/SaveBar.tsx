@@ -15,12 +15,12 @@ import { Button } from "@/components/ui/button";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { useBuyT } from "../i18n";
+import { useTranslation } from "../i18n";
 import type { BuyController } from "../use-buy-controller";
 
 /** แถบล่างติดจอ: ยอดรวม · ชำระแล้ว · คงเหลือ (จาก quote) · เหตุที่ยังบันทึกไม่ได้ · บันทึก · ล้างบิล */
 export function SaveBar({ c }: { c: BuyController }) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const id = useId();
   const { quote, fresh, saveBlock, saving, register, actions } = c;
   const cleared = useRef(false);
@@ -29,7 +29,7 @@ export function SaveBar({ c }: { c: BuyController }) {
   return (
     <div className="sticky bottom-0 z-20 -mx-4 border-t-2 bg-background px-4 py-3 md:-mx-6 md:px-6">
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-2">
-        <dl className={cn("flex flex-wrap gap-x-6 gap-y-1", !fresh && "opacity-60")} aria-busy={!fresh}>
+        <dl className={cn("flex flex-wrap gap-x-6 gap-y-1", !fresh && "text-muted-foreground")} aria-busy={!fresh}>
           <Total label={t("save.total")} value={quote?.total_amount} strong />
           <Total label={t("save.paid")} value={quote?.paid} />
           <Total label={t("save.balance")} value={quote?.balance} />
@@ -45,7 +45,7 @@ export function SaveBar({ c }: { c: BuyController }) {
             size="lg"
             aria-disabled={!ready}
             aria-describedby={`${id}-reason`}
-            className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+            className="aria-disabled:cursor-not-allowed aria-disabled:bg-muted aria-disabled:text-muted-foreground aria-disabled:shadow-none"
             onClick={() => void actions.submit()}
           >
             {saving ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
@@ -95,7 +95,7 @@ export function SaveBar({ c }: { c: BuyController }) {
 }
 
 function Total({ label, value, strong }: { label: string; value: string | undefined; strong?: boolean }) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   return (
     <div className="flex items-baseline gap-1.5">
       <dt className="text-sm text-muted-foreground">{label}</dt>
@@ -112,7 +112,7 @@ function Total({ label, value, strong }: { label: string; value: string | undefi
  * ให้เลือกเอง: เปิดบิลที่บันทึกแล้ว หรือบันทึกบิลที่กรอกอยู่เป็นใบใหม่ (key ใหม่)
  */
 export function ConflictDialog({ c }: { c: BuyController }) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const { conflict, actions } = c;
   return (
     <AlertDialog open={conflict !== null} onOpenChange={(open) => !open && actions.closeConflict()}>
