@@ -75,6 +75,14 @@ export interface StockParams {
   branch_id?: string;
 }
 
+/** ส่งบัญชีรายเดือน — year เป็น ค.ศ. เสมอ (หน้าแปลง พ.ศ. ↔ ค.ศ. เอง เลข +543 ไม่ใช่การคำนวณเงิน) */
+export interface ExportParams {
+  year: number;
+  /** 1–12 */
+  month: number;
+  branch_id?: string;
+}
+
 /** query string ลำดับคงที่ — ตัวเดียวกันทั้ง fetch (JSON) และลิงก์ CSV จึงได้ตัวเลขชุดเดียวกันเสมอ */
 function purchaseQuery(p: PurchaseParams, format?: "csv"): string {
   const query = new URLSearchParams({ date_from: p.date_from, date_to: p.date_to });
@@ -91,9 +99,21 @@ function stockQuery(p: StockParams, format?: "csv"): string {
   return query.toString();
 }
 
+function exportQuery(p: ExportParams): string {
+  const query = new URLSearchParams({ year: String(p.year), month: String(p.month).padStart(2, "0") });
+  if (p.branch_id) query.set("branch_id", p.branch_id);
+  return query.toString();
+}
+
 /** ลิงก์ดาวน์โหลด CSV (UTF-8 + BOM) — origin เดียวกัน cookie session ไปเอง · ไม่มี public URL */
 export const purchaseCsvHref = (p: PurchaseParams) => `/api/reports/purchase?${purchaseQuery(p, "csv")}`;
 export const stockCsvHref = (p: StockParams) => `/api/reports/stock?${stockQuery(p, "csv")}`;
+
+/**
+ * URL ของ GET /api/reports/export (zip) — type เป็น template literal ตรงกับ `ApiPath` ของ apiFetch โดยไม่ต้อง import
+ * (ตัวเดียวกันทั้ง HEAD เช็คก่อนดาวน์โหลด และ navigation ดาวน์โหลดจริง ตัวเลขชุดเดียวกันเสมอ — ดู export-page.tsx)
+ */
+export const exportHref = (p: ExportParams): `/api/reports/export?${string}` => `/api/reports/export?${exportQuery(p)}`;
 
 export const purchaseReportQueryOptions = (p: PurchaseParams) =>
   queryOptions({

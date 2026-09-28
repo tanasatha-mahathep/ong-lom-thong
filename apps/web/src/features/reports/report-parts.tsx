@@ -123,14 +123,17 @@ export function CsvLink({ href, filename }: { href: string; filename: string }) 
   );
 }
 
-/** API ตอบ 403 (staff · บัญชีที่ไม่มีสาขา) — เมนูซ่อนไว้แล้ว แต่เปิด URL ตรง ๆ ได้ */
-export function ReportForbidden() {
+/**
+ * API ตอบ 403 (role ที่ดูรายงานนี้ไม่ได้ · บัญชีที่ไม่มีสาขา) — เมนูซ่อนไว้แล้ว แต่เปิด URL ตรง ๆ ได้
+ * ข้อความเริ่มต้นของรายงานทั่วไป (manager/accounting/admin) — หน้าที่จำกัด role แคบกว่า (เช่น export) ส่ง title/body เอง
+ */
+export function ReportForbidden({ title, body }: { title?: string; body?: string } = {}) {
   const { t } = useTranslation("reports");
   return (
     <Alert>
       <Info aria-hidden="true" />
-      <AlertTitle>{t("forbidden.title")}</AlertTitle>
-      <AlertDescription>{t("forbidden.body")}</AlertDescription>
+      <AlertTitle>{title ?? t("forbidden.title")}</AlertTitle>
+      <AlertDescription>{body ?? t("forbidden.body")}</AlertDescription>
     </Alert>
   );
 }
