@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
+import { toast } from "sonner";
 import { afterEach, vi } from "vitest";
 
 // เทสต์ทั้งแอปรอ router + query หลายชั้น — เครื่อง CI ที่รันเทสต์ api ขนานกันช้ากว่า 1 วินาทีเริ่มต้นได้
@@ -8,6 +9,8 @@ configure({ asyncUtilTimeout: 3000 });
 // ไม่ได้เปิด globals ของ vitest — Testing Library จึงไม่ cleanup ให้เอง
 afterEach(() => {
   cleanup();
+  // sonner เก็บ toast ไว้ใน store ระดับโมดูลและ replay ให้ Toaster ที่ mount ใหม่ — ปิดทิ้งไม่ให้ค้างไปเทสต์ถัดไป
+  toast.dismiss();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });

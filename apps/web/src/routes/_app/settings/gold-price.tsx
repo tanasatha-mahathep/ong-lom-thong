@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { PagePlaceholder } from "@/components/page-placeholder";
+import { GoldPricePage } from "@/features/gold-price/gold-price-page";
 
 export const Route = createFileRoute("/_app/settings/gold-price")({
   staticData: { title: "ตั้งราคาทองวันนี้", crumbs: [{ title: "ตั้งค่า" }] },
-  component: PagePlaceholder,
+  component: GoldPricePage,
 });

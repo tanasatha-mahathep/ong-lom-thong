@@ -1,4 +1,4 @@
-import { auditLog, goldPrice, goldPriceSetting } from "@ong/db";
+import { auditLog, branch, goldPrice, goldPriceSetting } from "@ong/db";
 import { and, eq, isNull } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TestApp, databaseAvailable, startTestApp } from "../test/harness";
@@ -17,7 +17,11 @@ describe.skipIf(!available)("ราคาทองวันนี้ (R7 · R8 �
     await t.createUser({ email: "manager@ong.test", password: PW, role: "manager", branch: "00000" });
     await t.createUser({ email: "staff@ong.test", password: PW, branch: "00000" });
     await t.createUser({ email: "staff2@ong.test", password: PW, branch: "00001" });
-    for (const who of ["manager", "staff", "staff2"]) cookies[who] = await t.login(`${who}@ong.test`, PW);
+    await t.createUser({ email: "nobranch@ong.test", password: PW, role: "manager" });
+    await t.createUser({ email: "mgr2@ong.test", password: PW, role: "manager", branch: "00002" });
+    for (const who of ["manager", "staff", "staff2", "nobranch", "mgr2"]) {
+      cookies[who] = await t.login(`${who}@ong.test`, PW);
+    }
   });
   afterAll(async () => {
     await t?.close();
@@ -34,6 +38,25 @@ describe.skipIf(!available)("ราคาทองวันนี้ (R7 · R8 �
     const rows = (await res.json()) as { code: string; name_th: string; unit: string; assessment_enabled: boolean }[];
     expect(rows.map((m) => m.code)).toEqual(["gold", "nak", "silver", "platinum"]);
     expect(rows[0]).toMatchObject({ name_th: "ทอง", unit: "g", assessment_enabled: false });
+  });
+
+  it("ไม่มีสาขาที่เปิดอยู่ (ไม่ผูกสาขา / สาขาถูกปิดหมด) = 403 ทั้งราคาทองและโลหะ (fail-closed)", async () => {
+    // app.request อาจคืน Response ตรง ๆ (ไม่ใช่ Promise) — await ทีละตัว
+    const endpoints = async (who: string) => [
+      await t.request("/api/metals", { cookie: cookies[who] }),
+      await today(who),
+      await t.request("/api/gold-price/quote", { cookie: cookies[who], body: { bar_sell: "67850" } }),
+      await put(who, { bar_sell: "67850" }),
+    ];
+    for (const res of await endpoints("nobranch")) expect(res.status).toBe(403);
+    await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
+    try {
+      for (const res of await endpoints("mgr2")) expect(res.status).toBe(403);
+    } finally {
+      await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
+    }
+    expect(await t.db.select().from(goldPrice)).toEqual([]);
+    expect((await t.request("/api/metals", { cookie: cookies.mgr2 })).status).toBe(200);
   });
 
   it("ยังไม่ตั้งราคา = 404 พร้อมข้อความ R7", async () => {
@@ -53,10 +76,28 @@ describe.skipIf(!available)("ราคาทองวันนี้ (R7 · R8 �
     [{ bar_sell: "0" }, "ราคาทองแท่งขายออกต้องเป็นตัวเลขมากกว่า 0"],
     [{ bar_sell: "67850.001" }, "ราคาทศนิยมไม่เกิน 2 ตำแหน่ง"],
     [{ bar_sell: "150" }, "ราคาต่ำกว่าส่วนต่างรับซื้อ"],
+    [{ bar_sell: "1000000" }, "ราคาทองสูงผิดปกติ — ตรวจตัวเลขอีกครั้ง"],
+    [{ bar_sell: "1,000,000,000,000" }, "ราคาทองสูงผิดปกติ — ตรวจตัวเลขอีกครั้ง"],
   ])("quote ปฏิเสธ %j", async (body, error) => {
     const res = await quote(body);
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error, field: "bar_sell" });
+  });
+
+  it("ราคาสูงผิดปกติ = 400 แม้ยืนยันแล้ว — วันแรกที่ไม่มีราคาก่อนหน้าให้ด่านพิมพ์ผิดเทียบก็กัน (ไม่ล้น numeric เป็น 500)", async () => {
+    // เลขบัตร 13 หลัก (สมมติ) ที่ Siam ID พิมพ์หลุดเข้าช่องราคา · ล้านล้านบาท
+    for (const bar_sell of ["1103700123458", "1,000,000,000,000", "1000000.00"]) {
+      const res = await put("manager", { bar_sell, confirm_typo: true });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "ราคาทองสูงผิดปกติ — ตรวจตัวเลขอีกครั้ง", field: "bar_sell" });
+    }
+    expect(await t.db.select().from(goldPrice)).toEqual([]);
+    // เพดานพอดี 999,999.99 ยังคำนวณได้ (quote เท่านั้น ไม่บันทึก)
+    expect(await (await quote({ bar_sell: "999999.99" })).json()).toEqual({
+      bar_sell: "999999.99",
+      bar_buy: "999799.99",
+      jewelry_buy: "949810",
+    });
   });
 
   it("staff ตั้งราคาไม่ได้ (403) · manager ตั้งได้", async () => {
@@ -103,7 +144,8 @@ describe.skipIf(!available)("ราคาทองวันนี้ (R7 · R8 �
 
     const rejected = await put("manager", { bar_sell: "76000" });
     expect(rejected.status).toBe(409);
-    expect(await rejected.json()).toMatchObject({ field: "bar_sell", warning: q.warning });
+    // 409 ชี้ช่องยืนยัน (confirm_typo) · คำเตือนอยู่ใน warning
+    expect(await rejected.json()).toEqual({ error: q.warning, field: "confirm_typo", warning: q.warning });
     expect((await today("staff")).status).toBe(404);
 
     const confirmed = await put("manager", { bar_sell: "76000", confirm_typo: true });
