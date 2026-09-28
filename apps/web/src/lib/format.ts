@@ -41,6 +41,16 @@ export const formatWeight = (value: string | null | undefined) => formatDecimal(
 /** จำนวนเต็ม เช่น ราคาทองรูปพรรณ: "64268" → "64,268" */
 export const formatInteger = (value: string | null | undefined) => formatDecimal(INTEGER, value);
 
+/** ไม่มีสตางค์ — "67850" · "67850.00" */
+const WHOLE = /^-?\d+(\.0+)?$/;
+
+/**
+ * ราคาทองแท่งแบบกระดานราคา (ระบบเดิม "67,850"): ไม่มีสตางค์แสดงเป็นบาทเต็ม "67850.00" → "67,850"
+ * มีสตางค์แสดงครบ 2 ตำแหน่ง "67850.50" → "67,850.50" — ไม่ปัดทิ้ง จอจึงไม่ต่างจากราคาที่บันทึก
+ */
+export const formatBoardPrice = (value: string | null | undefined) =>
+  value && WHOLE.test(value) ? formatInteger(value) : formatMoney(value);
+
 /** เขตเวลาของร้าน — ตรงกับ SHOP_TIME_ZONE ใน @ong/core */
 const SHOP_TIME_ZONE = "Asia/Bangkok";
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;

@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY, formatInteger, formatMoney, formatThaiDate, formatThaiDateTime, formatWeight } from "./format";
+import {
+  EMPTY,
+  formatBoardPrice,
+  formatInteger,
+  formatMoney,
+  formatThaiDate,
+  formatThaiDateTime,
+  formatWeight,
+} from "./format";
 
 describe("formatMoney — ข้อความทศนิยมจาก API ไม่ผ่าน float", () => {
   it("ใส่คั่นหลักพันและทศนิยม 2 ตำแหน่ง", () => {
@@ -63,6 +71,25 @@ describe("formatInteger — ราคาทองรูปพรรณ (0 ตำ
   it("เศษครึ่งปัดขึ้น", () => {
     expect(formatInteger("64268.5")).toBe("64,269");
     expect(formatInteger("-0.5")).toBe("-1");
+  });
+});
+
+describe("formatBoardPrice — ราคาทองแท่งแบบกระดานราคา", () => {
+  it("ไม่มีสตางค์แสดงบาทเต็มเหมือนกระดานของระบบเดิม", () => {
+    expect(formatBoardPrice("67850.00")).toBe("67,850");
+    expect(formatBoardPrice("67650")).toBe("67,650");
+    expect(formatBoardPrice("12345678901234567.00")).toBe("12,345,678,901,234,567");
+  });
+
+  it("มีสตางค์แสดงครบ ไม่ปัดทิ้ง", () => {
+    expect(formatBoardPrice("67850.50")).toBe("67,850.50");
+    expect(formatBoardPrice("67850.05")).toBe("67,850.05");
+  });
+
+  it("ค่าว่างแสดงขีด · ค่าผิดรูปคืนตามเดิม", () => {
+    expect(formatBoardPrice(null)).toBe(EMPTY);
+    expect(formatBoardPrice("")).toBe(EMPTY);
+    expect(formatBoardPrice("1e3")).toBe("1e3");
   });
 });
 

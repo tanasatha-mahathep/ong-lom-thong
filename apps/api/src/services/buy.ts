@@ -6,6 +6,7 @@ import {
   ZERO,
   avgPricePerG,
   businessDate,
+  businessTime,
   cardStatus,
   fmtMoney,
   fmtWeight,
@@ -16,6 +17,7 @@ import {
 import {
   type CustomerSnapshot,
   type Db,
+  type Role,
   auditLog,
   branch,
   buyLine,
@@ -29,17 +31,38 @@ import {
 import { type SQL, and, asc, desc, eq, exists, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { type BranchRef, type Viewer, currentBranch, forUser } from "../lib/scope";
+import { UNUSABLE_CHARS_MSG, isCleanText } from "../lib/text";
 import { escapeLike, findCustomer } from "./customers";
 import { type TodayPrice, priceForBranch } from "./goldPrice";
 
 export const BUY_API_MSG = {
   noBranch: "ยังไม่ได้เลือกสาขาที่ทำงาน",
+  noTaxBranchCode: "สาขานี้ยังไม่ได้ตั้งรหัสสาขาของกรมสรรพากร — ติดต่อผู้ดูแลระบบ",
   futureDate: "วันที่ต้องไม่เกินวันนี้",
+  backdateRole: "เปิดบิลย้อนหลังได้เฉพาะผู้จัดการขึ้นไป",
+  backdateWindow: "ย้อนหลังได้ไม่เกิน 7 วัน",
+  backdateReason: "กรุณาระบุเหตุผลที่บันทึกย้อนหลัง",
+  backdateReasonShort: "เหตุผลที่บันทึกย้อนหลังต้องยาวอย่างน้อย 5 ตัวอักษร",
+  backdateTime: "บิลย้อนหลังต้องระบุเวลา",
+  futureTime: "เวลาต้องไม่เกินเวลาปัจจุบัน",
   unknownMetal: "ไม่พบประเภทโลหะ",
   keyTaken: "idempotency_key นี้ถูกใช้แล้ว",
+  keyReused: "idempotency_key นี้ใช้กับบิลอื่นแล้ว",
   docNoTaken: "เลขที่เอกสารชนกับบิลที่มีอยู่แล้ว — แจ้งผู้ดูแลระบบตรวจตัวนับเลขที่ (doc_sequence)",
   noGoldPriceOn: (isoDate: string) => `ยังไม่ได้ตั้งราคาทองของวันที่ ${beDate(isoDate)}`,
 } as const;
+
+// บิลย้อนหลัง (คีย์ใบเขียนมือหลังระบบล่ม · spec §11) — เจ้าของกำหนด 28 ก.ย.: ผู้จัดการขึ้นไป · ไม่เกิน 7 วัน · ต้องมีเหตุผล
+const BACKDATE_ROLES: readonly Role[] = ["manager", "admin"];
+const BACKDATE_MAX_DAYS = 7;
+const BACKDATE_REASON_MIN = 5;
+
+/** วันที่ ISO เลื่อนไป n วันตามปฏิทิน */
+const shiftDate = (iso: string, days: number) => {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+};
 
 /** "2026-09-30" → "30/09/2569" (วันที่แบบที่ร้านใช้ — ใช้ในข้อความเท่านั้น) */
 const beDate = (iso: string) => {
@@ -52,7 +75,7 @@ export class BuyError extends Error {
   constructor(
     message: string,
     readonly field: string,
-    readonly status: 403 | 409,
+    readonly status: 400 | 403 | 409,
     readonly extra: Record<string, unknown> = {},
   ) {
     super(message);
@@ -68,8 +91,19 @@ const optionalText = (max: number, label: string) =>
     .string({ error: `${label}ต้องเป็นข้อความ` })
     .trim()
     .max(max, `${label}ยาวเกิน ${max} ตัวอักษร`)
+    .refine(isCleanText, UNUSABLE_CHARS_MSG)
     .nullish()
     .transform((v) => v || null);
+
+/** วันที่ "YYYY-MM-DD" ที่มีจริงในปฏิทิน ตั้งแต่ปี 2000 — ปี 0000 ผ่านรูปแบบแต่ Postgres ปฏิเสธ (เคยเป็น 500) */
+const isoDate = (label: string) =>
+  z.iso
+    .date(`${label}ต้องเป็นรูปแบบ YYYY-MM-DD`)
+    .refine((d) => d >= "2000-01-01", `${label}ต้องตั้งแต่ปี ค.ศ. 2000 (พ.ศ. 2543)`);
+
+/** ช่องที่ฟอร์มส่งมาว่าง ("" · ช่องว่างล้วน · null) = ไม่ได้กรอก — quote ตอบ ok:false ต่อช่อง ไม่ใช่ 400 */
+const blankAsAbsent = <T extends z.ZodType>(schema: T) =>
+  z.preprocess((v) => (v === null || (typeof v === "string" && v.trim() === "") ? undefined : v), schema.optional());
 
 const LineBody = z.object({
   // โลหะที่ไม่รู้จักตรวจใน prepareBuy (ตอบเป็น error ของแถว ไม่ใช่ 400)
@@ -88,12 +122,14 @@ const PaymentBody = z.object({
 /** payload ของ POST /buy/quote — POST /buy ใช้ตัวนี้ + ช่องของหัวบิล (SaveBody) */
 export const QuoteBody = z.object(
   {
-    date: z.iso.date("วันที่ต้องเป็นรูปแบบ YYYY-MM-DD").optional(),
-    customer_id: z.uuid("customer_id ไม่ถูกต้อง").nullish(),
+    date: blankAsAbsent(isoDate("วันที่")),
+    customer_id: blankAsAbsent(z.uuid("customer_id ไม่ถูกต้อง")),
     lines: z.array(LineBody, { error: "ต้องส่ง lines เป็นรายการ" }).max(50, "รายการในบิลเกิน 50 แถว — แยกเป็นหลายบิล"),
     payments: z
       .array(PaymentBody, { error: "ต้องส่ง payments เป็นรายการ" })
       .max(10, "วิธีชำระเงินเกิน 10 รายการต่อบิล"),
+    // บังคับเฉพาะบิลย้อนหลัง (ตรวจใน prepareBuy) · บิลวันนี้ไม่ใช้
+    backdate_reason: optionalText(500, "เหตุผลที่บันทึกย้อนหลัง"),
   },
   { error: "ต้องส่งข้อมูลเป็น JSON object" },
 );
@@ -103,7 +139,7 @@ const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9_-]{16,128}$/;
 
 export const SaveBody = QuoteBody.extend({
-  time: z.string({ error: "เวลาต้องเป็นรูปแบบ HH:MM" }).regex(TIME, "เวลาต้องเป็นรูปแบบ HH:MM").optional(),
+  time: blankAsAbsent(z.string({ error: "เวลาต้องเป็นรูปแบบ HH:MM" }).regex(TIME, "เวลาต้องเป็นรูปแบบ HH:MM")),
   detail: optionalText(2000, "รายละเอียด"),
   full_tax: z.boolean({ error: "full_tax ต้องเป็น true หรือ false" }).default(false),
   idempotency_key: z
@@ -133,6 +169,9 @@ export interface PreparedBuy {
  * ขั้นเดียวที่ทั้ง POST /buy/quote และ POST /buy เรียก (CLAUDE.md กฎ 2) — ตัวเลขทั้งหมดมาจาก quoteBuy() ใน @ong/core
  * ส่วนที่ต้องอ่าน DB (สาขา · ราคาทองของวันบิล · ลูกค้า · โลหะ) ทำที่นี่แล้วต่อ error เข้ากับผลของ quoteBuy
  */
+const quoteLines = (body: QuoteBody) =>
+  body.lines.map((l) => ({ metalId: l.metal_id, weightG: l.weight_g, amount: l.amount }));
+
 export async function prepareBuy(db: Db, viewer: Viewer, body: QuoteBody, now: Date): Promise<PreparedBuy> {
   const where = currentBranch(viewer, await forUser(db, viewer));
   if (!where) throw new BuyError(BUY_API_MSG.noBranch, "branch", 403);
@@ -140,14 +179,15 @@ export async function prepareBuy(db: Db, viewer: Viewer, body: QuoteBody, now: D
   const today = businessDate(now);
   // ย้อนหลังได้ (คีย์ใบเขียนมือหลังระบบล่ม · spec §11) — ราคาทองของวันนั้นต้องมี · อนาคตไม่ได้
   const date = body.date ?? today;
-  const [price, customerRow, metals] = await Promise.all([
+  const [price, customerRow, metals, [head]] = await Promise.all([
     priceForBranch(db, date, where.id),
     body.customer_id ? findCustomer(db, body.customer_id) : null,
     db.select({ id: metal.id }).from(metal),
+    db.select({ taxBranchCode: branch.taxBranchCode }).from(branch).where(eq(branch.id, where.id)),
   ]);
 
   const quote = quoteBuy({
-    lines: body.lines.map((l) => ({ metalId: l.metal_id, weightG: l.weight_g, amount: l.amount })),
+    lines: quoteLines(body),
     payments: body.payments.map((p) => ({ method: p.method, bank: p.bank, amount: p.amount })),
     // สถานะบัตรคิด ณ วันที่ของบิล — บิลย้อนหลังใช้บัตรที่ยังไม่หมดอายุในวันนั้นได้
     customer: customerRow ? { id: customerRow.id, cardStatus: cardStatus(customerRow.cardExpireText, date) } : null,
@@ -156,7 +196,9 @@ export async function prepareBuy(db: Db, viewer: Viewer, body: QuoteBody, now: D
 
   const known = new Set(metals.map((m) => m.id));
   const errors: QuoteError[] = [
-    ...(date > today ? [{ field: "date", message: BUY_API_MSG.futureDate }] : []),
+    // ไม่มีรหัสสาขาของกรมสรรพากร = ออก PDF เก็บถาวรไม่ได้ตลอดไป (หัวใบถูก snapshot ตอนบันทึก · R15) → ห้ามขายตั้งแต่แรก
+    ...(head?.taxBranchCode?.trim() ? [] : [{ field: "branch", message: BUY_API_MSG.noTaxBranchCode }]),
+    ...dateErrors(viewer, body, date, today),
     // ข้อความของ core พูดถึง "วันนี้" — บิลย้อนหลังบอกวันที่ที่ขาดราคาให้ชัด
     ...quote.errors.map((e) =>
       e.field === "gold_price" && date !== today ? { ...e, message: BUY_API_MSG.noGoldPriceOn(date) } : e,
@@ -166,6 +208,21 @@ export async function prepareBuy(db: Db, viewer: Viewer, body: QuoteBody, now: D
     ),
   ];
   return { branch: where, today, date, price, customer: customerRow, quote, errors, ok: errors.length === 0 };
+}
+
+/** วันที่ของบิล: อนาคตไม่ได้ · ย้อนหลังได้เฉพาะผู้จัดการขึ้นไป ไม่เกิน 7 วัน และต้องมีเหตุผล (ลง audit) */
+function dateErrors(viewer: Viewer, body: QuoteBody, date: string, today: string): QuoteError[] {
+  if (date > today) return [{ field: "date", message: BUY_API_MSG.futureDate }];
+  if (date === today) return [];
+  if (!BACKDATE_ROLES.includes(viewer.role)) return [{ field: "date", message: BUY_API_MSG.backdateRole }];
+  const errors: QuoteError[] = [];
+  if (date < shiftDate(today, -BACKDATE_MAX_DAYS)) errors.push({ field: "date", message: BUY_API_MSG.backdateWindow });
+  const reason = body.backdate_reason;
+  if (!reason) errors.push({ field: "backdate_reason", message: BUY_API_MSG.backdateReason });
+  else if (reason.length < BACKDATE_REASON_MIN) {
+    errors.push({ field: "backdate_reason", message: BUY_API_MSG.backdateReasonShort });
+  }
+  return errors;
 }
 
 /** ผลของ POST /buy/quote (และแนบกับ 409 ของ POST /buy) — เงิน/น้ำหนักเป็น string */
@@ -221,16 +278,89 @@ const pgError = (e: unknown): { code?: string; constraint_name?: string } | null
   return null;
 };
 
-/** key เดิมของผู้ใช้คนเดิม = คำตอบเดิม (กดซ้ำ/เน็ตหลุด) · ของคนอื่น = 409 */
-async function findReplay(db: Db, viewer: Viewer, key: string): Promise<SavedBuy | null> {
+/**
+ * key เดิม + ผู้ใช้คนเดิม + เนื้อบิลเดิมทั้งใบ = คำตอบเดิม (กดซ้ำ/เน็ตหลุด)
+ * key ของคนอื่น = 409 (ไม่บอกว่าเป็นบิลไหน) · เนื้อบิลต่าง = 409 พร้อม existing {id, doc_no} ให้จอเปิดบิลที่บันทึกแล้ว
+ */
+async function findReplay(db: Db, viewer: Viewer, body: SaveBody, now: Date): Promise<SavedBuy | null> {
   const [row] = await db
-    .select({ id: buyReceipt.id, docNo: buyReceipt.docNo, pdfStatus: buyReceipt.pdfStatus, by: buyReceipt.createdBy })
+    .select({
+      id: buyReceipt.id,
+      docNo: buyReceipt.docNo,
+      pdfStatus: buyReceipt.pdfStatus,
+      by: buyReceipt.createdBy,
+      customerId: buyReceipt.customerId,
+      date: buyReceipt.date,
+      time: buyReceipt.time,
+      detail: buyReceipt.detail,
+      fullTax: buyReceipt.fullTax,
+    })
     .from(buyReceipt)
-    .where(eq(buyReceipt.idempotencyKey, key))
+    .where(eq(buyReceipt.idempotencyKey, body.idempotency_key))
     .limit(1);
   if (!row) return null;
   if (row.by !== viewer.userId) throw new BuyError(BUY_API_MSG.keyTaken, "idempotency_key", 409);
+  const [lines, payments] = await Promise.all([
+    db
+      .select({ metalId: buyLine.metalId, weightG: buyLine.weightG, amount: buyLine.amount })
+      .from(buyLine)
+      .where(eq(buyLine.receiptId, row.id))
+      .orderBy(asc(buyLine.lineNo)),
+    db
+      .select({ method: payment.method, bank: payment.bank, amount: payment.amount })
+      .from(payment)
+      .where(eq(payment.receiptId, row.id)),
+  ]);
+  if (!sameBill(body, businessDate(now), row, lines, payments)) {
+    throw new BuyError(BUY_API_MSG.keyReused, "idempotency_key", 409, { existing: { id: row.id, doc_no: row.docNo } });
+  }
   return { id: row.id, doc_no: row.docNo, pdf_status: row.pdfStatus };
+}
+
+/** เวลาใน DB "10:00:00" → "10:00" */
+const hhmm = (t: string) => t.slice(0, 5);
+const lineKey = (metalId: string, weight: string, amount: string) =>
+  `${metalId.toLowerCase()}|${fmtWeight(D(weight))}|${fmtMoney(D(amount))}`;
+const paymentKey = (method: string, bank: string | null, amount: string) =>
+  `${method}|${bank ?? ""}|${fmtMoney(D(amount))}`;
+const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+/**
+ * เนื้อบิลเดียวกันหรือไม่ — ลูกค้า · แถวตามลำดับ (โลหะ · น้ำหนัก 3 ตำแหน่ง · ราคา 2 ตำแหน่ง)
+ * · ชำระแบบไม่สนลำดับ (วิธี · ธนาคาร · จำนวน) · รายละเอียด · ใบกำกับเต็มรูป · วันที่ (ถ้าส่งมา)
+ * · เวลา เฉพาะบิลย้อนหลัง (บิลวันนี้จอเติมเวลาใหม่ได้) — ตัวเลขทำเป็นรูปมาตรฐานด้วย quoteBuy ตัวเดียวกับตอนบันทึก
+ */
+function sameBill(
+  body: SaveBody,
+  today: string,
+  row: { customerId: string; date: string; time: string; detail: string | null; fullTax: boolean },
+  lines: { metalId: string; weightG: string; amount: string }[],
+  payments: { method: string; bank: string | null; amount: string }[],
+): boolean {
+  const q = quoteBuy({
+    lines: quoteLines(body),
+    payments: body.payments.map((p) => ({ method: p.method, bank: p.bank, amount: p.amount })),
+    customer: null,
+    goldPriceSet: true,
+  });
+  // แถวที่ผิดรูป/ซ้ำถูกข้ามใน quoteBuy — จำนวนไม่เท่ากับที่ส่งมา = ไม่ใช่บิลเดิม
+  if (q.lines.length !== body.lines.length || q.payments.length !== body.payments.length) return false;
+  const backdated = body.date !== undefined && body.date < today;
+  return (
+    row.customerId === body.customer_id?.toLowerCase() &&
+    sameList(
+      q.lines.map((l) => lineKey(l.metalId, l.weightG, l.amount)),
+      lines.map((l) => lineKey(l.metalId, l.weightG, l.amount)),
+    ) &&
+    sameList(
+      q.payments.map((p) => paymentKey(p.method, p.bank, p.amount)).sort(),
+      payments.map((p) => paymentKey(p.method, p.bank, p.amount)).sort(),
+    ) &&
+    (body.detail ?? null) === row.detail &&
+    body.full_tax === row.fullTax &&
+    (body.date === undefined || body.date === row.date) &&
+    (!backdated || body.time === hhmm(row.time))
+  );
 }
 
 async function insertBuy(db: Db, viewer: Viewer, p: PreparedBuy, body: SaveBody, time: string): Promise<SavedBuy> {
@@ -243,11 +373,14 @@ async function insertBuy(db: Db, viewer: Viewer, p: PreparedBuy, body: SaveBody,
       sql`select next_doc_no(${p.branch.id}::uuid, 'RC', ${p.date}::date) as doc_no`,
     );
     if (!seq) throw new Error("next_doc_no returned nothing");
+    // อักษรนำของสาขา (แบบ Django Branch.doc_prefix): PT-RC6910-0001 · ตัวนับยังเป็นของสาขา/RC/งวด ตัวเดิม
+    const [head] = await tx.select({ prefix: branch.docPrefix }).from(branch).where(eq(branch.id, p.branch.id));
+    const docNo = head?.prefix ? `${head.prefix}-${seq.doc_no}` : seq.doc_no;
     const [receipt] = await tx
       .insert(buyReceipt)
       .values({
         branchId: p.branch.id,
-        docNo: seq.doc_no,
+        docNo,
         date: p.date,
         time,
         customerId: buyer.id,
@@ -296,7 +429,7 @@ async function insertBuy(db: Db, viewer: Viewer, p: PreparedBuy, body: SaveBody,
         action: "buy.backdate",
         tableName: "buy_receipt",
         rowId: receipt.id,
-        diff: { doc_no: receipt.docNo, date: p.date, time, entered_on: p.today },
+        diff: { doc_no: receipt.docNo, date: p.date, time, entered_on: p.today, reason: body.backdate_reason },
       });
     }
     // Σชำระ = ยอดบิล ตรวจซ้ำตอน commit โดย deferred trigger check_receipt_paid (ตาข่ายชั้นสุดท้าย)
@@ -306,28 +439,28 @@ async function insertBuy(db: Db, viewer: Viewer, p: PreparedBuy, body: SaveBody,
 
 /**
  * POST /buy — quote ด้วยขั้นเดียวกับ /buy/quote แล้วบันทึกทั้งบิลในทรานแซกชันเดียว
- * replay = key เดิมของผู้ใช้คนเดิม (ตอบ 200 ด้วยบิลเดิม ไม่สร้างใหม่)
+ * replay = key เดิมของผู้ใช้คนเดิม เนื้อบิลเดิม (ตอบ 200 ด้วยบิลเดิม ไม่สร้างใหม่)
  */
 export async function saveBuy(
   db: Db,
   viewer: Viewer,
   body: SaveBody,
   now: Date,
-  time: string,
 ): Promise<{ replay: boolean; receipt: SavedBuy }> {
-  const prepared = await prepareBuy(db, viewer, body, now);
-  // ตรวจ key ก่อนผล quote — กดซ้ำหลังบันทึกไปแล้ว (เช่นข้ามเที่ยงคืน) ต้องได้บิลเดิม ไม่ใช่ error
-  const existing = await findReplay(db, viewer, body.idempotency_key);
+  // ตรวจ key ก่อนทุกอย่าง — กดซ้ำหลังบันทึกไปแล้ว (ข้ามเที่ยงคืน · session เสียสาขาปัจจุบัน) ต้องได้บิลเดิม
+  const existing = await findReplay(db, viewer, body, now);
   if (existing) return { replay: true, receipt: existing };
+  const prepared = await prepareBuy(db, viewer, body, now);
   const first = prepared.errors[0];
   if (first) throw new BuyError(first.message, first.field, 409, quoteJson(prepared));
+  const time = billTime(body.time, prepared, now);
   try {
     return { replay: false, receipt: await insertBuy(db, viewer, prepared, body, time) };
   } catch (e) {
     const pg = pgError(e);
     if (pg?.code === "23505" && pg.constraint_name === "buy_receipt_idempotency_key_unique") {
       // ส่งพร้อมกันด้วย key เดียวกัน — ตัวที่ commit ก่อนชนะ ตัวที่เหลือได้บิลนั้น
-      const winner = await findReplay(db, viewer, body.idempotency_key);
+      const winner = await findReplay(db, viewer, body, now);
       if (winner) return { replay: true, receipt: winner };
     }
     if (pg?.code === "23505" && pg.constraint_name === "buy_receipt_branch_doc_no") {
@@ -337,19 +470,37 @@ export async function saveBuy(
   }
 }
 
+/** นาทีที่ยอมให้เวลาในบิลล่วงหน้านาฬิกาเซิร์ฟเวอร์ (นาฬิกาเครื่องหน้าร้านเดินไม่ตรง) */
+const FUTURE_TIME_GRACE_MS = 5 * 60_000;
+
+/** เวลาของบิล: ย้อนหลังต้องระบุเอง · วันนี้ไม่ระบุ = เวลาตอนบันทึก · วันนี้ห้ามล่วงหน้าเกิน 5 นาที */
+function billTime(time: string | undefined, p: PreparedBuy, now: Date): string {
+  if (!time) {
+    if (p.date < p.today) throw new BuyError(BUY_API_MSG.backdateTime, "time", 400);
+    return businessTime(now);
+  }
+  const limit = new Date(now.getTime() + FUTURE_TIME_GRACE_MS);
+  // 5 นาทีนั้นข้ามเที่ยงคืนไปแล้ว = ทุกเวลาของวันนี้ยังไม่เกิน
+  if (p.date === p.today && businessDate(limit) === p.today && time > businessTime(limit)) {
+    throw new BuyError(BUY_API_MSG.futureTime, "time", 400);
+  }
+  return time;
+}
+
 // ---------- อ่าน (scoped ตามสาขาที่อ่านได้) ----------
 
 export const LIST_PAGE_SIZE = 50;
 
 export const ListQuery = z.object({
-  date_from: z.iso.date("date_from ต้องเป็นรูปแบบ YYYY-MM-DD").optional(),
-  date_to: z.iso.date("date_to ต้องเป็นรูปแบบ YYYY-MM-DD").optional(),
+  date_from: isoDate("date_from ").optional(),
+  date_to: isoDate("date_to ").optional(),
   /** code ของโลหะ (gold · nak · silver · platinum) — บิลที่มีโลหะนั้นอย่างน้อยหนึ่งแถว */
-  metal: z.string().trim().max(32, "metal ไม่ถูกต้อง").optional(),
+  metal: z.string().trim().max(32, "metal ไม่ถูกต้อง").refine(isCleanText, UNUSABLE_CHARS_MSG).optional(),
   q: z
     .string()
     .trim()
     .max(100, "คำค้นยาวเกิน 100 ตัวอักษร")
+    .refine(isCleanText, UNUSABLE_CHARS_MSG)
     .refine((q) => q.length === 0 || q.length >= 2, "ค้นอย่างน้อย 2 ตัวอักษร")
     .default(""),
   branch_id: z.string().max(64, "branch_id ไม่ถูกต้อง").optional(),
@@ -361,8 +512,6 @@ export const ListQuery = z.object({
     .default(1),
 });
 export type ListQuery = z.infer<typeof ListQuery>;
-
-const hhmm = (t: string) => t.slice(0, 5);
 
 /** ยอดรวมของทุกหน้าตามตัวกรอง — string ทั้งหมด (จำนวนบิล · กรัม 3 ตำแหน่ง · บาท 2 ตำแหน่ง) */
 export interface ListTotals {
