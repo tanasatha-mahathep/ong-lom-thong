@@ -14,7 +14,8 @@ function expectSecurityHeaders(res: Response) {
   expect(res.headers.get("content-security-policy")).not.toMatch(/script-src[^;]*unsafe-inline/);
   expect(res.headers.get("x-frame-options")).toBe("DENY");
   expect(res.headers.get("x-content-type-options")).toBe("nosniff");
-  expect(res.headers.get("strict-transport-security")).toBe("max-age=31536000");
+  expect(res.headers.get("strict-transport-security")).toBe("max-age=31536000; includeSubDomains");
+  expect(res.headers.get("permissions-policy")).toBe("camera=(), microphone=(), geolocation=(), payment=()");
   expect(res.headers.get("cross-origin-opener-policy")).toBe("same-origin");
   expect(res.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
 }

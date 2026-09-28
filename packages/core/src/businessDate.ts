@@ -13,7 +13,10 @@ export function businessDate(now: Date = new Date(), timeZone: string = SHOP_TIM
     day: "2-digit",
   }).formatToParts(now);
   const get = (type: "year" | "month" | "day") => parts.find((p) => p.type === type)?.value ?? "";
-  return `${get("year")}-${get("month")}-${get("day")}`;
+  const iso = `${get("year")}-${get("month")}-${get("day")}`;
+  // Intl ที่ขาดส่วนใดส่วนหนึ่งจะได้ "-09-28" ซึ่งเทียบ string กับวันหมดอายุบัตรแล้วผิดเงียบ ๆ — หยุดเลย
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) throw new Error(`businessDate: unexpected Intl output "${iso}"`);
+  return iso;
 }
 
 /**
@@ -28,5 +31,8 @@ export function businessTime(now: Date = new Date(), timeZone: string = SHOP_TIM
     hourCycle: "h23",
   }).formatToParts(now);
   const get = (type: "hour" | "minute") => parts.find((p) => p.type === type)?.value ?? "";
-  return `${get("hour")}:${get("minute")}`;
+  const hhmm = `${get("hour")}:${get("minute")}`;
+  // "10:" จะถูก Postgres อ่านเป็น 10:00 เงียบ ๆ — หยุดเลย
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(hhmm)) throw new Error(`businessTime: unexpected Intl output "${hhmm}"`);
+  return hhmm;
 }

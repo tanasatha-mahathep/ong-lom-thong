@@ -12,7 +12,7 @@ const FULL = { lines: 100, branches: 100, functions: 100, statements: 100 };
 // ค่าติดลบ = จำนวนที่ไม่ครอบได้สูงสุด (Vitest) — แน่นกว่า % เพราะไฟล์โตขึ้นแล้วไม่เปิดช่องให้แขนงใหม่หลุด
 // ทั้งหมดคือ fallback `?? ""` / `? :` ที่มีไว้ให้ TypeScript (noUncheckedIndexedAccess) แต่ไปถึงจริงไม่ได้
 const MEASURED: Record<string, typeof FULL> = {
-  // L73 `named[2] ?? ""` — กลุ่มที่ 2 ของ DAY_MONTH_YEAR ไม่ใช่ optional: regex match แล้วต้องมีค่าเสมอ
+  // L78 `named[2] ?? ""` — กลุ่มที่ 2 ของ DAY_MONTH_YEAR ไม่ใช่ optional: regex match แล้วต้องมีค่าเสมอ
   "packages/core/src/card.ts": { ...FULL, branches: -1 },
   // L60–61 `dot === -1 ? …` — groupThousands เป็น private รับแต่ผล toFixed(2) / toFixed(3) ซึ่งมีจุดทศนิยมเสมอ
   "packages/core/src/money.ts": { ...FULL, branches: -2 },
