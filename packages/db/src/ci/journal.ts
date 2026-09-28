@@ -160,12 +160,22 @@ export function baseProblems(head: Journal, base: Journal, label: string): strin
   return problems;
 }
 
-/** Number of HEAD's journal entries some deployed journal already contains (0 if none is a prefix). */
+/**
+ * How many of HEAD's leading journal entries some environment already runs: the longest common
+ * prefix with any deployed journal (a branch behind dev shares dev's first entries, too).
+ */
 export function deployedPrefix(head: Journal, bases: Journal[]): number {
   let n = 0;
   for (const base of bases) {
-    const prefix = base.entries.every((b, i) => head.entries[i] && entryText(head.entries[i]) === entryText(b));
-    if (prefix) n = Math.max(n, base.entries.length);
+    let common = 0;
+    while (
+      common < head.entries.length &&
+      common < base.entries.length &&
+      entryText(head.entries[common]!) === entryText(base.entries[common]!)
+    ) {
+      common++;
+    }
+    n = Math.max(n, common);
   }
   return n;
 }
