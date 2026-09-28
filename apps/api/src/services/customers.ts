@@ -5,6 +5,7 @@ import { and, desc, eq, ilike, like, ne, or, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { MAX_PHOTO_BYTES, sniffImage } from "../lib/image";
 import type { Storage } from "../lib/storage";
+import { UNUSABLE_CHARS_MSG, isCleanText } from "../lib/text";
 
 export class CustomerInputError extends Error {
   constructor(
@@ -22,6 +23,7 @@ const optionalText = (max: number) =>
     .string()
     .trim()
     .max(max, `ยาวเกิน ${max} ตัวอักษร`)
+    .refine(isCleanText, UNUSABLE_CHARS_MSG)
     .optional()
     .transform((v) => (v ? v : null));
 
@@ -31,7 +33,12 @@ export const CustomerInput = z.object({
     .string({ error: "กรุณากรอกเลขบัตรประชาชน" })
     .transform(normalizeNationalId)
     .refine(isValidNationalId, "เลขบัตรประชาชนไม่ถูกต้อง (13 หลัก · ตรวจหลักสุดท้ายไม่ผ่าน)"),
-  name_th: z.string({ error: "กรุณากรอกชื่อ-นามสกุล" }).trim().min(1, "กรุณากรอกชื่อ-นามสกุล").max(200),
+  name_th: z
+    .string({ error: "กรุณากรอกชื่อ-นามสกุล" })
+    .trim()
+    .min(1, "กรุณากรอกชื่อ-นามสกุล")
+    .max(200)
+    .refine(isCleanText, UNUSABLE_CHARS_MSG),
   name_en: optionalText(200),
   birthday_text: optionalText(50),
   religion: optionalText(50),
@@ -83,12 +90,15 @@ export function toListItem(row: CustomerRow, today: string) {
     national_id_masked: maskNationalId(row.nationalId),
     name_th: row.nameTh,
     mobile: row.mobile,
+    // หน้า /buy แสดงที่อยู่ของลูกค้าที่เลือกจาก dropdown (spec §3.1 ข้อ 2)
+    address: row.address,
     card_status: cardStatus(row.cardExpireText, today),
   };
 }
 
 export const PAGE_SIZE = 20;
-const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
+/** คำค้นที่ผู้ใช้พิมพ์ใช้ใน LIKE — % _ และ backslash เป็นตัวอักษรธรรมดา */
+export const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 /** ค้นจากชื่อ (ไทย/อังกฤษ) · เลขบัตร · เบอร์ — ว่าง = ล่าสุดก่อน */
 export async function searchCustomers(db: Db, q: string, page: number) {

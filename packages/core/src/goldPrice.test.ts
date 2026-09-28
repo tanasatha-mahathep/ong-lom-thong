@@ -24,9 +24,12 @@ describe("deriveGoldPrice — สูตรจากระบบเดิม ย�
     expect(q.jewelryBuy.toFixed(0)).toBe("44910");
   });
 
-  it.each(["", "0", "-1", "abc", "12abc", "67,85O"])("ปฏิเสธค่าที่ใช้ไม่ได้: %j", (v) => {
-    expect(() => deriveGoldPrice(v)).toThrow(RangeError);
-  });
+  it.each(["", "0", "-1", "abc", "12abc", "67,85O", "6.785e4", "0x1090A", "67,85", "678,50"])(
+    "ปฏิเสธค่าที่ใช้ไม่ได้: %j",
+    (v) => {
+      expect(() => deriveGoldPrice(v)).toThrow(RangeError);
+    },
+  );
 });
 
 describe("typoWarning — ด่านกันพิมพ์ผิด", () => {

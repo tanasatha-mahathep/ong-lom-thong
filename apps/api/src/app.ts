@@ -3,8 +3,10 @@ import { Hono } from "hono";
 import type { Auth } from "./auth";
 import type { Env } from "./env";
 import { type AppEnv, apiError } from "./lib/context";
+import { loggableError } from "./lib/log";
 import { sameOriginOnly } from "./lib/origin";
 import type { Storage } from "./lib/storage";
+import { buyRoutes } from "./routes/buy";
 import { customerRoutes } from "./routes/customers";
 import { goldPriceRoutes } from "./routes/goldPrice";
 import { me } from "./routes/me";
@@ -43,12 +45,14 @@ export function createApp({ db, auth, env, storage, now = () => new Date() }: Ap
   api.route("/gold-price", goldPriceRoutes);
   api.route("/metals", metalRoutes);
   api.route("/customers", customerRoutes);
+  api.route("/buy", buyRoutes);
 
   api.notFound((c) => c.json(apiError("not found"), 404));
   app.route("/api", api);
 
   app.onError((err, c) => {
-    console.error(err);
+    // ห้าม log ค่า params ของ query — มีข้อมูลลูกค้า (lib/log.ts)
+    console.error(loggableError(err));
     return c.json(apiError("internal error"), 500);
   });
   return app;
