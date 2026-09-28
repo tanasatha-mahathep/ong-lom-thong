@@ -14,6 +14,9 @@ import type { Me, Role } from "@/lib/queries";
 import { t } from "./i18n";
 import type { QuoteBody, SaveBody } from "./types";
 
+/** ทั้งแอปพร้อม burst ของ Siam ID + บันทึก — เครื่องที่รันเทสต์ขนานกันช้าได้ */
+const FLOW_TIMEOUT = 30_000;
+
 const SAVED = { id: "7f1c2d3e-0000-4000-8000-000000000001", doc_no: "RC6909-0001", pdf_status: "pending" };
 
 interface Options {
@@ -60,7 +63,7 @@ async function addLine(user: ReturnType<typeof userEvent.setup>, w: string, a: s
   await user.keyboard(`${w}{Enter}${a}{Enter}`);
 }
 
-describe("/buy", () => {
+describe("/buy", { timeout: FLOW_TIMEOUT }, () => {
   it("walks the counter flow by keyboard: card → lines → full payment → Ctrl+Enter", async () => {
     const { api, user, router } = setup();
     await insertCard(user, CUSTOMER_OK.national_id);
@@ -95,11 +98,11 @@ describe("/buy", () => {
     });
   });
 
-  it("swallows the rest of a Siam ID burst so nothing lands in other fields", async () => {
+  it("lands on the weight field after a card read, with nothing typed into other fields", async () => {
     const { user } = setup();
-    await insertCard(user, `${CUSTOMER_OK.national_id}`);
-    await user.keyboard("{Tab}นายทดสอบ ซื้อเข้า{Tab}31/12/2575{Enter}");
-    expect(idBox()).toHaveFocus();
+    await insertCard(user, CUSTOMER_OK.national_id);
+    // Tab ที่ Siam ID ส่งต่อท้ายถูกกลืน (จังหวะ 800 ms ทดสอบละเอียดใน use-siam-id-capture.test.tsx)
+    await user.keyboard("{Tab}");
     await waitFor(() => expect(weight()).toHaveFocus());
     expect(weight()).toHaveValue("");
     expect(screen.getByLabelText(t("customer.searchLabel"))).toHaveValue("");

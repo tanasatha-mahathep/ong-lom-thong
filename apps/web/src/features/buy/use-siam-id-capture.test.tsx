@@ -1,21 +1,16 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
-import { type OnNationalId, useSiamIdCapture } from "./use-siam-id-capture";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { type OnNationalId, SIAM_ID_BURST_IDLE_MS, useSiamIdCapture } from "./use-siam-id-capture";
 
 function Harness({ onNationalId }: { onNationalId: OnNationalId }) {
   const [value, setValue] = useState("");
-  const capture = useSiamIdCapture({ value, onValueChange: setValue, onNationalId, idleMs: 50 });
+  const capture = useSiamIdCapture({ value, onValueChange: setValue, onNationalId });
   return (
     <>
       <label>
         เลขบัตร
         <input {...capture.inputProps} />
-      </label>
-      <label>
-        ชื่อ
-        <input />
       </label>
       <label>
         ปริมาณ
@@ -25,36 +20,51 @@ function Harness({ onNationalId }: { onNationalId: OnNationalId }) {
   );
 }
 
+// จับเวลาด้วยนาฬิกาปลอม (เฉพาะ setTimeout) + event แบบ sync — จังหวะ burst ไม่ขึ้นกับความเร็วเครื่องที่รันเทสต์
+beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] }));
+afterEach(() => vi.useRealTimers());
+
+const idBox = () => screen.getByLabelText<HTMLInputElement>("เลขบัตร");
+/** กดปุ่มแล้วดูว่าช่องกลืนไว้ไหม (fireEvent คืน false เมื่อ preventDefault) */
+const swallowed = (key: string) => !fireEvent.keyDown(idBox(), { key });
+
 describe("useSiamIdCapture", () => {
   it("keeps the 13 digits, swallows the reader's Tab/text/Enter, then moves focus once it goes quiet", async () => {
-    const user = userEvent.setup();
     const found = vi.fn<OnNationalId>(() => Promise.resolve(() => screen.getByLabelText("ปริมาณ").focus()));
     render(<Harness onNationalId={found} />);
-    await user.click(screen.getByLabelText("เลขบัตร"));
+    idBox().focus();
 
-    await user.keyboard("1909900001010{Tab}นายทดสอบ{Tab}01/01/2530{Enter}");
-    expect(screen.getByLabelText("เลขบัตร")).toHaveValue("1909900001010");
-    expect(screen.getByLabelText("เลขบัตร")).toHaveFocus();
-    expect(screen.getByLabelText("ชื่อ")).toHaveValue("");
+    fireEvent.change(idBox(), { target: { value: "1909900001010" } });
     expect(found).toHaveBeenCalledExactlyOnceWith("1909900001010");
+    // ส่วนที่ Siam ID พิมพ์ตามมา: Tab · ชื่อ · Enter — ไม่มีอะไรหลุดออกจากช่อง
+    expect(swallowed("Tab")).toBe(true);
+    expect(swallowed("น")).toBe(true);
+    fireEvent.change(idBox(), { target: { value: "1909900001010นาย" } });
+    expect(swallowed("Enter")).toBe(true);
+    expect(idBox()).toHaveValue("1909900001010");
 
-    await waitFor(() => expect(screen.getByLabelText("ปริมาณ")).toHaveFocus());
+    // ยังไม่เงียบครบ = ยังไม่ย้าย · ครบแล้ว = ไปช่องที่ผลค้นบอก
+    await act(() => vi.advanceTimersByTimeAsync(SIAM_ID_BURST_IDLE_MS - 1));
+    expect(idBox()).toHaveFocus();
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(screen.getByLabelText("ปริมาณ")).toHaveFocus();
+    // จบ burst แล้ว ปุ่มกลับมาทำงานตามปกติ
+    expect(swallowed("Tab")).toBe(false);
   });
 
   it("stays put when the lookup gives no next field, and leaves short input alone", async () => {
-    const user = userEvent.setup();
     const found = vi.fn<OnNationalId>(() => Promise.resolve(null));
     render(<Harness onNationalId={found} />);
-    await user.click(screen.getByLabelText("เลขบัตร"));
+    idBox().focus();
 
-    await user.keyboard("12345{Tab}");
-    expect(screen.getByLabelText("ชื่อ")).toHaveFocus();
+    fireEvent.change(idBox(), { target: { value: "12345" } });
+    expect(swallowed("Tab")).toBe(false);
     expect(found).not.toHaveBeenCalled();
 
-    await user.click(screen.getByLabelText("เลขบัตร"));
-    await user.keyboard("67890123{Tab}");
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    expect(screen.getByLabelText("เลขบัตร")).toHaveFocus();
+    fireEvent.change(idBox(), { target: { value: "1234567890123" } });
+    expect(swallowed("Tab")).toBe(true);
+    await act(() => vi.advanceTimersByTimeAsync(SIAM_ID_BURST_IDLE_MS));
+    expect(idBox()).toHaveFocus();
     expect(found).toHaveBeenCalledExactlyOnceWith("1234567890123");
   });
 });
