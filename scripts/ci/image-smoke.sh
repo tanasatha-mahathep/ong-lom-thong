@@ -17,17 +17,19 @@
 #      unresolvable *.invalid hosts (proves boot and /healthz need neither); hardened runtime
 #      (--read-only, --cap-drop ALL, no-new-privileges)                             (CIS Docker 5.3/5.12/5.25)
 #   6. HTTP: /healthz and /api/healthz ok:true · / and SPA deep links serve the image's index.html ·
-#      assets served · /api/me 401 without a session · state-changing requests with a foreign or
-#      missing Origin 403 (with a same-origin control that reaches the session check instead)
-#   7. the process runs as non-root · `docker stop` is graceful (exit 0 within STOP_TIMEOUT)
-#   8. security response headers on / and /api/* recorded (OWASP Secure Headers Project, ASVS 4.0.3 V14.4)
-#      — reported as warnings, not failures, until the app sets them
+#      assets served, a missing /assets file is a 404 (not the SPA) · /api/me 401 without a session ·
+#      state-changing requests with a foreign or missing Origin 403 (with a same-origin control that
+#      reaches the session check instead) · unknown /api paths are a JSON 404 for GET and POST
+#   7. the process runs as non-root and cannot rewrite its own files
+#   8. security headers on every response kind (HTML, asset, API 2xx/401/403/404), required — see
+#      header_problems(): OWASP ASVS 5.0 V3.4 + V14.3.2, OWASP Secure Headers Project
+#   9. the access log has a line per /api request (401 and the rejected 403 too), with no query string
+#      and no 13-digit numbers                              (ASVS 5.0 V16.2.1 / V16.2.5 / V16.3.3, PDPA)
+#  10. `docker stop` is graceful: exit 0 within STOP_TIMEOUT (= Railway drainingSeconds, 10 s)
 #
 # Env: IMAGE (ong-smoke-api:local) · SKIP_BUILD=1 · SMOKE_PORT (18787, loopback only) · BOOT_TIMEOUT (90 s)
-#      STOP_TIMEOUT (10 s) · SMOKE_STRICT_HEADERS=1 (missing security headers fail instead of warn)
-#      SMOKE_WAIVE_UNGRACEFUL_STOP_UNTIL=YYYY-MM-DD (time-boxed waiver: an ungraceful stop only warns
-#      until that date, then fails again) · SMOKE_AUTH_SECRET (override the random secret; negative
-#      controls only)
+#      STOP_TIMEOUT (10 s) · SMOKE_AUTH_SECRET (override the random secret; negative controls only)
+# No waivers: relaxing a check means editing this file in a reviewed commit.
 # Every container and network it creates is named ong-smoke-* and removed on exit, pass or fail.
 # Bash 3.2 compatible (macOS /bin/bash): no associative arrays, no mapfile.
 set -euo pipefail
@@ -154,6 +156,108 @@ header() { # name — value of a response header from the last http() call (empt
 
 body_snippet() { head -c 160 "${WORK}/body" | tr '\n' ' '; }
 
+RESPONSES=() # "label|kind|file" for every response whose headers are checked in section 8
+keep_headers() { # label kind — save the last http() response's headers for the header policy
+  local file="${WORK}/headers.$((${#RESPONSES[@]} + 1))"
+  cp "${WORK}/headers" "$file"
+  RESPONSES+=("$1|$2|$file")
+}
+
+headers_file() { # label — the saved header file of that response
+  local response
+  for response in ${RESPONSES[@]+"${RESPONSES[@]}"}; do
+    if [ "${response%%|*}" = "$1" ]; then
+      echo "${response##*|}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+hdr() { # file name — value of a header in a saved header file ("" when absent)
+  grep -i "^$2:" "$1" | tail -n 1 | cut -d: -f2- | tr -d '\r' | sed -e 's/^ *//' -e 's/ *$//' || true
+}
+
+lower() { tr '[:upper:]' '[:lower:]'; }
+
+csp_sources() { # policy directive — that directive's sources, lower-cased ("" when absent)
+  printf '%s\n' "$1" | tr ';' '\n' | awk -v d="$2" '{ $1 = $1 } tolower($1) == d { $1 = ""; sub(/^ /, ""); print tolower($0); exit }'
+}
+
+max_age() { sed -nE 's/.*max-age=([0-9]+).*/\1/p' <<<"$1"; }
+
+# Required on every response (kind: html | asset | api | other); one problem per output line.
+# Behind Railway's TLS edge the app only ever speaks plain HTTP, so it sends HSTS on every response and
+# the browser honours it over HTTPS only (RFC 6797 §8.1) — the smoke checks exactly what the app sends.
+header_problems() { # file kind
+  local f=$1 kind=$2 v csp script age bad
+  v="$(hdr "$f" strict-transport-security | lower)"
+  age="$(max_age "$v")"
+  if [ -z "$v" ]; then
+    echo "no strict-transport-security"
+  elif [ -z "$age" ] || [ "$age" -lt 31536000 ]; then
+    echo "HSTS max-age under 1 year (${v})"
+  fi
+  csp="$(hdr "$f" content-security-policy)"
+  if [ -z "$csp" ]; then
+    echo "no content-security-policy"
+  else
+    [ "$(csp_sources "$csp" object-src)" = "'none'" ] || echo "CSP object-src is not 'none'"
+    [ "$(csp_sources "$csp" frame-ancestors)" = "'none'" ] || echo "CSP frame-ancestors is not 'none'"
+    case "$(csp_sources "$csp" base-uri)" in "'none'" | "'self'") ;; *) echo "CSP base-uri is not 'none' or 'self'" ;; esac
+    script="$(csp_sources "$csp" script-src)"
+    [ -n "$script" ] || script="$(csp_sources "$csp" default-src)"
+    if [ -z "$script" ]; then
+      echo "CSP has neither script-src nor default-src"
+    else
+      for bad in "'unsafe-inline'" "'unsafe-eval'" "*" "data:" "http:" "https:"; do
+        case " ${script} " in *" ${bad} "*) echo "CSP lets scripts load from ${bad}" ;; esac
+      done
+    fi
+  fi
+  [ "$(hdr "$f" x-content-type-options | lower)" = nosniff ] || echo "x-content-type-options is not nosniff"
+  [ "$(hdr "$f" x-frame-options | lower)" = deny ] || echo "x-frame-options is not DENY"
+  v="$(hdr "$f" referrer-policy | lower | awk -F, '{ gsub(/ /, "", $NF); print $NF }')"
+  case "$v" in
+    no-referrer | same-origin | strict-origin | strict-origin-when-cross-origin) ;;
+    *) echo "referrer-policy '${v:-none}' can leak URLs (paths and searches carry customer data)" ;;
+  esac
+  [ -z "$(hdr "$f" x-powered-by)" ] || echo "x-powered-by names the stack"
+  case "$(hdr "$f" server)" in *[0-9]*) echo "server header discloses a version" ;; esac
+  case "$kind" in
+    html)
+      case "$(hdr "$f" cross-origin-opener-policy | lower)" in
+        same-origin | same-origin-allow-popups) ;;
+        *) echo "cross-origin-opener-policy is not same-origin" ;;
+      esac
+      case "$(hdr "$f" cache-control | lower)" in
+        *no-cache* | *no-store*) ;;
+        *) echo "index.html is cached without revalidation (stale asset links after a deploy)" ;;
+      esac
+      ;;
+    api)
+      case "$(hdr "$f" cache-control | lower)" in *no-store*) ;; *) echo "API response is not cache-control no-store" ;; esac
+      ;;
+    asset)
+      v="$(hdr "$f" cache-control | lower)"
+      age="$(max_age "$v")"
+      case "$v" in *immutable*) ;; *) echo "hashed asset is not cache-control immutable" ;; esac
+      if [ -z "$age" ] || [ "$age" -lt 31536000 ]; then echo "hashed asset max-age under 1 year"; fi
+      ;;
+  esac
+}
+
+recommended_gaps() { # file — stricter than required; reported as WARN on the HTML document
+  local f=$1 csp
+  case "$(hdr "$f" strict-transport-security | lower)" in
+    *includesubdomains*) ;;
+    *) echo "HSTS without includeSubDomains (ASVS 5.0 3.4.1 at L2)" ;;
+  esac
+  csp="$(hdr "$f" content-security-policy)"
+  [ "$(csp_sources "$csp" base-uri)" = "'none'" ] || echo "CSP base-uri is not 'none' (ASVS 5.0 3.4.3)"
+  [ -n "$(hdr "$f" permissions-policy)" ] || echo "no permissions-policy (OWASP Secure Headers Project)"
+}
+
 expect() { # check expected_status [jq filter that must be true]
   local check=$1 want=$2 filter=${3:-}
   if [ "$HTTP_STATUS" != "$want" ]; then
@@ -200,7 +304,7 @@ summary() { # printed on every exit, pass or fail
     awk -F '\t' '{ gsub(/\|/, "\\|", $3); printf "| %s | %s | %s |\n", $1, $2, $3 }' "$RESULTS"
     if [ -s "${WORK}/headers.md" ]; then
       echo
-      echo "Security response headers (OWASP Secure Headers Project · ASVS 4.0.3 V14.4):"
+      echo "Security response headers (OWASP ASVS 5.0 V3.4 · OWASP Secure Headers Project):"
       echo
       echo "| Header | \`/\` | \`/api/healthz\` |"
       echo "| --- | --- | --- |"
@@ -380,13 +484,14 @@ record PASS "boots in production mode" \
 step "HTTP checks against ${BASE_URL}"
 http GET /healthz
 expect "GET /healthz" 200 '.ok == true'
+keep_headers "/healthz" other
 http GET /api/healthz
 expect "GET /api/healthz" 200 '.ok == true'
-cp "${WORK}/headers" "${WORK}/headers.api"
+keep_headers "/api/healthz" api
 
 docker exec "$API" cat /app/public/index.html >"${WORK}/index.html"
 http GET /
-cp "${WORK}/headers" "${WORK}/headers.root"
+keep_headers "/" html
 content_type="$(header content-type)"
 if [ "$HTTP_STATUS" = 200 ] && cmp -s "${WORK}/body" "${WORK}/index.html" && [[ "$content_type" == text/html* ]]; then
   record PASS "GET / serves the SPA" "HTTP 200, ${content_type}, identical to /app/public/index.html"
@@ -412,16 +517,29 @@ else
   else
     record FAIL "entry script is served" "${asset}: HTTP ${HTTP_STATUS}, ${content_type}"
   fi
+  keep_headers "${asset}" asset
   encoding="$(header content-encoding)"
-  caching="$(header cache-control)"
-  record INFO "static asset delivery" "content-encoding: ${encoding:-none} · cache-control: ${caching:-none}"
+  record INFO "static asset compression" "content-encoding: ${encoding:-none}"
 fi
 
-http GET /api/me
+# a tab left open across a redeploy asks for old chunk hashes: it must get an error, not index.html
+http GET /assets/ong-smoke-missing-0000000.js
+if [ "$HTTP_STATUS" = 404 ] && [[ "$(header content-type)" != text/html* ]]; then
+  record PASS "missing /assets file is a 404, not the SPA" "HTTP 404, $(header content-type)"
+else
+  record FAIL "missing /assets file is a 404, not the SPA" "HTTP ${HTTP_STATUS}, $(header content-type)"
+fi
+keep_headers "/assets/<missing> (404)" other
+
+# the query string carries a synthetic 13-digit number: section 9 proves neither reaches the log
+http GET "/api/me?probe=ong-smoke-query&national_id=${TAX_ID}"
 expect "GET /api/me without a session is 401" 401 '.error == "unauthorized"'
+keep_headers "/api/me (401)" api
+http GET "/api/customers/${TAX_ID}"
 
 http POST /api/me/branch -H 'origin: https://evil.example' -H 'content-type: application/json' --data '{}'
 expect "POST with a foreign Origin is 403" 403 '.error == "forbidden origin"'
+keep_headers "/api/me/branch (403)" api
 http POST /api/me/branch -H 'content-type: application/json' --data '{}'
 expect "POST without an Origin is 403" 403 '.error == "forbidden origin"'
 http POST /api/auth/sign-in/email -H 'origin: https://evil.example' -H 'content-type: application/json' \
@@ -432,11 +550,10 @@ http POST /api/me/branch -H "origin: ${PUBLIC_URL}" -H 'content-type: applicatio
 expect "POST with the app Origin gets 401 (session)" 401 '.error == "unauthorized"'
 
 http GET /api/no-such-endpoint
-if [ "$HTTP_STATUS" = 404 ] && jq -e '.error' "${WORK}/body" >/dev/null 2>&1; then
-  record PASS "unknown /api/* path is a JSON 404" "HTTP 404"
-else
-  record WARN "unknown /api/* path is a JSON 404" "HTTP ${HTTP_STATUS} $(header content-type) — API 404 falls through to the SPA"
-fi
+expect "GET on an unknown /api path is a JSON 404" 404 '.error == "not found"'
+keep_headers "/api/no-such-endpoint (404)" api
+http POST /api/no-such-endpoint -H "origin: ${PUBLIC_URL}" -H 'content-type: application/json' --data '{}'
+expect "POST on an unknown /api path is a JSON 404" 404 '.error == "not found"'
 
 # ---------- 7. process identity ----------
 
@@ -458,78 +575,66 @@ else
   record WARN "app files not owned by the runtime user" "owners: ${owners% } · runtime user: ${runtime_user}"
 fi
 
-# ---------- 8. security headers (report only) ----------
+# ---------- 8. security headers (required) ----------
 
-step "security response headers"
-# name|recommended value — OWASP Secure Headers Project; cache-control matters for API responses only
-SECURITY_HEADERS=(
-  "strict-transport-security|max-age=63072000; includeSubDomains"
-  "content-security-policy|default-src 'self'; frame-ancestors 'none'; object-src 'none'"
-  "x-content-type-options|nosniff"
-  "x-frame-options|DENY"
-  "referrer-policy|no-referrer"
-  "permissions-policy|camera=(), geolocation=(), microphone=()"
-  "cross-origin-opener-policy|same-origin"
-  "cross-origin-resource-policy|same-origin"
-  "cache-control|no-store (API)"
-)
+step "security response headers on ${#RESPONSES[@]} responses"
 : >"${WORK}/headers.md"
-missing_root=""
-missing_api=""
-for entry in "${SECURITY_HEADERS[@]}"; do
-  name="${entry%%|*}"
-  root_value="$(grep -i "^${name}:" "${WORK}/headers.root" | tail -n 1 | cut -d: -f2- | tr -d '\r' | sed 's/^ *//' || true)"
-  api_value="$(grep -i "^${name}:" "${WORK}/headers.api" | tail -n 1 | cut -d: -f2- | tr -d '\r' | sed 's/^ *//' || true)"
-  if [ "$name" != cache-control ] && [ -z "$root_value" ]; then missing_root="${missing_root} ${name}"; fi
-  if [ -z "$api_value" ]; then missing_api="${missing_api} ${name}"; fi
-  printf '| %s | %s | %s |\n' "$name" "${root_value:-**missing**}" "${api_value:-**missing**}" >>"${WORK}/headers.md"
-  printf '    %-30s /: %-28s /api: %s\n' "$name" "${root_value:-MISSING}" "${api_value:-MISSING}"
+header_failures=0
+for response in ${RESPONSES[@]+"${RESPONSES[@]}"}; do
+  IFS='|' read -r label kind file <<<"$response"
+  problems="$(header_problems "$file" "$kind")"
+  if [ -n "$problems" ]; then
+    header_failures=$((header_failures + 1))
+    record FAIL "security headers on ${label}" "$(tr '\n' ';' <<<"$problems" | sed -e 's/;$//' -e 's/;/; /g')"
+  fi
 done
-for name in server x-powered-by; do
-  for which in root api; do
-    value="$(grep -i "^${name}:" "${WORK}/headers.${which}" | tail -n 1 | cut -d: -f2- | tr -d '\r' || true)"
-    if [ -n "$value" ]; then
-      record WARN "no ${name} header disclosure" "${which}: ${name}:${value}"
-    fi
-  done
-done
-header_status=WARN
-[ "${SMOKE_STRICT_HEADERS:-0}" != 1 ] || header_status=FAIL
-if [ -z "$missing_root" ]; then
-  record PASS "security headers on /" "all recommended headers present"
-else
-  record "$header_status" "security headers on /" "missing:${missing_root}"
+if [ "$header_failures" -eq 0 ]; then
+  record PASS "security headers on every response" "${#RESPONSES[@]} responses: HSTS ≥ 1 y, CSP (object-src and \
+frame-ancestors 'none', no unsafe script sources), nosniff, XFO DENY, strict referrer policy, COOP and \
+no-cache on HTML, no-store on /api, immutable assets"
 fi
-if [ -z "$missing_api" ]; then
-  record PASS "security headers on /api/*" "all recommended headers present"
-else
-  record "$header_status" "security headers on /api/*" "missing:${missing_api}"
-fi
+html_headers="$(headers_file "/")" || die "no saved headers for /"
+api_headers="$(headers_file "/api/healthz")" || die "no saved headers for /api/healthz"
+gaps="$(recommended_gaps "$html_headers")"
+[ -z "$gaps" ] || record WARN "stricter header settings" "$(tr '\n' ';' <<<"$gaps" | sed -e 's/;$//' -e 's/;/; /g')"
 
+for name in strict-transport-security content-security-policy x-content-type-options x-frame-options \
+  referrer-policy cross-origin-opener-policy cross-origin-resource-policy permissions-policy cache-control; do
+  html_value="$(hdr "$html_headers" "$name")"
+  api_value="$(hdr "$api_headers" "$name")"
+  printf '| %s | %s | %s |\n' "$name" "${html_value:-**missing**}" "${api_value:-**missing**}" >>"${WORK}/headers.md"
+done
+
+# ---------- 9. access log ----------
+
+step "access log"
 logs="$(docker logs "$API" 2>&1)"
-if grep -q 'GET /api/me' <<<"$logs"; then
-  record PASS "API requests are access-logged" "found 'GET /api/me' in the container log"
+if grep -Eq "GET /api/me 401 [0-9]+ms" <<<"$logs" && grep -Eq "POST /api/me/branch 403 [0-9]+ms" <<<"$logs" &&
+  grep -Eq "GET /api/customers/#{13} [0-9]{3} [0-9]+ms" <<<"$logs"; then
+  record PASS "/api requests are access-logged" "GET /api/me 401, POST /api/me/branch 403, 13-digit path segment masked"
 else
-  record WARN "API requests are access-logged" "no log line for GET /api/me (ASVS 4.0.3 V7.1)"
+  record FAIL "/api requests are access-logged" "missing a line for GET /api/me 401, POST /api/me/branch 403 or the masked /api/customers path"
+fi
+if grep -Fq "ong-smoke-query" <<<"$logs" || grep -Fq "$TAX_ID" <<<"$logs"; then
+  record FAIL "access log has no query strings or 13-digit numbers" \
+    "$(grep -F -e ong-smoke-query -e "$TAX_ID" <<<"$logs" | head -n 2 | tr '\n' ' ')"
+else
+  record PASS "access log has no query strings or 13-digit numbers" "probe query and synthetic ID ${TAX_ID} absent"
 fi
 
-# ---------- 9. graceful stop ----------
+# ---------- 10. graceful stop ----------
 
-step "docker stop -t ${STOP_TIMEOUT}"
+step "docker stop -t ${STOP_TIMEOUT} (Railway drainingSeconds is 10)"
 stop_start=$SECONDS
 docker stop -t "$STOP_TIMEOUT" "$API" >/dev/null
 stop_seconds=$((SECONDS - stop_start))
 exit_code="$(docker inspect -f '{{.State.ExitCode}}' "$API")"
+shutdown_line="$(docker logs "$API" 2>&1 | grep -oE '\[shutdown\] done in [0-9]+ ms' | tail -n 1 || true)"
 if [ "$exit_code" = 0 ] && [ "$stop_seconds" -lt "$STOP_TIMEOUT" ]; then
-  record PASS "docker stop is graceful" "exit 0 after ${stop_seconds} s"
+  record PASS "docker stop is graceful" "exit 0 after ${stop_seconds} s${shutdown_line:+ (${shutdown_line})}"
 else
-  detail="exit ${exit_code} after ${stop_seconds} s (137 = SIGKILL after the grace period: SIGTERM not handled by PID 1)"
-  waiver="${SMOKE_WAIVE_UNGRACEFUL_STOP_UNTIL:-}"
-  if [[ "$waiver" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] && [[ ! "$(date -u +%Y-%m-%d)" > "$waiver" ]]; then
-    record WARN "docker stop is graceful" "${detail} — waived until ${waiver}"
-  else
-    record FAIL "docker stop is graceful" "$detail"
-  fi
+  record FAIL "docker stop is graceful" \
+    "exit ${exit_code} after ${stop_seconds} s (137 = SIGKILL: SIGTERM not handled, or shutdown hung)"
 fi
 
 if [ "$FAILED" -ne 0 ]; then
