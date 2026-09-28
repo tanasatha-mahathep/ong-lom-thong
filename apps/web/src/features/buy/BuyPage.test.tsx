@@ -14,9 +14,6 @@ import type { Me, Role } from "@/lib/queries";
 import { t } from "./i18n";
 import type { QuoteBody, SaveBody } from "./types";
 
-/** ทั้งแอปพร้อม burst ของ Siam ID + บันทึก — เครื่องที่รันเทสต์ขนานกันช้าได้ */
-const FLOW_TIMEOUT = 30_000;
-
 const SAVED = { id: "7f1c2d3e-0000-4000-8000-000000000001", doc_no: "RC6909-0001", pdf_status: "pending" };
 
 interface Options {
@@ -63,7 +60,7 @@ async function addLine(user: ReturnType<typeof userEvent.setup>, w: string, a: s
   await user.keyboard(`${w}{Enter}${a}{Enter}`);
 }
 
-describe("/buy", { timeout: FLOW_TIMEOUT }, () => {
+describe("/buy", () => {
   it("walks the counter flow by keyboard: card → lines → full payment → Ctrl+Enter", async () => {
     const { api, user, router } = setup();
     await insertCard(user, CUSTOMER_OK.national_id);
