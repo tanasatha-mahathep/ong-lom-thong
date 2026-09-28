@@ -33,6 +33,7 @@ import { z } from "zod";
 import { type BranchRef, type Viewer, currentBranch, forUser } from "../lib/scope";
 import { UNUSABLE_CHARS_MSG, isCleanText } from "../lib/text";
 import { escapeLike, findCustomer } from "./customers";
+import { type CompanyInfo, captureCompanySnapshot } from "./receiptPdf";
 import { type TodayPrice, priceForBranch } from "./goldPrice";
 
 export const BUY_API_MSG = {
@@ -363,7 +364,14 @@ function sameBill(
   );
 }
 
-async function insertBuy(db: Db, viewer: Viewer, p: PreparedBuy, body: SaveBody, time: string): Promise<SavedBuy> {
+async function insertBuy(
+  db: Db,
+  viewer: Viewer,
+  p: PreparedBuy,
+  body: SaveBody,
+  time: string,
+  company: CompanyInfo,
+): Promise<SavedBuy> {
   const buyer = p.customer;
   const price = p.price;
   if (!p.ok || !buyer || !price) throw new Error("insertBuy: quote ไม่ผ่าน");
@@ -376,6 +384,8 @@ async function insertBuy(db: Db, viewer: Viewer, p: PreparedBuy, body: SaveBody,
     // อักษรนำของสาขา (แบบ Django Branch.doc_prefix): PT-RC6910-0001 · ตัวนับยังเป็นของสาขา/RC/งวด ตัวเดิม
     const [head] = await tx.select({ prefix: branch.docPrefix }).from(branch).where(eq(branch.id, p.branch.id));
     const docNo = head?.prefix ? `${head.prefix}-${seq.doc_no}` : seq.doc_no;
+    // หัวใบ ณ วันขาย (R15) — PDF ทุกฉบับของบิลนี้ (รวมฉบับยกเลิก) ใช้ชุดนี้ ไม่ใช่ค่าปัจจุบัน
+    const companySnapshot = await captureCompanySnapshot(tx, p.branch.id, company);
     const [receipt] = await tx
       .insert(buyReceipt)
       .values({
@@ -385,6 +395,7 @@ async function insertBuy(db: Db, viewer: Viewer, p: PreparedBuy, body: SaveBody,
         time,
         customerId: buyer.id,
         customerSnapshot: snapshotOf(buyer),
+        companySnapshot,
         goldPriceSnapshot: price.barSell,
         detail: body.detail,
         fullTax: body.full_tax,
@@ -446,6 +457,8 @@ export async function saveBuy(
   viewer: Viewer,
   body: SaveBody,
   now: Date,
+  /** หัวใบ (COMPANY_*) — แช่แข็งลง company_snapshot ของบิล */
+  company: CompanyInfo,
 ): Promise<{ replay: boolean; receipt: SavedBuy }> {
   // ตรวจ key ก่อนทุกอย่าง — กดซ้ำหลังบันทึกไปแล้ว (ข้ามเที่ยงคืน · session เสียสาขาปัจจุบัน) ต้องได้บิลเดิม
   const existing = await findReplay(db, viewer, body, now);
@@ -455,7 +468,7 @@ export async function saveBuy(
   if (first) throw new BuyError(first.message, first.field, 409, quoteJson(prepared));
   const time = billTime(body.time, prepared, now);
   try {
-    return { replay: false, receipt: await insertBuy(db, viewer, prepared, body, time) };
+    return { replay: false, receipt: await insertBuy(db, viewer, prepared, body, time, company) };
   } catch (e) {
     const pg = pgError(e);
     if (pg?.code === "23505" && pg.constraint_name === "buy_receipt_idempotency_key_unique") {
@@ -584,6 +597,7 @@ export async function listBuys(db: Db, readable: BranchRef[], query: ListQuery) 
         totalAmount: buyReceipt.totalAmount,
         status: buyReceipt.status,
         pdfStatus: buyReceipt.pdfStatus,
+        voidPdfStatus: buyReceipt.voidPdfStatus,
         createdBy: buyReceipt.createdBy,
         createdByName: user.name,
       })
@@ -619,6 +633,8 @@ export async function listBuys(db: Db, readable: BranchRef[], query: ListQuery) 
     total_amount: r.totalAmount,
     status: r.status,
     pdf_status: r.pdfStatus,
+    // ฉบับที่ /pdf เสิร์ฟของบิลที่ยกเลิกคือฉบับยกเลิก — /bills แสดงสถานะของฉบับนั้นได้
+    void_pdf_status: r.voidPdfStatus,
     created_by: { id: r.createdBy, name: r.createdByName },
   }));
   const totals = sums ? totalsOf(sums.count, sums.weight, sums.amount) : NO_TOTALS;
@@ -714,6 +730,7 @@ export async function getBuy(db: Db, readable: BranchRef[], id: string) {
     status: r.status,
     pdf_status: r.pdfStatus,
     idcard_status: r.idcardStatus,
+    void_pdf_status: r.voidPdfStatus,
     created_by: { id: r.createdBy, name: row.createdByName },
     created_at: r.createdAt.toISOString(),
     voided_at: r.voidedAt?.toISOString() ?? null,
