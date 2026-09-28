@@ -13,8 +13,8 @@
   "scripts": {
     "e2e": "playwright test",
     "report": "playwright show-report playwright-report",
-    "stack:down": "bash stack/down.sh",
-    "stack:up": "bash stack/up.sh",
+    "stack:down": "bash stack/stack.sh down",
+    "stack:up": "bash stack/stack.sh up",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
