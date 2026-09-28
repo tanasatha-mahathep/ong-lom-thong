@@ -989,6 +989,7 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       status: "active",
       pdf_status: "pending",
       idcard_status: "pending",
+      void_pdf_status: "none",
       created_by: { id: userIds.staff, name: "staff" },
       voided_at: null,
       void_reason: null,
@@ -1107,6 +1108,7 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       total_amount: "20030.00",
       status: "active",
       pdf_status: "pending",
+      void_pdf_status: "none",
       created_by: { id: userIds.staff, name: "staff" },
     });
     expect(body.items.find((i) => i.id === backdatedId)?.customer.national_id_masked).toBe("3 XXXX XXXXX 65 7");

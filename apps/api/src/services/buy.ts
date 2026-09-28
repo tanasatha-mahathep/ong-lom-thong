@@ -597,6 +597,7 @@ export async function listBuys(db: Db, readable: BranchRef[], query: ListQuery) 
         totalAmount: buyReceipt.totalAmount,
         status: buyReceipt.status,
         pdfStatus: buyReceipt.pdfStatus,
+        voidPdfStatus: buyReceipt.voidPdfStatus,
         createdBy: buyReceipt.createdBy,
         createdByName: user.name,
       })
@@ -632,6 +633,8 @@ export async function listBuys(db: Db, readable: BranchRef[], query: ListQuery) 
     total_amount: r.totalAmount,
     status: r.status,
     pdf_status: r.pdfStatus,
+    // ฉบับที่ /pdf เสิร์ฟของบิลที่ยกเลิกคือฉบับยกเลิก — /bills แสดงสถานะของฉบับนั้นได้
+    void_pdf_status: r.voidPdfStatus,
     created_by: { id: r.createdBy, name: r.createdByName },
   }));
   const totals = sums ? totalsOf(sums.count, sums.weight, sums.amount) : NO_TOTALS;
@@ -727,6 +730,7 @@ export async function getBuy(db: Db, readable: BranchRef[], id: string) {
     status: r.status,
     pdf_status: r.pdfStatus,
     idcard_status: r.idcardStatus,
+    void_pdf_status: r.voidPdfStatus,
     created_by: { id: r.createdBy, name: row.createdByName },
     created_at: r.createdAt.toISOString(),
     voided_at: r.voidedAt?.toISOString() ?? null,
