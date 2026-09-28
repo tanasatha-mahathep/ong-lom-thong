@@ -290,6 +290,12 @@ export const buyReceipt = pgTable(
       .notNull()
       .default("none"),
     voidPdfGeneratedAt: tz("void_pdf_generated_at"),
+    // งานสร้าง PDF ของบิลนี้: lease = ผู้เขียนคนเดียว (จองสั้น ๆ ไม่ถือ transaction ระหว่าง Gotenberg/bucket)
+    // หมดอายุเองถ้าผู้ถือค้าง/ตาย · retry_after = backoff ของงานที่ล้มชั่วคราว (2 นาที ×2 … สูงสุด 1 ชม.)
+    pdfLeaseUntil: tz("pdf_lease_until"),
+    pdfLeaseToken: uuid("pdf_lease_token"),
+    pdfAttempts: integer("pdf_attempts").notNull().default(0),
+    pdfRetryAfter: tz("pdf_retry_after"),
     idempotencyKey: text("idempotency_key").notNull().unique(),
   },
   (t) => [

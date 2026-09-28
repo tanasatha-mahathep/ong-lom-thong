@@ -1,5 +1,5 @@
 {
-  "id": "3722e345-2899-4b3b-980c-c6363a9dd9eb",
+  "id": "242d1ce3-95d0-44af-a596-c9f5f826518d",
   "prevId": "9d908c01-e0a4-4ef8-80d7-f5c46cbe6fba",
   "version": "7",
   "dialect": "postgresql",
@@ -619,6 +619,31 @@
         },
         "void_pdf_generated_at": {
           "name": "void_pdf_generated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pdf_lease_until": {
+          "name": "pdf_lease_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pdf_lease_token": {
+          "name": "pdf_lease_token",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pdf_attempts": {
+          "name": "pdf_attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "pdf_retry_after": {
+          "name": "pdf_retry_after",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false

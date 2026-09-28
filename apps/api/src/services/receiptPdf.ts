@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { PAYMENT_METHODS, isPaymentMethod, maskNationalId } from "@ong/core";
 import { type ReceiptData, ReceiptDataError, renderIdCardHtml, renderReceiptHtml } from "@ong/core/receipt";
 import { type CompanySnapshot, type Db, type PDF_STATUSES, branch, buyLine, buyReceipt, metal, payment } from "@ong/db";
-import { and, asc, eq, inArray, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import type { PgUpdateSetSource } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import type { Env } from "../env";
 import type { BackgroundTasks } from "../lib/background";
@@ -15,7 +17,8 @@ import { ObjectExistsError, type Storage, type StoredObject, putNew } from "../l
 /**
  * PDF เก็บถาวรของบิลซื้อเข้า (spec §9.2 · R15 · CLAUDE.md กฎ 5)
  * - ใบรับซื้อ · สำเนาบัตร (ถ้าลูกค้ามีรูปบัตร) · ฉบับยกเลิก (…_void.pdf) — ไฟล์ละ key ไม่เขียนทับ
- * - บิลหนึ่งใบมีผู้เขียนคนเดียว: advisory lock ต่อบิลครอบทั้ง render + อัปโหลด + อัปเดตสถานะ
+ * - บิลหนึ่งใบมีผู้เขียนคนเดียว: lease ต่อบิล (จอง/บันทึกผลด้วย UPDATE สั้น ๆ) — ไม่ถือ transaction ระหว่าง
+ *   Gotenberg/bucket (connection pool ต้องว่างให้การขาย · ข้อ 9.2 "ไม่บล็อกการขาย")
  * - render/Gotenberg/bucket ล้ม = สถานะ failed + log เหตุผล — ไม่ทำให้การขายล้ม (retry ภายหลัง)
  */
 
@@ -66,10 +69,12 @@ const branchHeader = {
  * รหัสสาขาสรรพากรตามที่ตั้งไว้ ไม่เดาแทน (null = PDF ไม่ออก — ReceiptDataError)
  */
 export function companySnapshotOf(company: CompanyInfo, b: BranchHeader): CompanySnapshot {
+  // ช่องว่าง/เว้นวรรคล้วนของสาขา = ไม่ได้ตั้ง → ใช้ของกิจการ
+  const filled = (v: string | null) => (v?.trim() ? v.trim() : null);
   return {
     name: company.name,
-    address: b.address ?? company.address,
-    tel: b.tel ?? company.tel,
+    address: filled(b.address) ?? company.address,
+    tel: filled(b.tel) ?? company.tel,
     fax: company.fax,
     tax_id: company.taxId,
     branch_name: b.name,
@@ -256,21 +261,29 @@ export interface ReceiptPdfDeps {
 }
 
 export interface ArchiveResult extends PdfStatuses {
-  /** มีผู้เขียนอื่นถือบิลนี้อยู่ (โหมดไม่รอ) — ไม่ได้ทำอะไร */
+  /** มีผู้เขียนอื่นถือ lease ของบิลนี้อยู่ — ไม่ได้ทำอะไร */
   busy: boolean;
 }
 
 export interface ReceiptPdfService {
-  /** หลังบันทึก/ยกเลิกบิล — เริ่มเบื้องหลัง request ไม่รอ */
+  /** หลังบันทึก/ยกเลิกบิล — เข้าคิวเบื้องหลัง (พร้อมกันไม่เกินที่คิวกำหนด) request ไม่รอ */
   enqueue(receiptId: string): void;
   /**
-   * สร้างไฟล์ที่ยังขาดของบิล (ผู้เขียนคนเดียวต่อบิล) · ไม่มีบิล = null
-   * wait=false: มีคนทำอยู่ = busy ไม่รอ · includeInvalid: ลองไฟล์ที่ invalid ด้วย (retry ที่คนสั่ง)
+   * สร้างไฟล์ที่ยังขาดของบิล — ผู้เขียนคนเดียวต่อบิลด้วย lease · มีคนถือ lease อยู่ = busy · ไม่มีบิล = null
+   * manual (retry ที่คนสั่ง): ลองไฟล์ invalid ด้วย และไม่รอ backoff
    */
-  archive(receiptId: string, opts?: { wait?: boolean; includeInvalid?: boolean }): Promise<ArchiveResult | null>;
-  /** บิลที่ค้าง pending/failed นานกว่า olderThanMs — ทีละใบ ข้ามใบที่มีคนทำอยู่ · คืนจำนวนที่ทำ */
+  archive(receiptId: string, opts?: { manual?: boolean }): Promise<ArchiveResult | null>;
+  /** เข้าคิวบิลที่ค้าง pending/failed (พ้น backoff · ไม่มี lease · เก่ากว่า olderThanMs) — คืนจำนวนที่เข้าคิว */
   retryDue(opts?: { olderThanMs?: number; limit?: number }): Promise<number>;
 }
+
+/**
+ * lease ต้องนานกว่างานหนึ่งรอบ (≤ 3 ไฟล์ × Gotenberg 30 วินาที + bucket) — ผู้ถือตาย/ค้าง lease หมดเอง ผู้อื่นทำต่อได้
+ * ไฟล์ที่ผู้ถือเดิมอัปโหลดไปแล้วถูกรับมาใช้ (receipt-id + sha256 ตรง) ไม่ render ทับ
+ */
+const LEASE = sql`now() + interval '3 minutes'`;
+/** ล้มชั่วคราวติดกัน: รอ 2 · 4 · 8 … นาที สูงสุด 1 ชั่วโมง — แถวที่เสียถาวรไม่แย่งคิว retry รอบละ 10 ใบ */
+export const backoffMs = (attempts: number) => Math.min(60 * 60_000, 2 * 60_000 * 2 ** Math.max(0, attempts - 1));
 
 export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService {
   const { db, storage, renderer, company, fonts, tasks, now, watermark } = deps;
@@ -304,23 +317,34 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
     return renderer.htmlToPdf({ html, files: fonts, trace: kind === "void" ? `${docNo}-void` : docNo });
   }
 
+  const invalid = (reason: string, detail: string): Outcome => {
+    log.error(`[pdf] !!! ${detail} — marked invalid, nothing overwritten`);
+    return { ok: false, permanent: true, reason };
+  };
+
   /**
-   * ไฟล์ที่มีอยู่แล้วใน bucket = ของรอบก่อน (อัปโหลดแล้วแต่อัปเดต DB ไม่ทัน) — รับมาใช้ ไม่ render ทับ
-   * เฉพาะเมื่อเป็นของบิลนี้ (metadata receipt-id) — DB ถูก restore แต่ bucket ยังอยู่ เลขที่เอกสารอาจซ้ำกับไฟล์ของบิลเก่า
+   * ไฟล์ที่มีอยู่แล้วใน bucket = ของรอบก่อน (อัปโหลดแล้วแต่บันทึกผลไม่ทัน) — รับมาใช้ ไม่ render ทับ
+   * เฉพาะเมื่อเป็นของบิลนี้ (receipt-id) และ byte ตรงกับ sha256 ที่เขียนไว้ตอนอัปโหลด — DB ที่ถูก restore
+   * แต่ bucket ยังอยู่อาจมีเลขที่เอกสารซ้ำกับไฟล์ของบิลเก่า
    */
   function adopt(key: string, object: StoredObject, src: ReceiptSource): Outcome {
     const owner = object.metadata["receipt-id"];
     if (owner !== src.receipt.id) {
-      log.error(
-        `[pdf] !!! ${key} belongs to another bill (receipt-id ${owner ?? "missing"}, this bill ${src.receipt.id}) — ` +
-          "not adopted, not overwritten · check doc numbering / a database restore",
+      return invalid(
+        "archive key belongs to another bill",
+        `${key} belongs to another bill (receipt-id ${owner ?? "missing"}, this bill ${src.receipt.id}) · ` +
+          "check doc numbering / a database restore",
       );
-      return { ok: false, permanent: true, reason: "archive key belongs to another bill" };
+    }
+    const actual = sha256Hex(object.body);
+    const written = object.metadata.sha256;
+    if (written !== undefined && written !== actual) {
+      return invalid("stored bytes do not match their sha256", `${key}: bytes ${actual} ≠ metadata ${written}`);
     }
     if (Buffer.from(object.body.subarray(0, 5)).toString("latin1") !== "%PDF-") {
-      return { ok: false, permanent: true, reason: `object at ${key} is not a PDF — needs manual check` };
+      return invalid("stored object is not a PDF", `${key} is not a PDF`);
     }
-    return { ok: true, key, sha256: sha256Hex(object.body) };
+    return { ok: true, key, sha256: actual };
   }
 
   async function produce(kind: PdfKind, src: ReceiptSource): Promise<Outcome> {
@@ -331,15 +355,26 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
       const stored = await storage.get(key);
       if (stored) return adopt(key, stored, src);
       const pdf = await render(kind, src);
+      let sha256: string;
       try {
-        await putNew(storage, key, pdf, PDF_CONTENT_TYPE, { "receipt-id": src.receipt.id, kind });
+        ({ sha256 } = await putNew(storage, key, pdf, PDF_CONTENT_TYPE, { "receipt-id": src.receipt.id, kind }));
       } catch (e) {
         if (!(e instanceof ObjectExistsError)) throw e;
         const winner = await storage.get(key);
         if (!winner) throw e;
         return adopt(key, winner, src);
       }
-      return { ok: true, key, sha256: sha256Hex(pdf) };
+      // ยืนยันหลังเขียน: object ที่ bucket มีตอนนี้ต้องเป็นของเราจริง (ผู้เขียนที่ lease หลุดอาจเขียนตัดหน้า
+      // บน bucket ที่ไม่รองรับ If-None-Match) — ไม่ตรง = invalid ไม่บันทึก sha ที่ไม่ตรงกับไฟล์จริง
+      const head = await storage.exists(key);
+      if (head?.metadata["receipt-id"] !== src.receipt.id || head.metadata.sha256 !== sha256) {
+        return invalid(
+          "archive object changed right after upload",
+          `${key}: expected receipt-id ${src.receipt.id} sha256 ${sha256}, bucket has ` +
+            `${head?.metadata["receipt-id"] ?? "none"} / ${head?.metadata.sha256 ?? "none"}`,
+        );
+      }
+      return { ok: true, key, sha256 };
     } catch (e) {
       const reason = reasonOf(e);
       const permanent = isPermanent(e);
@@ -350,7 +385,7 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
     }
   }
 
-  function columnsFor(kind: PdfKind, out: Outcome, at: Date): Partial<typeof buyReceipt.$inferInsert> {
+  function columnsFor(kind: PdfKind, out: Outcome, at: Date): PgUpdateSetSource<typeof buyReceipt> {
     if (kind === "receipt") {
       return out.ok
         ? { pdfKey: out.key, pdfSha256: out.sha256, pdfStatus: "ready", pdfGeneratedAt: at }
@@ -366,35 +401,87 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
       : { voidPdfStatus: out.permanent ? "invalid" : "failed" };
   }
 
-  async function archive(
-    receiptId: string,
-    { wait = true, includeInvalid = false } = {},
-  ): Promise<ArchiveResult | null> {
+  const statusColumns = {
+    pdfStatus: buyReceipt.pdfStatus,
+    idcardStatus: buyReceipt.idcardStatus,
+    voidPdfStatus: buyReceipt.voidPdfStatus,
+  };
+
+  async function archive(receiptId: string, { manual = false } = {}): Promise<ArchiveResult | null> {
     if (!z.uuid().safeParse(receiptId).success) return null;
-    return db.transaction(async (tx) => {
-      // ผู้เขียนคนเดียวต่อบิล — ล็อกหลุดเองเมื่อทรานแซกชันจบ (commit/rollback/connection หลุด)
-      const lockKey = sql`hashtextextended(${`buy_receipt_pdf:${receiptId}`}, 0)`;
-      if (wait) {
-        await tx.execute(sql`select pg_advisory_xact_lock(${lockKey})`);
-      } else {
-        const [got] = await tx.execute<{ locked: boolean }>(
-          sql`select pg_try_advisory_xact_lock(${lockKey}) as locked`,
-        );
-        if (!got?.locked) {
-          const [row] = await tx.select().from(buyReceipt).where(eq(buyReceipt.id, receiptId)).limit(1);
-          return row ? { ...statusesOf(row), busy: true } : null;
-        }
+    const wanted = manual ? (["pending", "failed", "invalid"] as const) : (["pending", "failed"] as const);
+    const token = randomUUID();
+
+    // (1) จอง — UPDATE เดียว atomic: ต้องมีงานจริง · ไม่มีใครถือ lease · งานอัตโนมัติต้องพ้น backoff
+    const [claimed] = await db
+      .update(buyReceipt)
+      .set({ pdfLeaseToken: token, pdfLeaseUntil: LEASE })
+      .where(
+        and(
+          eq(buyReceipt.id, receiptId),
+          or(isNull(buyReceipt.pdfLeaseUntil), lt(buyReceipt.pdfLeaseUntil, sql`now()`)),
+          or(
+            inArray(buyReceipt.pdfStatus, wanted),
+            inArray(buyReceipt.idcardStatus, wanted),
+            and(eq(buyReceipt.status, "void"), inArray(buyReceipt.voidPdfStatus, wanted)),
+          ),
+          manual ? undefined : or(isNull(buyReceipt.pdfRetryAfter), lte(buyReceipt.pdfRetryAfter, sql`now()`)),
+        ),
+      )
+      .returning({ id: buyReceipt.id });
+    if (!claimed) {
+      const [row] = await db
+        .select({ ...statusColumns, leased: sql<boolean | null>`${buyReceipt.pdfLeaseUntil} > now()` })
+        .from(buyReceipt)
+        .where(eq(buyReceipt.id, receiptId))
+        .limit(1);
+      return row ? { ...statusesOf(row), busy: row.leased === true } : null;
+    }
+
+    const release = () =>
+      db
+        .update(buyReceipt)
+        .set({ pdfLeaseToken: null, pdfLeaseUntil: null })
+        .where(and(eq(buyReceipt.id, receiptId), eq(buyReceipt.pdfLeaseToken, token)));
+    try {
+      // (2) render + อัปโหลด — นอก transaction ใด ๆ
+      const src = await loadReceiptSource(db, receiptId);
+      if (!src) {
+        await release();
+        return null;
       }
-      // อ่านหลังได้ล็อก — ผู้เขียนก่อนหน้าอาจทำเสร็จไปแล้ว
-      const src = await loadReceiptSource(tx, receiptId);
-      if (!src) return null;
-      const set: Partial<typeof buyReceipt.$inferInsert> = {};
-      // render ให้ครบก่อน แล้วอัปเดตครั้งเดียวท้ายสุด — ล็อกแถวสั้นที่สุด (การยกเลิกบิลไม่ต้องรอ Gotenberg)
-      for (const kind of missingFiles(src.receipt, { includeInvalid }))
-        Object.assign(set, columnsFor(kind, await produce(kind, src), now()));
-      if (Object.keys(set).length > 0) await tx.update(buyReceipt).set(set).where(eq(buyReceipt.id, receiptId));
-      return { ...statusesOf({ ...src.receipt, ...set }), busy: false };
-    });
+      const set: PgUpdateSetSource<typeof buyReceipt> = {};
+      let transient = false;
+      for (const kind of missingFiles(src.receipt, { includeInvalid: manual })) {
+        const out = await produce(kind, src);
+        Object.assign(set, columnsFor(kind, out, now()));
+        if (!out.ok && !out.permanent) transient = true;
+      }
+      const attempts = transient ? src.receipt.pdfAttempts + 1 : 0;
+      Object.assign(set, {
+        pdfAttempts: attempts,
+        pdfRetryAfter: transient ? sql`now() + ${`${backoffMs(attempts) / 1000} seconds`}::interval` : null,
+        pdfLeaseToken: null,
+        pdfLeaseUntil: null,
+      });
+
+      // (3) บันทึกผล — เฉพาะเมื่อยังถือ lease อยู่ (หมดอายุแล้วมีผู้อื่นทำต่อ = ห้ามเขียนทับผลของเขา)
+      const [recorded] = await db
+        .update(buyReceipt)
+        .set(set)
+        .where(and(eq(buyReceipt.id, receiptId), eq(buyReceipt.pdfLeaseToken, token)))
+        .returning(statusColumns);
+      if (!recorded) {
+        log.error(`[pdf] !!! ${src.receipt.docNo}: lease expired before recording — another writer took over`);
+        const [row] = await db.select(statusColumns).from(buyReceipt).where(eq(buyReceipt.id, receiptId));
+        return row ? { ...statusesOf(row), busy: true } : null;
+      }
+      return { ...statusesOf(recorded), busy: false };
+    } catch (e) {
+      // DB/อื่น ๆ ล้มกลางทาง — ปล่อย lease (ถ้ายังเป็นของเรา) รอบหน้าไม่ต้องรอ 3 นาที
+      await release().catch(() => undefined);
+      throw e;
+    }
   }
 
   async function retryDue({ olderThanMs = 2 * 60_000, limit = 10 } = {}): Promise<number> {
@@ -404,24 +491,26 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
       .select({ id: buyReceipt.id })
       .from(buyReceipt)
       .where(
-        or(
-          and(inArray(buyReceipt.pdfStatus, waiting), lte(buyReceipt.createdAt, cutoff)),
-          and(inArray(buyReceipt.idcardStatus, waiting), lte(buyReceipt.createdAt, cutoff)),
-          and(inArray(buyReceipt.voidPdfStatus, waiting), lte(buyReceipt.voidedAt, cutoff)),
+        and(
+          or(
+            and(inArray(buyReceipt.pdfStatus, waiting), lte(buyReceipt.createdAt, cutoff)),
+            and(inArray(buyReceipt.idcardStatus, waiting), lte(buyReceipt.createdAt, cutoff)),
+            and(inArray(buyReceipt.voidPdfStatus, waiting), lte(buyReceipt.voidedAt, cutoff)),
+          ),
+          or(isNull(buyReceipt.pdfRetryAfter), lte(buyReceipt.pdfRetryAfter, sql`now()`)),
+          or(isNull(buyReceipt.pdfLeaseUntil), lt(buyReceipt.pdfLeaseUntil, sql`now()`)),
         ),
       )
       .orderBy(asc(buyReceipt.createdAt))
       .limit(limit);
-    let done = 0;
-    for (const { id } of due) {
-      const result = await archive(id, { wait: false });
-      if (result && !result.busy) done++;
-    }
-    return done;
+    // ผ่านคิวเดียวกับงานหลังบันทึก — เคารพเพดานงานพร้อมกัน · บิลที่อยู่ในคิวแล้วไม่เข้าซ้ำ
+    let queued = 0;
+    for (const { id } of due) if (tasks.run(`pdf retry ${id}`, () => archive(id), id)) queued++;
+    return queued;
   }
 
   return {
-    enqueue: (receiptId) => tasks.run(`pdf ${receiptId}`, () => archive(receiptId)),
+    enqueue: (receiptId) => void tasks.run(`pdf ${receiptId}`, () => archive(receiptId), receiptId),
     archive,
     retryDue,
   };
@@ -440,8 +529,8 @@ export function startPdfRetryLoop(
     if (running) return;
     running = true;
     try {
-      const done = await pdf.retryDue({ olderThanMs, limit });
-      if (done > 0) log.info(`[pdf] retry: processed ${done} receipt(s)`);
+      const queued = await pdf.retryDue({ olderThanMs, limit });
+      if (queued > 0) log.info(`[pdf] retry: queued ${queued} receipt(s)`);
     } catch (e) {
       log.error("[pdf] retry loop failed:", e instanceof Error ? e.message : e);
     } finally {

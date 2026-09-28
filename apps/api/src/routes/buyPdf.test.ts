@@ -261,7 +261,7 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
 
     await t.db.update(buyLine).set({ amount: "20030.00" }).where(eq(buyLine.receiptId, bill.id));
     expect(await t.pdf.archive(bill.id)).toMatchObject({ pdf_status: "invalid" }); // งานอัตโนมัติไม่แตะ invalid
-    expect(await t.pdf.archive(bill.id, { includeInvalid: true })).toMatchObject({ pdf_status: "ready" });
+    expect(await t.pdf.archive(bill.id, { manual: true })).toMatchObject({ pdf_status: "ready" });
   });
 
   it("retry เบื้องหลัง: เก็บใบที่ค้าง pending/failed · ใบที่เพิ่งสร้าง (< 2 นาที) ยังไม่แตะ", async () => {
@@ -284,7 +284,7 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
     const bill = await save({ customer_id: s.custC });
     // งานของ POST ถือล็อกอยู่ (ค้างใน Gotenberg)
     await vi.waitFor(() => expect(t.fake.calls.some((c) => c.trace === bill.doc_no)).toBe(true));
-    expect(await t.pdf.archive(bill.id, { wait: false })).toMatchObject({ busy: true, pdf_status: "pending" });
+    expect(await t.pdf.archive(bill.id)).toMatchObject({ busy: true, pdf_status: "pending" });
     const second = t.pdf.archive(bill.id); // รอคิวจนตัวแรกจบ แล้วเห็นว่าไม่มีอะไรต้องทำ
     release();
     await t.tasks.idle();
