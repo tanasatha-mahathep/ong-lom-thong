@@ -9,7 +9,8 @@ const WARNING = "ราคาห่างจากครั้งก่อน 4.
 const QUOTE_70850 = { bar_sell: "70850.00", bar_buy: "70650.00", jewelry_buy: "67118" };
 /** ราคาของสาขาหลังตั้งราคากลาง 70,850 */
 const SAVED = { ...GOLD_PRICE, ...QUOTE_70850 };
-const TYPO_CONFLICT = { error: WARNING, field: "bar_sell", warning: WARNING };
+/** 409 ของด่านกันพิมพ์ผิดตามสัญญา #60 — ชี้ confirm_typo และยังมี warning */
+const TYPO_CONFLICT = { error: WARNING, field: "confirm_typo", warning: WARNING };
 
 const confirmedTypo = (body: unknown) =>
   typeof body === "object" && body !== null && "confirm_typo" in body && body.confirm_typo === true;
@@ -19,6 +20,7 @@ async function openAs(role: Role, routes: Parameters<typeof fakeApi>[0] = {}) {
     "GET /api/me": () => json(makeMe(role)),
     "GET /api/gold-price/today": () => json(GOLD_PRICE),
     "POST /api/gold-price/quote": () => json(QUOTE_70850),
+    "GET /api/gold-price/today/branches": () => json([]),
     ...routes,
   });
   renderApp("/settings/gold-price");
