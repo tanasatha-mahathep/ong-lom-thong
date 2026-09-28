@@ -1,10 +1,12 @@
-# build context = repo root (railway.json → dockerfilePath: apps/api/Dockerfile)
+# build context = repo root (.railway/railway.ts → dockerfilePath: apps/api/Dockerfile)
 FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS build
-ENV HUSKY=0
-RUN corepack enable && corepack prepare pnpm@10.18.2 --activate
+ENV HUSKY=0 COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable
 WORKDIR /repo
 
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+# เวอร์ชัน pnpm มาจาก packageManager ใน package.json ที่เดียว (Renovate อัปเดตที่นั่น)
+RUN corepack install
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 COPY packages/core/package.json packages/core/
