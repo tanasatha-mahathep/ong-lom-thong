@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { BRANCH_2, BRANCH_HQ, GOLD_PRICE, fakeApi, json, makeMe, renderApp } from "@/test/app";
 import { navFor } from "@/lib/nav";
-import type { Role } from "@/lib/queries";
+import type { Me, Role } from "@/lib/queries";
 
 const titles = (role: Role) => navFor(role).flatMap((group) => group.items.map((item) => item.title));
 
@@ -37,10 +37,10 @@ describe("เมนูตาม role (spec §10)", () => {
   });
 });
 
-function renderShell(role: Role, branches = [BRANCH_HQ]) {
+function renderShell(role: Role, branches = [BRANCH_HQ], me: Me = makeMe(role, branches)) {
   let signedIn = true;
   const api = fakeApi({
-    "GET /api/me": () => (signedIn ? json(makeMe(role, branches)) : json({ error: "unauthorized" }, 401)),
+    "GET /api/me": () => (signedIn ? json(me) : json({ error: "unauthorized" }, 401)),
     "GET /api/gold-price/today": () => json(GOLD_PRICE),
     "POST /api/me/branch": () => json({ branch: BRANCH_2 }),
     "POST /api/auth/sign-out": () => {
@@ -112,6 +112,22 @@ describe("sidebar ของแอป", () => {
     ).toBeInTheDocument();
     expect(api.callsTo("POST", "/api/auth/sign-out")).toHaveLength(1);
     expect(router.state.location.pathname).toBe("/login");
+  });
+
+  it("ยังไม่มีสาขาปัจจุบัน (สาขาหลักถูกปิด) → เมนูผู้ใช้มีสลับสาขาแม้มีสิทธิ์สาขาเดียว", async () => {
+    const { api } = renderShell("staff", [BRANCH_2], { ...makeMe("staff", [BRANCH_2]), branch: null });
+    const user = userEvent.setup();
+    (await screen.findByRole("button", { name: /ทดสอบ staff/ })).focus();
+    expect(screen.getByText("สาขาปัจจุบัน").parentElement).toHaveTextContent("ยังไม่ได้เลือกสาขา");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "สลับสาขา" })).toHaveFocus());
+    await user.keyboard("{ArrowRight}");
+    await waitFor(() => expect(screen.getByRole("menuitemradio", { name: /สาขา 2/ })).toHaveFocus());
+    await user.keyboard("{Enter}");
+
+    await waitFor(() =>
+      expect(api.callsTo("POST", "/api/me/branch").map((c) => c.body)).toEqual([{ branch_id: BRANCH_2.id }]),
+    );
   });
 
   it("หลายสาขา → สลับสาขาจากเมนูผู้ใช้ด้วยคีย์บอร์ด แล้วโหลดข้อมูลใหม่", async () => {

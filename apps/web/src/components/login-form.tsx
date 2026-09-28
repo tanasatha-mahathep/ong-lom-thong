@@ -19,7 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { errorMessage } from "@/lib/api";
-import { type Me, meQueryOptions } from "@/lib/queries";
+import { type Me, canSwitchBranch, meQueryOptions } from "@/lib/queries";
 import { SHOP_NAME } from "@/lib/shop";
 import { signIn, signInErrorMessage, switchBranch } from "@/lib/session";
 
@@ -37,7 +37,7 @@ export function LoginForm({ onDone }: { onDone: () => void }) {
         {me ? (
           <BranchStep me={me} onDone={onDone} />
         ) : (
-          <SignInStep onSignedIn={(signedIn) => (signedIn.branches.length > 1 ? setMe(signedIn) : onDone())} />
+          <SignInStep onSignedIn={(signedIn) => (canSwitchBranch(signedIn) ? setMe(signedIn) : onDone())} />
         )}
         <BrandPanel />
       </CardContent>
@@ -74,11 +74,18 @@ function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const mutation = useMutation({
-    mutationFn: async (credentials: { email: string; password: string }) => {
+    mutationFn: async (credentials: { email: string; password: string }): Promise<Me> => {
       await signIn(credentials);
       // session ใหม่ — ทิ้ง cache ของ session ก่อนหน้า แล้วอ่านผู้ใช้จากเซิร์ฟเวอร์
       queryClient.removeQueries();
-      return queryClient.fetchQuery({ ...meQueryOptions, staleTime: 0 });
+      const me = await queryClient.fetchQuery({ ...meQueryOptions, staleTime: 0 });
+      // มีสิทธิ์สาขาเดียวแต่ session ยังไม่มีสาขา (สาขาหลักถูกปิด / สร้างด้วย --allow) → ตั้งให้เลย ไม่ต้องถาม
+      const [only] = me.branches;
+      if (me.branch || !only || me.branches.length > 1) return me;
+      const branch = await switchBranch(only.id);
+      const withBranch = { ...me, branch };
+      queryClient.setQueryData(meQueryOptions.queryKey, withBranch);
+      return withBranch;
     },
     // 401 = รหัสผิด แสดงในฟอร์ม ไม่ใช่ session หมดอายุ
     meta: { handlesUnauthorized: true },

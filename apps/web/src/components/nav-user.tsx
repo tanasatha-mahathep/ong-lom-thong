@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
 import { errorMessage } from "@/lib/api";
-import { type Me, ROLE_LABEL } from "@/lib/queries";
+import { type Me, ROLE_LABEL, canSwitchBranch } from "@/lib/queries";
 import { signOut, switchBranch } from "@/lib/session";
 
 /** เมนูผู้ใช้ท้าย sidebar — สลับสาขา (มีสิทธิ์มากกว่า 1 สาขา) · ออกจากระบบ */
@@ -77,7 +77,7 @@ export function NavUser({ me }: { me: Me }) {
               <span className="text-xs text-muted-foreground">{ROLE_LABEL[me.role]}</span>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            {me.branches.length > 1 && (
+            {canSwitchBranch(me) && (
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger disabled={switchMutation.isPending}>
                   <ArrowLeftRight aria-hidden="true" />

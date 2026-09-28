@@ -119,6 +119,30 @@ describe("หน้า login", () => {
     expect(screen.getByText("สาขาปัจจุบัน").parentElement).toHaveTextContent(BRANCH_2.name);
   });
 
+  it("หลายสาขาแต่ยังไม่มีสาขาปัจจุบัน → ขั้นเลือกสาขา ค่าเริ่มต้นเป็นสาขาแรก", async () => {
+    const api = signInServer({ ...makeMe("staff", [BRANCH_HQ, BRANCH_2]), branch: null });
+    renderApp("/login");
+    const user = await submitCredentials();
+
+    expect(await screen.findByRole("heading", { level: 1, name: "เลือกสาขาที่ทำงาน" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "สำนักงานใหญ่ (สาขา 1)" })).toBeChecked();
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "หน้าแรก" })).toBeInTheDocument();
+    expect(api.callsTo("POST", "/api/me/branch").map((c) => c.body)).toEqual([{ branch_id: BRANCH_HQ.id }]);
+  });
+
+  it("สาขาเดียวแต่ยังไม่มีสาขาปัจจุบัน → ตั้งสาขานั้นให้เองโดยไม่ถาม", async () => {
+    const api = signInServer({ ...makeMe("staff", [BRANCH_2]), branch: null });
+    renderApp("/login");
+    await submitCredentials();
+
+    expect(await screen.findByRole("heading", { level: 1, name: "หน้าแรก" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "เลือกสาขาที่ทำงาน" })).not.toBeInTheDocument();
+    expect(api.callsTo("POST", "/api/me/branch").map((c) => c.body)).toEqual([{ branch_id: BRANCH_2.id }]);
+    expect(screen.getByText("สาขาปัจจุบัน").parentElement).toHaveTextContent(BRANCH_2.name);
+  });
+
   it("login อยู่แล้ว → เปิด /login แล้วเข้าแอปเลย", async () => {
     fakeApi({ "GET /api/me": () => json(makeMe("staff")), "GET /api/gold-price/today": () => json(GOLD_PRICE) });
     const router = renderApp("/login");

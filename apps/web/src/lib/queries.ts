@@ -27,6 +27,12 @@ const MeSchema = z.object({
 export type Me = z.infer<typeof MeSchema>;
 
 /**
+ * มีสาขาให้เลือก — มีสิทธิ์หลายสาขา หรือมีสิทธิ์แต่ session ยังไม่มีสาขาปัจจุบัน
+ * (บัญชีสร้างด้วย `--allow` อย่างเดียว / สาขาหลักถูกปิด) · ใช้ทั้งขั้นเลือกสาขาตอน login และเมนูสลับสาขา
+ */
+export const canSwitchBranch = (me: Me) => me.branches.length > 1 || (!me.branch && me.branches.length > 0);
+
+/**
  * ผู้ใช้ที่ login อยู่ — GET /api/me
  * 401 ของ query นี้ไม่ผ่านตัวดัก 401 กลาง: guard ของ `_app` และหน้า /login จัดการเอง
  */
