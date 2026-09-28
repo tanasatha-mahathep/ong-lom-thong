@@ -9,21 +9,26 @@ import type { TransactionSql } from "postgres";
  *   function public.next_doc_no(p_branch uuid, p_prefix text, p_date date) | > BEGIN
  *
  * Covered: schemas · extensions · enums/domains/composite/range types · tables (kind, persistence,
- * RLS, partitioning, inheritance, options) · columns (position, type, nullability, default,
- * identity, generated, collation) · constraints · indexes · sequences (not their current value) ·
- * views · functions/procedures (pg_get_functiondef) · triggers · policies · rules · event triggers
- * · default privileges · owners, ACLs and comments. Not covered: operators, casts, collations,
- * text-search objects, publications — none are used here; add a query before relying on them.
+ * RLS, partitioning, inheritance, options, state of the internal FK triggers) · columns (position,
+ * type, nullability, default, identity, generated, collation) · constraints · indexes · sequences
+ * (not their current value) · views · functions/procedures (pg_get_functiondef) · triggers ·
+ * policies · rules · statistics objects · event triggers · default privileges · per-database
+ * settings · owners, ACLs and comments. drizzle's own bookkeeping table is left out (compared
+ * separately). Not covered: operators, casts, collations, text-search objects, publications —
+ * none are used here; add a query before relying on them.
  */
 
-/** Application schemas: everything except PostgreSQL's own and the migration runner's bookkeeping. */
+/** Every schema except PostgreSQL's own (the drizzle schema is included: migrations can create objects there). */
 const appSchema = (alias: string) =>
-  `${alias}.nspname NOT IN ('pg_catalog', 'information_schema', 'drizzle') AND ${alias}.nspname NOT LIKE 'pg\\_%'`;
+  `${alias}.nspname NOT IN ('pg_catalog', 'information_schema') AND ${alias}.nspname NOT LIKE 'pg\\_%'`;
+/** drizzle.__drizzle_migrations and its sequence/index/constraints — runner-owned, compared on its own. */
+const notBookkeeping = (ns: string, rel: string) =>
+  `NOT (${ns}.nspname = 'drizzle' AND coalesce(${rel}, '') LIKE '\\_\\_drizzle\\_migrations%')`;
 /** Members of an extension belong to the extension (captured by name + version), not to us. */
 const notExtensionMember = (catalog: string, oid: string) =>
   `NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = '${catalog}'::regclass AND d.objid = ${oid} AND d.deptype = 'e')`;
 
-interface Entry {
+export interface Entry {
   kind: string;
   key: string;
   attrs: string[];
@@ -32,6 +37,7 @@ interface Entry {
 
 /** Order of sections in the rendered fingerprint (readability only — lines are sorted within). */
 const KIND_ORDER = [
+  "database setting",
   "event trigger",
   "extension",
   "default privileges",
@@ -56,10 +62,18 @@ const KIND_ORDER = [
   "trigger",
   "policy",
   "rule",
+  "statistics",
 ];
 
 /** Routines and triggers — the objects that packages/db/sql/functions.sql owns. */
-export const ROUTINE_KINDS = new Set(["function", "procedure", "aggregate", "window function", "trigger"]);
+export const ROUTINE_KINDS = new Set([
+  "function",
+  "procedure",
+  "aggregate",
+  "window function",
+  "trigger",
+  "event trigger",
+]);
 
 const QUERIES: string[] = [
   // schemas
@@ -88,6 +102,9 @@ const QUERIES: string[] = [
        'access method ' || coalesce(am.amname, '-'),
        'options ' || coalesce(c.reloptions::text, '-'),
        'comment ' || coalesce(obj_description(c.oid, 'pg_class'), '-'),
+       -- FK enforcement lives in internal triggers: ALTER TABLE … DISABLE TRIGGER ALL turns it off
+       'internal triggers ' || coalesce((SELECT string_agg(t2.tgenabled::text, '' ORDER BY t2.tgenabled::text)
+                                         FROM pg_trigger t2 WHERE t2.tgrelid = c.oid AND t2.tgisinternal), '-'),
        CASE WHEN c.relkind = 'p' THEN 'partition key ' || pg_get_partkeydef(c.oid) END,
        CASE WHEN c.relispartition THEN 'partition bound ' || pg_get_expr(c.relpartbound, c.oid) END,
        (SELECT 'inherits ' || string_agg(format('%I.%I', pn.nspname, pc.relname), ', ' ORDER BY i.inhseqno)
@@ -97,7 +114,8 @@ const QUERIES: string[] = [
      CASE WHEN c.relkind IN ('v', 'm') THEN pg_get_viewdef(c.oid, true) END
    FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
    LEFT JOIN pg_am am ON am.oid = c.relam
-   WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND ${appSchema("n")} AND ${notExtensionMember("pg_class", "c.oid")}`,
+   WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f') AND ${appSchema("n")} AND ${notBookkeeping("n", "c.relname")}
+     AND ${notExtensionMember("pg_class", "c.oid")}`,
 
   // columns — position is the logical order among live columns (dropped columns leave attnum gaps)
   `SELECT 'column', format('%I.%I.%I', n.nspname, c.relname, a.attname),
@@ -122,7 +140,7 @@ const QUERIES: string[] = [
    LEFT JOIN pg_collation co ON co.oid = a.attcollation
    LEFT JOIN pg_namespace cn ON cn.oid = co.collnamespace
    WHERE a.attnum > 0 AND NOT a.attisdropped AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
-     AND ${appSchema("n")} AND ${notExtensionMember("pg_class", "c.oid")}`,
+     AND ${appSchema("n")} AND ${notBookkeeping("n", "c.relname")} AND ${notExtensionMember("pg_class", "c.oid")}`,
 
   // constraints on tables and domains (PG 18 also lists NOT NULL here as contype 'n')
   `SELECT 'constraint', format('%I.%I.%I', n.nspname, coalesce(c.relname, t.typname), con.conname),
@@ -132,7 +150,7 @@ const QUERIES: string[] = [
    JOIN pg_namespace n ON n.oid = con.connamespace
    LEFT JOIN pg_class c ON c.oid = con.conrelid
    LEFT JOIN pg_type t ON t.oid = con.contypid
-   WHERE ${appSchema("n")}`,
+   WHERE ${appSchema("n")} AND ${notBookkeeping("n", "c.relname")}`,
 
   // indexes, including the ones behind primary keys and unique constraints
   `SELECT 'index', format('%I.%I', n.nspname, ic.relname),
@@ -142,7 +160,7 @@ const QUERIES: string[] = [
    FROM pg_index i
    JOIN pg_class ic ON ic.oid = i.indexrelid
    JOIN pg_namespace n ON n.oid = ic.relnamespace
-   WHERE ${appSchema("n")} AND ${notExtensionMember("pg_class", "ic.oid")}`,
+   WHERE ${appSchema("n")} AND ${notBookkeeping("n", "ic.relname")} AND ${notExtensionMember("pg_class", "ic.oid")}`,
 
   // sequences — definition and owner, never last_value (that is data)
   `SELECT 'sequence', format('%I.%I', n.nspname, c.relname),
@@ -153,6 +171,7 @@ const QUERIES: string[] = [
        'persistence ' || c.relpersistence::text,
        'owner ' || pg_get_userbyid(c.relowner),
        'acl ' || coalesce(c.relacl::text, '-'),
+       'comment ' || coalesce(obj_description(c.oid, 'pg_class'), '-'),
        'owned by ' || coalesce((
          SELECT format('%I.%I.%I', dn.nspname, dc.relname, da.attname) || ' (' || d.deptype::text || ')'
          FROM pg_depend d
@@ -165,7 +184,7 @@ const QUERIES: string[] = [
    FROM pg_sequence s
    JOIN pg_class c ON c.oid = s.seqrelid
    JOIN pg_namespace n ON n.oid = c.relnamespace
-   WHERE ${appSchema("n")} AND ${notExtensionMember("pg_class", "c.oid")}`,
+   WHERE ${appSchema("n")} AND ${notBookkeeping("n", "c.relname")} AND ${notExtensionMember("pg_class", "c.oid")}`,
 
   // enums, domains, standalone composite types, range types (array types are implicit)
   `SELECT CASE t.typtype WHEN 'e' THEN 'enum' WHEN 'd' THEN 'domain' WHEN 'c' THEN 'composite type'
@@ -241,6 +260,18 @@ const QUERIES: string[] = [
    JOIN pg_namespace n ON n.oid = c.relnamespace
    WHERE r.rulename <> '_RETURN' AND ${appSchema("n")}`,
 
+  // extended statistics (CREATE STATISTICS) steer the planner
+  `SELECT 'statistics', format('%I.%I', n.nspname, s.stxname),
+     ARRAY['definition ' || pg_get_statisticsobjdef(s.oid)], NULL
+   FROM pg_statistic_ext s JOIN pg_namespace n ON n.oid = s.stxnamespace
+   WHERE ${appSchema("n")}`,
+
+  // ALTER DATABASE … SET / ALTER ROLE … IN DATABASE … SET (timezone, search_path, …) for this database
+  `SELECT 'database setting', coalesce(pg_get_userbyid(nullif(s.setrole, 0))::text, 'all roles'),
+     ARRAY(SELECT x FROM unnest(s.setconfig) AS x ORDER BY x), NULL
+   FROM pg_db_role_setting s
+   WHERE s.setdatabase = (SELECT d.oid FROM pg_database d WHERE d.datname = current_database())`,
+
   // database-wide objects that migrations could create
   `SELECT 'event trigger', format('%I', e.evtname),
      ARRAY['event ' || e.evtevent, 'function ' || e.evtfoid::regprocedure::text,
@@ -263,7 +294,9 @@ async function collect(tx: TransactionSql): Promise<Entry[]> {
   return entries;
 }
 
-function render(entries: Entry[], keep: (entry: Entry) => boolean = () => true): string {
+type Keep = (entry: Entry) => boolean;
+
+function render(entries: Entry[], keep: Keep = () => true, keepAttr: (attr: string) => boolean = () => true): string {
   const rank = (kind: string) => {
     const i = KIND_ORDER.indexOf(kind);
     return i === -1 ? KIND_ORDER.length : i;
@@ -274,7 +307,7 @@ function render(entries: Entry[], keep: (entry: Entry) => boolean = () => true):
   const lines: string[] = [];
   for (const e of sorted) {
     const head = `${e.kind} ${e.key} |`;
-    for (const attr of e.attrs) lines.push(`${head} ${attr}`);
+    for (const attr of e.attrs) if (keepAttr(attr)) lines.push(`${head} ${attr}`);
     if (e.definition !== null) {
       for (const line of e.definition.replace(/\n+$/, "").split("\n")) lines.push(`${head} > ${line}`);
     }
@@ -295,14 +328,52 @@ async function withCatalogPath<T>(tx: TransactionSql, run: () => Promise<T>): Pr
   return result;
 }
 
-/** Whole application schema (every schema except PostgreSQL's own and drizzle's bookkeeping). */
-export async function schemaFingerprint(tx: TransactionSql): Promise<string> {
-  return withCatalogPath(tx, async () => render(await collect(tx)));
+/** Every catalog entry of the database (read once, rendered several ways). */
+export async function catalogEntries(tx: TransactionSql): Promise<Entry[]> {
+  return withCatalogPath(tx, () => collect(tx));
 }
 
+/** Whole schema: every schema except PostgreSQL's own, without drizzle's bookkeeping table. */
+export const renderSchema = (entries: Entry[]) => render(entries);
+
 /** Only routines and triggers — what packages/db/sql/functions.sql is supposed to define. */
+export const renderRoutines = (entries: Entry[]) => render(entries, (e) => ROUTINE_KINDS.has(e.kind));
+
+/**
+ * What schema.ts can declare, so a database built by the migrations can be compared with one built
+ * by `drizzle-kit push` of schema.ts: tables, columns, constraints, indexes, sequences, enums,
+ * views, policies — without column positions (ALTER … ADD COLUMN appends), routines and triggers
+ * (functions.sql), constraint triggers, the drizzle schema, owners, ACLs, comments and storage tuning.
+ */
+const STRUCTURE_KINDS = new Set([
+  "enum",
+  "table",
+  "view",
+  "materialized view",
+  "column",
+  "constraint",
+  "index",
+  "sequence",
+  "policy",
+]);
+const NOT_DECLARABLE =
+  /^(position|comment|acl|owner|options|storage|compression|replica identity|access method|clustered|internal triggers) /;
+export const renderStructure = (entries: Entry[]) =>
+  render(
+    entries,
+    (e) =>
+      STRUCTURE_KINDS.has(e.kind) &&
+      !e.key.startsWith("drizzle.") &&
+      !(e.kind === "constraint" && e.attrs.includes("type t")),
+    (attr) => !NOT_DECLARABLE.test(attr),
+  );
+
+export async function schemaFingerprint(tx: TransactionSql): Promise<string> {
+  return renderSchema(await catalogEntries(tx));
+}
+
 export async function routineFingerprint(tx: TransactionSql): Promise<string> {
-  return withCatalogPath(tx, async () => render(await collect(tx), (e) => ROUTINE_KINDS.has(e.kind)));
+  return renderRoutines(await catalogEntries(tx));
 }
 
 /** Row count + md5 of every application table's rows — detects any write by a supposed no-op. */
@@ -311,7 +382,7 @@ export async function dataFingerprint(tx: TransactionSql): Promise<string> {
     const tables = await tx.unsafe<{ name: string }[]>(
       `SELECT format('%I.%I', n.nspname, c.relname) AS name
        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-       WHERE c.relkind IN ('r', 'p') AND NOT c.relispartition AND ${appSchema("n")}
+       WHERE c.relkind IN ('r', 'p') AND NOT c.relispartition AND ${appSchema("n")} AND ${notBookkeeping("n", "c.relname")}
        ORDER BY 1`,
     );
     const lines: string[] = [];
@@ -326,12 +397,22 @@ export async function dataFingerprint(tx: TransactionSql): Promise<string> {
   });
 }
 
-/** Drops every application function/procedure/aggregate (CASCADE takes their triggers along). */
-export async function dropAppRoutines(tx: TransactionSql): Promise<void> {
+/**
+ * Drops every application trigger, event trigger and routine (CASCADE), so that what
+ * packages/db/sql/functions.sql recreates on its own can be compared with what was deployed.
+ */
+export async function dropAppCode(tx: TransactionSql): Promise<void> {
   const drops = await tx.unsafe<{ stmt: string }[]>(
-    `SELECT format('DROP %s IF EXISTS %s CASCADE',
+    `SELECT format('DROP TRIGGER IF EXISTS %I ON %I.%I', tg.tgname, n.nspname, c.relname) AS stmt
+     FROM pg_trigger tg JOIN pg_class c ON c.oid = tg.tgrelid JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE NOT tg.tgisinternal AND ${appSchema("n")}
+     UNION ALL
+     SELECT format('DROP EVENT TRIGGER IF EXISTS %I', e.evtname)
+     FROM pg_event_trigger e WHERE ${notExtensionMember("pg_event_trigger", "e.oid")}
+     UNION ALL
+     SELECT format('DROP %s IF EXISTS %s CASCADE',
               CASE p.prokind WHEN 'p' THEN 'PROCEDURE' WHEN 'a' THEN 'AGGREGATE' ELSE 'FUNCTION' END,
-              p.oid::regprocedure) AS stmt
+              p.oid::regprocedure)
      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
      WHERE ${appSchema("n")} AND ${notExtensionMember("pg_proc", "p.oid")}`,
   );

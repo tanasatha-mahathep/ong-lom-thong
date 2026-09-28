@@ -79,35 +79,18 @@ function readSnapshotIds(path: string): { id: string; prevId: string } {
   return { id: typeof s.id === "string" ? s.id : "", prevId: typeof s.prevId === "string" ? s.prevId : "" };
 }
 
-/**
- * Integrity of HEAD's history on its own, and against the base (deployed) journal when given:
- * base entries are an exact prefix · idx = position · `when` strictly increasing · every entry has
- * its SQL and snapshot · no SQL or snapshot outside the journal · snapshots form one chain.
- */
-export function historyProblems(headFolder: string, base: Journal | null, baseLabel = "base"): string[] {
+/** HEAD's history on its own: idx/tag/when order, SQL + snapshot per entry, no orphans, one chain. */
+export function headProblems(headFolder: string): string[] {
   const problems: string[] = [];
   const head = readJournal(headFolder);
 
-  if (base) {
-    if (base.dialect !== head.dialect) problems.push(`journal dialect changed: ${base.dialect} → ${head.dialect}`);
-    if (head.entries.length < base.entries.length) {
-      problems.push(
-        `journal has ${head.entries.length} entries but ${baseLabel} already deployed ${base.entries.length} — entries were removed`,
-      );
-    }
-    base.entries.forEach((b, i) => {
-      const h = head.entries[i];
-      if (!h || entryText(h) !== entryText(b)) {
-        problems.push(
-          `journal entry ${i} differs from ${baseLabel} (deployed entries are immutable):\n` +
-            `    ${baseLabel}: ${entryText(b)}\n    HEAD: ${h ? entryText(h) : "(missing)"}`,
-        );
-      }
-    });
-  }
-
   head.entries.forEach((e, i) => {
     if (e.idx !== i) problems.push(`journal entry ${i} (${e.tag}) has idx ${e.idx}`);
+    // the Dockerfile copies packages/db/migrations only: a tag that points elsewhere is missing in production
+    if (!/^[A-Za-z0-9_-]+$/.test(e.tag)) problems.push(`journal entry ${i} has tag "${e.tag}" — not a plain file name`);
+    else if (/^\d{4}_/.test(e.tag) && Number(e.tag.slice(0, 4)) !== i) {
+      problems.push(`journal entry ${i} has tag ${e.tag} — its number does not match its position`);
+    }
     const prev = head.entries[i - 1];
     if (prev && e.when <= prev.when) {
       problems.push(
@@ -154,4 +137,35 @@ export function historyProblems(headFolder: string, base: Journal | null, baseLa
     prevId = s.id;
   }
   return problems;
+}
+
+/** A deployed journal (production tag, an environment's branch) must be an exact prefix of HEAD's. */
+export function baseProblems(head: Journal, base: Journal, label: string): string[] {
+  const problems: string[] = [];
+  if (base.dialect !== head.dialect) problems.push(`journal dialect changed: ${base.dialect} → ${head.dialect}`);
+  if (head.entries.length < base.entries.length) {
+    problems.push(
+      `journal has ${head.entries.length} entries but ${label} already deployed ${base.entries.length} — entries were removed`,
+    );
+  }
+  base.entries.forEach((b, i) => {
+    const h = head.entries[i];
+    if (!h || entryText(h) !== entryText(b)) {
+      problems.push(
+        `journal entry ${i} differs from ${label} (deployed entries are immutable):\n` +
+          `    ${label}: ${entryText(b)}\n    HEAD: ${h ? entryText(h) : "(missing)"}`,
+      );
+    }
+  });
+  return problems;
+}
+
+/** Number of HEAD's journal entries some deployed journal already contains (0 if none is a prefix). */
+export function deployedPrefix(head: Journal, bases: Journal[]): number {
+  let n = 0;
+  for (const base of bases) {
+    const prefix = base.entries.every((b, i) => head.entries[i] && entryText(head.entries[i]) === entryText(b));
+    if (prefix) n = Math.max(n, base.entries.length);
+  }
+  return n;
 }
