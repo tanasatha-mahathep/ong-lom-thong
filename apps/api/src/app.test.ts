@@ -7,7 +7,19 @@ const PW = "correct-horse-battery";
 const ORIGIN = "http://localhost:8787";
 const SPA = "<!doctype html><title>ONG</title>";
 
-describe.skipIf(!available)("createApp — JSON 404 · access log", () => {
+/** header ที่ทุก response ต้องมี (lib/httpHeaders.ts) */
+function expectSecurityHeaders(res: Response) {
+  expect(res.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+  expect(res.headers.get("content-security-policy")).toContain("default-src 'self'");
+  expect(res.headers.get("content-security-policy")).not.toMatch(/script-src[^;]*unsafe-inline/);
+  expect(res.headers.get("x-frame-options")).toBe("DENY");
+  expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(res.headers.get("strict-transport-security")).toBe("max-age=31536000");
+  expect(res.headers.get("cross-origin-opener-policy")).toBe("same-origin");
+  expect(res.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
+}
+
+describe.skipIf(!available)("createApp — header · JSON 404 · access log", () => {
   let t: TestApp;
   let cookie = "";
 
@@ -22,6 +34,29 @@ describe.skipIf(!available)("createApp — JSON 404 · access log", () => {
     await t?.close();
   });
 
+  it("SPA (/) · /api/healthz · route ที่ต้อง login ได้ header ความปลอดภัยครบ · API = no-store", async () => {
+    const spa = await t.request("/");
+    expect(spa.status).toBe(200);
+    expect(await spa.text()).toBe(SPA);
+    expectSecurityHeaders(spa);
+    expect(spa.headers.get("cache-control")).toBeNull();
+
+    const health = await t.request("/api/healthz");
+    expect(health.status).toBe(200);
+    expectSecurityHeaders(health);
+    expect(health.headers.get("cache-control")).toBe("no-store");
+
+    const me = await t.request("/api/me", { cookie });
+    expect(me.status).toBe(200);
+    expectSecurityHeaders(me);
+    expect(me.headers.get("cache-control")).toBe("no-store");
+
+    const unauthorized = await t.request("/api/me");
+    expect(unauthorized.status).toBe(401);
+    expectSecurityHeaders(unauthorized);
+    expect(unauthorized.headers.get("cache-control")).toBe("no-store");
+  });
+
   it.each(["GET", "POST", "PUT", "PATCH", "DELETE"])(
     "%s /api/<ไม่มี route> = JSON 404 ไม่ใช่ index.html ของ SPA",
     async (method) => {
@@ -30,6 +65,8 @@ describe.skipIf(!available)("createApp — JSON 404 · access log", () => {
         expect(res.status, `${method} ${path}`).toBe(404);
         expect(res.headers.get("content-type"), `${method} ${path}`).toMatch(/^application\/json/);
         expect(await res.json()).toEqual({ error: "not found" });
+        expectSecurityHeaders(res);
+        expect(res.headers.get("cache-control")).toBe("no-store");
       }
     },
   );
