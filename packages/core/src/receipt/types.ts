@@ -26,6 +26,8 @@ export interface ReceiptData {
   payments: { label: string; bank: string | null; amount: string }[];
   status: "active" | "void";
   voidReason?: string | null;
+  /** ลายน้ำแนวทแยงทับทั้งใบ — ระบบทดสอบ (staging) ใส่ "ไม่ใช่ใบรับซื้อจริง" · production ไม่ส่ง */
+  watermark?: string | null;
 }
 
 /** สำเนาบัตรประชาชน — แยกไฟล์จากใบรับซื้อ สิทธิ์เข้าถึงแคบกว่า (PDPA) */
@@ -36,6 +38,8 @@ export interface IdCardCopyData {
   companyName: string;
   /** URL หรือ data: URI ของรูปบัตร — ส่งให้ Gotenberg เป็น form file แล้วอ้างชื่อไฟล์แบบ relative ได้ */
   photoSrc: string;
+  /** ลายน้ำแนวทแยงแบบเดียวกับ ReceiptData.watermark */
+  watermark?: string | null;
 }
 
 export interface RenderHtmlOptions {

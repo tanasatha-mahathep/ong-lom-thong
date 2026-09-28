@@ -8,25 +8,29 @@ import { type AppEnv, apiError } from "./lib/context";
 import { loggableError } from "./lib/log";
 import { sameOriginOnly } from "./lib/origin";
 import type { Storage } from "./lib/storage";
+import type { ReceiptPdfService } from "./services/receiptPdf";
 import { buyRoutes } from "./routes/buy";
 import { customerRoutes } from "./routes/customers";
 import { goldPriceRoutes } from "./routes/goldPrice";
 import { me } from "./routes/me";
 import { metalRoutes } from "./routes/metals";
 import { reportRoutes } from "./routes/reports";
+import { adminRoutes } from "./routes/admin";
 
 export interface AppDeps {
   db: Db;
   auth: Auth;
   env: Env;
   storage: Storage;
+  /** สร้าง/เก็บ PDF ของบิล — renderer จริง (Gotenberg) ใน index.ts · ตัวปลอมใน test harness */
+  pdf: ReceiptPdfService;
   now?: () => Date;
 }
 
 const health = () => ({ ok: true, time: new Date().toISOString() });
 
 /** ประกอบแอปจาก dependency ที่ส่งเข้ามา — เทสต์เรียก app.request() ได้โดยไม่ต้องเปิดพอร์ต */
-export function createApp({ db, auth, env, storage, now = () => new Date() }: AppDeps) {
+export function createApp({ db, auth, env, storage, pdf, now = () => new Date() }: AppDeps) {
   const app = new Hono<AppEnv>();
   // ก่อนทุก route (รวม SPA ใน index.ts): access log ไม่มี PII · header ความปลอดภัย · API ไม่ cache
   app.use(accessLog(env.NODE_ENV === "test" ? null : (line) => console.log(line)));
@@ -37,6 +41,7 @@ export function createApp({ db, auth, env, storage, now = () => new Date() }: Ap
     c.set("auth", auth);
     c.set("env", env);
     c.set("storage", storage);
+    c.set("pdf", pdf);
     c.set("now", now);
     await next();
   });
@@ -54,6 +59,8 @@ export function createApp({ db, auth, env, storage, now = () => new Date() }: Ap
   api.route("/customers", customerRoutes);
   api.route("/buy", buyRoutes);
   api.route("/reports", reportRoutes);
+  // สาขา · ผู้ใช้ — admin เท่านั้น
+  api.route("/admin", adminRoutes);
 
   app.route("/api", api);
   // notFound ของ sub-app ไม่ถูกใช้ตอน mount — path ใต้ /api ที่ไม่มี route ตอบ JSON 404 ทุก method

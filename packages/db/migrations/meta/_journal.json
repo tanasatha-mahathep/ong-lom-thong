@@ -29,6 +29,13 @@
       "when": 1790607021375,
       "tag": "0003_branch_profile_and_company_snapshot",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790615731633,
+      "tag": "0004_buy_receipt_void_pdf_and_lease",
+      "breakpoints": true
     }
   ]
 }

@@ -139,6 +139,8 @@ export default defineRailway((ctx) => {
       BETTER_AUTH_URL: "https://${{RAILWAY_PUBLIC_DOMAIN}}",
 
       ...COMPANY,
+      // ใบจากระบบทดสอบต้องไม่ดูเหมือนใบรับซื้อจริง — production ไม่ประกาศ (apply แล้วถูกล้าง = ไม่มีลายน้ำ)
+      ...(production ? {} : { RECEIPT_WATERMARK: "ตัวอย่าง — ระบบทดสอบ ไม่ใช่ใบรับซื้อจริง" }),
     },
   });
 
