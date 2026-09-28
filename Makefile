@@ -134,6 +134,9 @@ merge: ## รอ CI ผ่านแล้ว merge แบบ merge commit (PR=�
 	gh pr merge $(PR) --merge --delete-branch
 	git switch dev && git pull --ff-only
 
+# SHA เดียวกันมี run หลายชุด (push ของ dev · testing · staging และ PR promotion) — นับเฉพาะ run ของ branch ต้นทาง
+# ที่มาจาก push หรือ workflow_dispatch (ขั้น sync หลัง release) · ไม่งั้น run ที่ผ่านบน dev หรือบน PR (ไม่มี image/e2e)
+# จะปล่อย testing → staging ทั้งที่ e2e บน testing ตก
 promote: ## promote ทีละขั้นแบบ fast-forward (TO=testing|staging|main · main ต้อง CONFIRM=yes)
 	@case "$(TO)" in testing) from=dev;; staging) from=testing;; main) from=staging;; \
 	*) echo "TO ต้องเป็น testing|staging|main" >&2; exit 1;; esac; \
@@ -142,8 +145,9 @@ promote: ## promote ทีละขั้นแบบ fast-forward (TO=testing|s
 	sha=$$(git rev-parse "origin/$${from}"); \
 	if [ "$$(git rev-parse "origin/$(TO)")" = "$$sha" ]; then echo "$(TO) อยู่ที่ $${sha:0:7} แล้ว"; exit 0; fi; \
 	git merge-base --is-ancestor "origin/$(TO)" "$$sha" || { echo "$(TO) มี commit ที่ $${from} ไม่มี — fast-forward ไม่ได้" >&2; exit 1; }; \
-	ok=$$(gh run list --workflow ci.yml --commit "$$sha" --status success --json databaseId --jq length); \
-	[ "$$ok" != 0 ] || { echo "CI ยังไม่ผ่านบน $${sha:0:7} ($${from})" >&2; exit 1; }; \
+	ok=$$(gh run list --workflow ci.yml --branch "$${from}" --commit "$$sha" --status success --json event \
+	--jq '[.[] | select(.event == "push" or .event == "workflow_dispatch")] | length'); \
+	[ "$$ok" != 0 ] || { echo "CI ของ $${from} ยังไม่ผ่านที่ $${sha:0:7}" >&2; exit 1; }; \
 	gh pr create --base "$(TO)" --head "$${from}" --title "chore(release): promote $${from} to $(TO)" \
 	--body "Promotion `$(TO) ← $${from}` by fast-forward push (same SHAs). Do not use the merge buttons."; \
 	git push origin "$${sha}:refs/heads/$(TO)"; \
