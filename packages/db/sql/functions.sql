@@ -17,7 +17,8 @@ BEGIN
   ON CONFLICT (branch_id, prefix, period)
   DO UPDATE SET last_no = doc_sequence.last_no + 1
   RETURNING last_no INTO v_no;
-  RETURN p_prefix || v_period || '-' || lpad(v_no::text, 4, '0');
+  -- ≥ 10000 ไม่ถูกตัด (lpad ของ Postgres ตัดสตริงที่ยาวกว่าความยาวเป้าหมาย) — migration 0005
+  RETURN p_prefix || v_period || '-' || lpad(v_no::text, greatest(4, length(v_no::text)), '0');
 END
 $$;
 

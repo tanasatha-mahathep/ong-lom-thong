@@ -36,6 +36,13 @@
       "when": 1790615731633,
       "tag": "0004_buy_receipt_void_pdf_and_lease",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790620281426,
+      "tag": "0005_next_doc_no_wide_numbers",
+      "breakpoints": true
     }
   ]
 }
