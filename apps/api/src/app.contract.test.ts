@@ -28,7 +28,7 @@ import { cardFormat, syntheticNationalId, testName } from "./test/synthetic";
  * โดนตรวจทุกข้อข้างล่างทันทีโดยไม่ต้องแก้ไฟล์นี้ — ลืม requireSession · ลืมกัน CSRF · id ผิดรูปแล้ว 500 · error หลุด
  * ร่องรอยภายใน · หลุดเลขบัตร · เงินเป็น float · เปิด CORS · ผู้ใช้ไม่มีสาขาได้ข้อมูล · body ผิดรูปแล้ว 500 = แดง
  * ข้อยกเว้นทุกข้ออยู่ใน allowlist ด้านล่างพร้อมเหตุผล · ช่องโหว่ที่รู้แล้วมี it.fails ของตัวเองหนึ่งข้อต่อ finding
- * (F4 · F7 · F8) — แก้แล้ว it.fails จะแดง: เปลี่ยนเป็น it และลบค่าคงที่ของ finding นั้นออก (F9 · F13 แก้แล้ว — ตรึงเป็น it)
+ * (F7 · F8 · F17) — แก้แล้ว it.fails จะแดง: เปลี่ยนเป็น it และลบค่าคงที่ของ finding นั้นออก (F4 · F9 · F13 แก้แล้ว — ตรึงเป็น it)
  *
  * มาตรฐาน: OWASP ASVS 4.0.3 (V3.3 · V4.1 · V4.2 · V5.1 · V7.4.1 · V8.2.1 · V8.3 · V13.2 · V14.5.3) และ 5.0 ·
  * OWASP API Security Top 10 2023 (API1 · API2 · API3 · API5 · API8 · API9) · RFC 9110 §9.2.1 (safe methods) ·
@@ -62,8 +62,12 @@ const NON_API = new Set([
   "GET /healthz", // liveness probe ของ Railway
 ]);
 
-/** ไม่มีอะไรถูกลบ — ยกเลิก = เอกสารใหม่ (CLAUDE.md กฎ 5 · spec §5) */
-const NO_DELETE_ALLOWED = new Set<string>([]);
+/** ไม่มีอะไรถูกลบ — ยกเลิก = เอกสารใหม่ (CLAUDE.md กฎ 5 · spec §5) · ยกเว้นที่ระบุเหตุผลไว้ (เจ้าของตัดสินใจ) */
+const NO_DELETE_ALLOWED = new Set<string>([
+  // PR #60: ยกเลิกราคาเฉพาะสาขาของวันนี้ → กลับไปใช้ราคากลาง · ไม่ใช่เอกสาร/ไฟล์ (กฎ 5 พูดถึงใบรับซื้อ/PDF)
+  // ลง audit gold_price.clear_branch พร้อมค่าที่ลบ · ใบรับซื้อเก็บ snapshot ราคาของตัวเองอยู่แล้ว — spec §5 ยังไม่มี DELETE
+  "DELETE /api/gold-price/today/branches/:branchId",
+]);
 
 /** endpoint เดียวที่ส่งเลขบัตรเต็มได้ (R13 · spec §5 · CLAUDE.md กฎ 7) */
 const PII_EXCEPTION = "GET /api/customers/:id";
@@ -89,8 +93,8 @@ const NO_STORE_PENDING_F8 = new Set([
   "GET /api/metals",
 ]);
 
-// F4 — ยังไม่มี requireAnyBranch (ผู้ใช้ไม่มีสาขาได้ 200) · sweep ข้ามไว้ ตรวจใน it.fails "F4 — …" แทน · แก้แล้วลบออก
-const NO_BRANCH_GUARD_F4 = new Set(["GET /api/metals", "GET /api/gold-price/today"]);
+// F17 — route ใหม่ของ PR #60 ที่ยังไม่ส่ง Cache-Control: no-store · sweep ข้ามไว้ ตรวจใน it.fails "F17 — …" แทน · แก้แล้วลบออก
+const NO_STORE_PENDING_F17 = new Set(["GET /api/gold-price/today/branches"]);
 
 /** route ที่ต้องเห็นเสมอ — กันชุดเทสต์ผ่านแบบว่างเปล่า (router อ่านไม่ออก = ไม่มีเทสต์ = เขียวหลอก) */
 const KNOWN_ROUTES = [
@@ -439,14 +443,19 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
         PII_EXCEPTION: [PII_EXCEPTION],
         BRANCHLESS_ALLOWED: [...BRANCHLESS_ALLOWED.keys()],
         NO_STORE_PENDING_F8: [...NO_STORE_PENDING_F8],
-        NO_BRANCH_GUARD_F4: [...NO_BRANCH_GUARD_F4],
+        NO_STORE_PENDING_F17: [...NO_STORE_PENDING_F17],
       };
       for (const [name, entries] of Object.entries(lists)) {
         for (const key of entries)
           expect(keys.has(key), `${name} มี "${key}" ซึ่งไม่มี route นี้แล้ว — ลบออก`).toBe(true);
       }
       // ข้อยกเว้นของ GET sweep ต้องเป็น GET ที่ต้อง login จริง — ไม่งั้นข้ามไปเปล่า ๆ
-      for (const key of [PII_EXCEPTION, ...BRANCHLESS_ALLOWED.keys(), ...NO_STORE_PENDING_F8, ...NO_BRANCH_GUARD_F4]) {
+      for (const key of [
+        PII_EXCEPTION,
+        ...BRANCHLESS_ALLOWED.keys(),
+        ...NO_STORE_PENDING_F8,
+        ...NO_STORE_PENDING_F17,
+      ]) {
         expect(
           guardedGets.map((e) => e.key),
           key,
@@ -638,11 +647,11 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
     const responsesOf = (e: Endpoint) => fetched.get(e.key) ?? [];
 
     describe("Cache-Control: no-store (ASVS 4.0.3 V8.2.1 · API8:2023)", () => {
-      for (const e of guardedGets.filter((e) => !NO_STORE_PENDING_F8.has(e.key))) {
+      for (const e of guardedGets.filter((e) => !NO_STORE_PENDING_F8.has(e.key) && !NO_STORE_PENDING_F17.has(e.key))) {
         it(`${e.key} → 2xx พร้อม Cache-Control: no-store`, (ctx) => {
           const ok = responsesOf(e).find((r) => r.status >= 200 && r.status < 300);
           if (!ok) return ctx.skip(`${e.key}: ไม่มีข้อมูลในไฟล์นี้ที่ทำให้ได้ 2xx — ตรวจ header ไม่ได้`);
-          expect(ok.cacheControl, `${e.key} [${ok.path}]`).toMatch(noStore);
+          expect(ok.cacheControl ?? "(ไม่มี Cache-Control)", `${e.key} [${ok.path}]`).toMatch(noStore);
         });
       }
 
@@ -658,6 +667,14 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
           }
         },
       );
+
+      // F17 — PR #60 เพิ่ม GET /api/gold-price/today/branches (ราคาวันนี้ของทุกสาขาที่อ่านได้) โดยไม่ตั้ง no-store — แบบเดียวกับ F8
+      // แก้: ตั้ง header ใน route (หรือ middleware ของ /api หลัง requireSession) แล้วลบออกจาก NO_STORE_PENDING_F17
+      it.fails("F17 — GET /api/gold-price/today/branches ต้องส่ง Cache-Control: no-store", async () => {
+        const res = await hit("/api/gold-price/today/branches", { cookie: cookies.super });
+        expect(res.status).toBe(200);
+        expect(res.headers.get("cache-control") ?? "(ไม่มี Cache-Control)").toMatch(noStore);
+      });
     });
 
     describe("เลขบัตรเต็มออกได้ที่ GET /api/customers/:id เท่านั้น (R13 · CLAUDE.md กฎ 7 · API3:2023)", () => {
@@ -740,7 +757,7 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
   });
 
   describe("ผู้ใช้ที่ไม่มีสาขา — fail-closed (CLAUDE.md กฎ 4 · API5:2023)", () => {
-    for (const e of guardedGets.filter((e) => !hasParams(e.path) && !NO_BRANCH_GUARD_F4.has(e.key))) {
+    for (const e of guardedGets.filter((e) => !hasParams(e.path))) {
       const allowed = BRANCHLESS_ALLOWED.get(e.key);
       const what = allowed ? "200 แต่ไม่มีสาขาใดติดมา (BRANCHLESS_ALLOWED)" : "403/404 หรือรายการว่าง";
       it(`${e.key} → ${what}`, async () => {
@@ -762,36 +779,33 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
       });
     }
 
-    // วันนี้ metals · gold-price มีแค่ requireSession → 200 ทุกตัว และ manager/admin ที่ไม่มีสาขาตั้งราคากลางได้ (เขียน audit)
-    // แก้: เพิ่ม requireAnyBranch ให้ metalRoutes และ goldPriceRoutes แล้วลบออกจาก NO_BRANCH_GUARD_F4
-    it.fails(
-      "F4 — ผู้ใช้ที่ไม่มีสาขาที่เปิดอยู่ (ไม่เคยได้สาขา · สาขาเดียวถูกปิด) ได้ 403 ที่ /api/metals · /api/gold-price/* และตั้งราคาไม่ได้",
-      async () => {
-        const expectNoAccess = async (who: "branchless" | "closed") => {
-          const cookie = cookies[who];
-          const reads: [string, string, unknown][] = [
-            ["GET", "/api/metals", undefined],
-            ["GET", "/api/gold-price/today", undefined],
-            ["POST", "/api/gold-price/quote", { bar_sell: "67850" }],
-          ];
-          for (const [method, path, body] of reads) {
-            await expectApiError(await hit(path, { method, cookie, body }), 403, `${who} ${method} ${path}`);
-          }
-          const before = await sideEffects();
-          const res = await hit("/api/gold-price/today", { method: "PUT", cookie, body: { bar_sell: "67850" } });
-          await expectApiError(res, 403, `${who} PUT /api/gold-price/today`);
-          expect(await sideEffects(), `${who}: ตั้งราคาไม่ได้ต้องไม่มีอะไรถูกเขียน`).toEqual(before);
-        };
-        await expectNoAccess("branchless"); // (a) admin ที่ไม่เคยได้สาขา
-        const { db } = harness();
-        await db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
-        try {
-          await expectNoAccess("closed"); // (b) manager ที่สาขาเดียวของตัวเองถูกปิด
-        } finally {
-          await db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
+    // F4 — แก้แล้วใน dev (PR #60 · fix(api): require an open branch for the gold price and metal routes)
+    // เดิมเป็น it.fails (metals · gold-price มีแค่ requireSession → 200 และ manager/admin ที่ไม่มีสาขาตั้งราคากลางได้)
+    it("F4 (แก้แล้ว) — ผู้ใช้ที่ไม่มีสาขาที่เปิดอยู่ (ไม่เคยได้สาขา · สาขาเดียวถูกปิด) ได้ 403 ที่ /api/metals · /api/gold-price/* และตั้งราคาไม่ได้", async () => {
+      const expectNoAccess = async (who: "branchless" | "closed") => {
+        const cookie = cookies[who];
+        const reads: [string, string, unknown][] = [
+          ["GET", "/api/metals", undefined],
+          ["GET", "/api/gold-price/today", undefined],
+          ["POST", "/api/gold-price/quote", { bar_sell: "67850" }],
+        ];
+        for (const [method, path, body] of reads) {
+          await expectApiError(await hit(path, { method, cookie, body }), 403, `${who} ${method} ${path}`);
         }
-      },
-    );
+        const before = await sideEffects();
+        const res = await hit("/api/gold-price/today", { method: "PUT", cookie, body: { bar_sell: "67850" } });
+        await expectApiError(res, 403, `${who} PUT /api/gold-price/today`);
+        expect(await sideEffects(), `${who}: ตั้งราคาไม่ได้ต้องไม่มีอะไรถูกเขียน`).toEqual(before);
+      };
+      await expectNoAccess("branchless"); // (a) admin ที่ไม่เคยได้สาขา
+      const { db } = harness();
+      await db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
+      try {
+        await expectNoAccess("closed"); // (b) manager ที่สาขาเดียวของตัวเองถูกปิด
+      } finally {
+        await db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
+      }
+    });
   });
 
   describe("input ผิดรูป → 4xx ที่อ่านรู้เรื่อง ไม่ใช่ 5xx (ASVS 4.0.3 V5.1.3 · V5.1.4 · API8:2023)", () => {
