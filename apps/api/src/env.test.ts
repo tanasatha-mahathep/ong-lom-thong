@@ -74,6 +74,21 @@ describe("loadEnv — Gotenberg + หัวใบรับซื้อ", () => {
     );
   });
 
+  it("GOTENBERG_URL ห้ามมี user/password ในตัว (หลุดไปกับ error ของ fetch ได้) · username ตัดช่องว่าง", () => {
+    const message = problem({ ...EXAMPLE, GOTENBERG_URL: "http://ong:TOPSECRET@gotenberg:3000" }) ?? "";
+    expect(message).toContain("GOTENBERG_URL");
+    expect(message).not.toContain("TOPSECRET");
+    expect(loadEnv({ ...EXAMPLE, GOTENBERG_USERNAME: "  ong  " }).GOTENBERG_USERNAME).toBe("ong");
+    expect(problem({ ...EXAMPLE, GOTENBERG_USERNAME: "   " })).toContain("GOTENBERG_USERNAME");
+  });
+
+  it("production: รหัสผ่าน Gotenberg ต้องยาว ≥ 32 ตัวอักษร (เครื่อง dev ไม่บังคับ)", () => {
+    expect(problem({ ...PRODUCTION, GOTENBERG_PASSWORD: "short-but-not-an-example" })).toMatch(
+      /GOTENBERG_PASSWORD: ต้องยาวอย่างน้อย 32/,
+    );
+    expect(problem({ ...EXAMPLE, GOTENBERG_PASSWORD: "short" })).toBeNull();
+  });
+
   it("production ปฏิเสธรหัสผ่าน Gotenberg ตัวอย่าง (เหมือน BETTER_AUTH_SECRET)", () => {
     expect(loadEnv(PRODUCTION).NODE_ENV).toBe("production");
     expect(problem({ ...PRODUCTION, GOTENBERG_PASSWORD: "ongongong" })).toMatch(
