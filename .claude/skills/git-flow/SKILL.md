@@ -9,6 +9,7 @@ description: ขั้นตอน worktree/branch/commit/PR ของ repo ร�
 
 - ทำงานเฉพาะใน worktree ที่ได้รับมอบหมาย (เช่น `../ong-lom-thong-wt/<ชื่อ>` ข้าง repo) — ใช้ absolute path เสมอ
 - **ห้ามแตะ checkout หลักของ repo** (session อื่นอาจใช้อยู่) · ห้าม `git switch` ใน worktree ของคนอื่น · สร้าง worktree ใหม่ด้วย `git worktree add -b <branch> <path> origin/dev` (worktree อัตโนมัติของ Claude Code เริ่มจาก `main` — ห้ามใช้)
+- **ห้ามใช้ `git stash` ทุกรูปแบบ** — stash ใช้ stack เดียวกันทุก worktree และทุก session (28 ก.ย. เอเจนต์หนึ่ง `stash pop` ได้งานของอีกตัวมา) · พักงานด้วย commit ใน branch ตัวเองแทน
 - worktree มี `node_modules` แล้ว · เพิ่ม dependency: `pnpm --filter <pkg> add <dep>@^x` แล้ว commit `pnpm-lock.yaml` ไปกับ commit ที่ใช้ dep นั้น
 - Postgres สำหรับเทสต์: container local (`postgres://ong:ong@localhost:5432/postgres`) — เทสต์สร้าง database ใหม่ต่อไฟล์ รันขนานกับเอเจนต์อื่นได้
 
