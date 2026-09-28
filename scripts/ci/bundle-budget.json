@@ -1,0 +1,18 @@
+{
+  "$comment": "Gzip budget for the web build (apps/web/dist), enforced in CI by scripts/ci/bundle-budget.js at zlib level 6, the level behind the gzip column of the vite build log. Each budget is the measured size plus 25% headroom rounded up to the next 1000 B; raise one only with the reason in the commit body.",
+  "gzipLevel": 6,
+  "headroom": 0.25,
+  "budget": {
+    "totalJsGzipBytes": 271000,
+    "totalCssGzipBytes": 15000,
+    "largestJsChunkGzipBytes": 108000
+  },
+  "measured": {
+    "date": "2026-09-29",
+    "commit": "5520bf9",
+    "totalJsGzipBytes": 216049,
+    "totalCssGzipBytes": 11297,
+    "largestJsChunkGzipBytes": 86275,
+    "largestJsChunk": "assets/vendor-_03OHiyF.js"
+  }
+}

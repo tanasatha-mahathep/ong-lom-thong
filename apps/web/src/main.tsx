@@ -1,28 +1,15 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { RouterProvider, createRouter } from "@tanstack/react-router";
-import React from "react";
-import ReactDOM from "react-dom/client";
-import { routeTree } from "./routeTree.gen";
+import { RouterProvider } from "@tanstack/react-router";
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { createAppRouter } from "@/router";
 import "./styles.css";
 
-const queryClient = new QueryClient();
+const router = createAppRouter();
+const root = document.getElementById("root");
+if (!root) throw new Error("ไม่พบ #root ใน index.html");
 
-const router = createRouter({
-  routeTree,
-  context: { queryClient },
-  defaultPreload: "intent",
-});
-
-declare module "@tanstack/react-router" {
-  interface Register {
-    router: typeof router;
-  }
-}
-
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>
-  </React.StrictMode>,
+createRoot(root).render(
+  <StrictMode>
+    <RouterProvider router={router} />
+  </StrictMode>,
 );
