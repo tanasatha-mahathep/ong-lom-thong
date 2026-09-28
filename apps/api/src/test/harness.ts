@@ -36,7 +36,7 @@ export interface TestUser {
 }
 
 /** database ใหม่ต่อไฟล์เทสต์ — migrate + seed (สาขา 00000/00001/00002 · โลหะ 4 ชนิด) */
-export async function startTestApp() {
+export async function startTestApp(options: { now?: () => Date } = {}) {
   const admin = postgres(BASE_URL, { max: 1, onnotice: () => {} });
   const name = `test_${randomUUID().replaceAll("-", "")}`;
   await admin.unsafe(`CREATE DATABASE ${name}`);
@@ -54,7 +54,7 @@ export async function startTestApp() {
     BETTER_AUTH_URL: ORIGIN,
   });
   const auth = createAuth(db, env);
-  const app = createApp({ db, auth, env });
+  const app = createApp({ db, auth, env, now: options.now });
   const branches = Object.fromEntries((await db.select().from(branch)).map((b) => [b.code, b.id]));
 
   async function createUser(u: TestUser) {
