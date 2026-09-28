@@ -491,6 +491,12 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       BUY_MSG.badNumber,
     ],
     [
+      "น้ำหนักใส่จุลภาค (5,860 ที่ตั้งใจพิมพ์ 5.860)",
+      () => ({ lines: [line("gold", "5,860", "20030")], payments: [] }),
+      "lines.0.weight_g",
+      "น้ำหนักห้ามใส่จุลภาค — เช่น 5.860 หรือ 1250.500",
+    ],
+    [
       "เลขบัตรหลุดลงช่องราคา",
       () => ({ lines: [line("gold", "5.860", ID_A)], payments: [] }),
       "lines.0.amount",

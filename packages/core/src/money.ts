@@ -35,6 +35,16 @@ export function parseDecimal(v: unknown): Decimal | null {
   return new Decimal(s.replace(/,/g, ""));
 }
 
+/**
+ * Strict parse ของตัวเลขที่ต้องไม่มีจุลภาคเลย (น้ำหนัก) — ตัวเลขล้วน มีทศนิยมได้ · null เมื่อไม่ใช่รูปแบบนี้
+ * น้ำหนักไม่รับการคั่นหลักพัน: "5,860" ที่ตั้งใจพิมพ์ 5.860 เคยถูกอ่านเป็น 5,860 กรัม
+ */
+export function parsePlainDecimal(v: unknown): Decimal | null {
+  if (typeof v !== "string") return null;
+  const s = v.trim();
+  return PLAIN_NUMBER.test(s) ? new Decimal(s) : null;
+}
+
 export const halfUp = (v: Decimal, dp: number): Decimal => v.toDecimalPlaces(dp, Decimal.ROUND_HALF_UP);
 export const floorTo = (v: Decimal, dp: number): Decimal => v.toDecimalPlaces(dp, Decimal.ROUND_FLOOR);
 

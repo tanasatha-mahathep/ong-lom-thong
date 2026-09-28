@@ -1,7 +1,7 @@
 import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
 import { ReceiptDataError } from "./errors";
-import { formatMoney, formatWeight, parseDecimal, requireDecimal } from "./money";
+import { formatMoney, formatWeight, parseDecimal, parsePlainDecimal, requireDecimal } from "./money";
 
 describe("parseDecimal — รับเฉพาะตัวเลขธรรมดา หรือคั่นหลักพันถูกต้อง", () => {
   it.each([
@@ -13,7 +13,7 @@ describe("parseDecimal — รับเฉพาะตัวเลขธรร�
     ["  67,850  ", "67850"], // ราคาทองที่ร้านพิมพ์แบบมีคอมมา
     ["67,850.50", "67850.5"],
     ["1,234,567.891", "1234567.891"],
-    ["5,860", "5860"], // คั่นหลักพันถูกต้อง = ห้าพันกว่า (เพดานน้ำหนักต่อแถวยังตรวจต่อใน quoteBuy)
+    ["5,860", "5860"], // เงินคั่นหลักพันได้ — น้ำหนักใช้ parsePlainDecimal (ไม่รับจุลภาค)
   ])("%j → %s", (input, expected) => {
     expect(parseDecimal(input)?.toString()).toBe(expected);
   });
@@ -109,5 +109,23 @@ describe("requireDecimal — ตัวเลขบนเอกสาร: รู�
 
   it.each(["0x10", "1e3", "- 5", "--5", "+5", "20,03"])("ไม่รับ %j → ReceiptDataError", (bad) => {
     expect(() => requireDecimal(bad)).toThrow(ReceiptDataError);
+  });
+});
+
+describe("parsePlainDecimal — น้ำหนัก: ตัวเลขล้วน ไม่มีจุลภาค", () => {
+  it.each([
+    ["5.860", "5.86"],
+    [" 1250.500 ", "1250.5"],
+    ["0", "0"],
+  ])("%j → %s", (v, want) => {
+    expect(parsePlainDecimal(v)?.toString()).toBe(want);
+  });
+
+  it.each(["5,860", "1,250.500", "5,86", "", "-1", "1e3", "0x10", ".5", "abc"])("ปฏิเสธ %j", (v) => {
+    expect(parsePlainDecimal(v)).toBeNull();
+  });
+
+  it.each([5.86, null, undefined])("ไม่ใช่ข้อความ %j → null", (v) => {
+    expect(parsePlainDecimal(v)).toBeNull();
   });
 });

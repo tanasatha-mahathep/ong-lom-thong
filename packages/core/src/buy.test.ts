@@ -124,7 +124,9 @@ describe("quoteBuy — ตรวจตัวเลขต่อแถว (R3)", (
     ["", BUY_MSG.badNumber],
     ["0x10", BUY_MSG.badNumber],
     ["1e3", BUY_MSG.badNumber],
-    ["5,86", BUY_MSG.badNumber], // คอมมาแทนจุดทศนิยม — ไม่เดา
+    ["5,86", BUY_MSG.weightComma], // คอมมาแทนจุดทศนิยม — ไม่เดา
+    ["5,860", BUY_MSG.weightComma], // เคยถูกอ่านเป็น 5,860 กรัม (ราคา/กรัม 3.42)
+    ["1,250.500", BUY_MSG.weightComma], // น้ำหนักไม่คั่นหลักพัน
   ])("น้ำหนัก %j → %s", (w, msg) => {
     const r = quoteBuy(base({ lines: [{ metalId: GOLD, weightG: w, amount: "100" }] }));
     expect(messages(r)).toContain(msg);
@@ -140,15 +142,15 @@ describe("quoteBuy — ตรวจตัวเลขต่อแถว (R3)", (
     const r = quoteBuy(base({ lines: [{ metalId: GOLD, weightG: "1", amount: a }] }));
     expect(messages(r)).toContain(msg);
   });
-  it("คั่นหลักพันถูกต้องรับได้: ราคา 20,030 · น้ำหนัก 5,860 = 5,860 กรัม (ไม่ใช่ 5.860)", () => {
+  it("เงินคั่นหลักพันได้ (ราคา 20,030 · ชำระ 20,030) · น้ำหนักเป็นตัวเลขล้วน 1250.500", () => {
     const r = quoteBuy(
       base({
-        lines: [{ metalId: GOLD, weightG: "5,860", amount: "20,030" }],
+        lines: [{ metalId: GOLD, weightG: "1250.500", amount: "20,030" }],
         payments: [{ method: "cash", amount: "20,030" }],
       }),
     );
     expect(r.ok).toBe(true);
-    expect(r.lines[0]).toMatchObject({ weightG: "5860.000", amount: "20030.00" });
+    expect(r.lines[0]).toMatchObject({ weightG: "1250.500", amount: "20030.00" });
   });
 
   it("แถวที่ผิดไม่ถูกนับรวมยอด แต่แถวที่ถูกยังนับ", () => {
