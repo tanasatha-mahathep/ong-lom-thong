@@ -1,4 +1,6 @@
 import "@testing-library/jest-dom/vitest";
+// i18n ตัวเดียวกับแอป (ภาษาไทย) — component ที่ใช้ useTranslation ได้ข้อความจริงแม้ render เดี่ยว ๆ
+import "@/i18n";
 import { cleanup, configure } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, vi } from "vitest";

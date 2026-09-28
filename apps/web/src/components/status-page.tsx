@@ -1,5 +1,6 @@
 import { type ErrorComponentProps, Link, useRouter } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { errorMessage } from "@/lib/api";
 
@@ -15,13 +16,14 @@ function StatusPage({ title, description, action }: { title: string; description
 
 /** URL ที่ไม่มีหน้า */
 export function NotFoundPage() {
+  const { t } = useTranslation();
   return (
     <StatusPage
-      title="ไม่พบหน้านี้"
-      description="ลิงก์อาจพิมพ์ผิด หรือหน้านี้ถูกย้ายไปแล้ว"
+      title={t("status.notFoundTitle")}
+      description={t("status.notFoundBody")}
       action={
         <Button asChild>
-          <Link to="/">กลับหน้าแรก</Link>
+          <Link to="/">{t("status.backHome")}</Link>
         </Button>
       }
     />
@@ -30,10 +32,11 @@ export function NotFoundPage() {
 
 /** error ที่หลุดจาก loader/component — ลองโหลดใหม่ได้ */
 export function ErrorPage({ error, reset }: ErrorComponentProps) {
+  const { t } = useTranslation();
   const router = useRouter();
   return (
     <StatusPage
-      title="เกิดข้อผิดพลาด"
+      title={t("status.errorTitle")}
       description={errorMessage(error)}
       action={
         <Button
@@ -42,7 +45,7 @@ export function ErrorPage({ error, reset }: ErrorComponentProps) {
             void router.invalidate();
           }}
         >
-          ลองใหม่
+          {t("retry")}
         </Button>
       }
     />

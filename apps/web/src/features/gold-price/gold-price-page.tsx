@@ -1,6 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, Info, LoaderCircle, TriangleAlert } from "lucide-react";
 import { type FormEvent, useId, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -30,11 +31,12 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useBusinessDate } from "@/hooks/use-business-date";
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
-import { ApiError } from "@/lib/api";
+import { ApiError, errorMessage } from "@/lib/api";
+import i18next from "@/i18n";
 import { normalizeDecimalInput } from "@/lib/decimal-input";
 import { formatBoardPrice, formatInteger, formatThaiDate } from "@/lib/format";
 import { canSetGoldPrice } from "@/lib/nav";
-import { GOLD_PRICE_SOURCE_LABEL, goldPriceTodayQueryOptions, useMe } from "@/lib/queries";
+import { goldPriceTodayQueryOptions, useMe } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { barSellErrorOf, goldPriceQuoteQueryOptions, saveGoldPrice, typoWarningOf } from "./queries";
 
@@ -49,10 +51,11 @@ interface Prices {
 
 /** /settings/gold-price — ตั้งราคากลางของวัน (manager · admin) และราคาที่สาขาปัจจุบันใช้อยู่ */
 export function GoldPricePage() {
+  const { t } = useTranslation("goldPrice");
   const { role } = useMe();
   return (
     <>
-      <PageHeader description="กรอกราคาทองแท่งขายออกค่าเดียวทุกเช้า ระบบคำนวณราคารับซื้อให้" />
+      <PageHeader description={t("description")} />
       <div className="grid items-start gap-4 md:gap-6 lg:grid-cols-2">
         {canSetGoldPrice(role) ? <SetPriceCard /> : <ManagersOnlyNotice />}
         <TodayPriceCard />
@@ -63,21 +66,22 @@ export function GoldPricePage() {
 
 /** role อื่นเปิด URL นี้ตรง ๆ — เมนูซ่อนไว้แล้ว และ API ตอบ 403 อยู่ดี */
 function ManagersOnlyNotice() {
+  const { t } = useTranslation("goldPrice");
   return (
     <Alert role="note">
       <Info aria-hidden="true" />
-      <AlertTitle>ตั้งราคาทองได้เฉพาะผู้จัดการและผู้ดูแลระบบ</AlertTitle>
-      <AlertDescription>ราคาผิดหรือยังไม่ได้ตั้ง แจ้งผู้จัดการของสาขา</AlertDescription>
+      <AlertTitle>{t("managersOnly.title")}</AlertTitle>
+      <AlertDescription>{t("managersOnly.body")}</AlertDescription>
     </Alert>
   );
 }
 
-/** error ที่ไม่ได้ชี้ช่อง — ข้อความไทยของเราเอง ไม่แสดงข้อความดิบของเซิร์ฟเวอร์ (อาจเป็นภาษาอังกฤษ) */
-function requestErrorMessage(error: unknown, action: "บันทึกราคา" | "คำนวณราคา"): string {
-  if (error instanceof ApiError && error.status === 0) return "ติดต่อเซิร์ฟเวอร์ไม่ได้ ตรวจการเชื่อมต่อแล้วลองใหม่";
-  if (error instanceof ApiError && error.status === 403)
-    return "บัญชีนี้ตั้งราคาทองไม่ได้ — เฉพาะผู้จัดการและผู้ดูแลระบบ";
-  return `${action}ไม่สำเร็จ ลองใหม่อีกครั้ง`;
+/** error ที่ไม่ได้ชี้ช่อง — ข้อความของเราเอง ไม่แสดงข้อความดิบของเซิร์ฟเวอร์ (อาจเป็นภาษาอังกฤษ) */
+function requestErrorMessage(error: unknown, action: "save" | "quote"): string {
+  const t = i18next.getFixedT(null, "goldPrice");
+  if (error instanceof ApiError && error.status === 0) return errorMessage(error);
+  if (error instanceof ApiError && error.status === 403) return t("errors.forbidden");
+  return t(action === "save" ? "errors.saveFailed" : "errors.quoteFailed");
 }
 
 /**
@@ -85,6 +89,7 @@ function requestErrorMessage(error: unknown, action: "บันทึกรา�
  * ด่านกันพิมพ์ผิด (409) → AlertDialog โฟกัสที่ "กลับไปแก้ไข" ก่อน — Enter ซ้ำโดยไม่ได้อ่านจึงไม่ผ่านด่าน
  */
 function SetPriceCard() {
+  const { t } = useTranslation("goldPrice");
   const ids = useId();
   const queryClient = useQueryClient();
   const today = useBusinessDate();
@@ -101,8 +106,8 @@ function SetPriceCard() {
     mutationFn: saveGoldPrice,
     onSuccess: async (saved) => {
       setText("");
-      toast.success("บันทึกราคาทองวันนี้แล้ว", {
-        description: `ทองแท่งขายออก ${formatBoardPrice(saved.bar_sell)} บาท`,
+      toast.success(t("saved"), {
+        description: t("savedDescription", { price: formatBoardPrice(saved.bar_sell) }),
       });
       // หัวหน้า · หน้าแรก · การ์ดราคาวันนี้ อ่านราคาของสาขาปัจจุบันใหม่ (สาขาที่มีราคาเฉพาะสาขาไม่เปลี่ยนตามราคากลาง)
       await queryClient.invalidateQueries({ queryKey: goldPriceTodayQueryOptions.queryKey });
@@ -125,10 +130,10 @@ function SetPriceCard() {
   const preview = idle ? undefined : quote.data;
   const quoteError = idle || busy ? null : quote.error;
 
-  const fieldError = missing ? "กรอกราคาทองแท่งขายออก" : (barSellErrorOf(save.error) ?? barSellErrorOf(quoteError));
+  const fieldError = missing ? t("errors.missing") : (barSellErrorOf(save.error) ?? barSellErrorOf(quoteError));
   const formError =
     save.error && !barSellErrorOf(save.error) && !typoWarningOf(save.error)
-      ? requestErrorMessage(save.error, "บันทึกราคา")
+      ? requestErrorMessage(save.error, "save")
       : null;
 
   const inputId = `${ids}-bar-sell`;
@@ -152,11 +157,9 @@ function SetPriceCard() {
     <Card>
       <CardHeader>
         <CardTitle>
-          <h2 id={`${ids}-title`}>ราคากลางวันนี้</h2>
+          <h2 id={`${ids}-title`}>{t("central.title")}</h2>
         </CardTitle>
-        <CardDescription>
-          {formatThaiDate(today, "long")} · ทุกสาขาใช้ราคานี้ ยกเว้นสาขาที่ตั้งราคาเฉพาะสาขาไว้
-        </CardDescription>
+        <CardDescription>{t("central.description", { date: formatThaiDate(today, "long") })}</CardDescription>
       </CardHeader>
       <form noValidate onSubmit={submit} aria-labelledby={`${ids}-title`} className="grid gap-6">
         <CardContent className="grid gap-6">
@@ -167,7 +170,7 @@ function SetPriceCard() {
             </Alert>
           )}
           <Field data-invalid={!!fieldError}>
-            <FieldLabel htmlFor={inputId}>ราคาทองแท่งขายออก (บาท)</FieldLabel>
+            <FieldLabel htmlFor={inputId}>{t("barSellLabel")}</FieldLabel>
             <Input
               ref={inputRef}
               id={inputId}
@@ -188,7 +191,7 @@ function SetPriceCard() {
               aria-describedby={describedBy}
               className="h-12 text-2xl font-semibold tabular-nums md:text-2xl"
             />
-            <FieldDescription id={hintId}>พิมพ์ตัวเลข เช่น 67850 แล้วกด Enter เพื่อบันทึก</FieldDescription>
+            <FieldDescription id={hintId}>{t("barSellHint")}</FieldDescription>
             <FieldError id={errorId}>{fieldError}</FieldError>
           </Field>
           <QuotePreview
@@ -203,7 +206,7 @@ function SetPriceCard() {
         <CardFooter>
           <Button type="submit" disabled={save.isPending}>
             {save.isPending && <LoaderCircle className="animate-spin" aria-hidden="true" />}
-            {save.isPending ? "กำลังบันทึก…" : "บันทึกราคา"}
+            {save.isPending ? t("saving", { ns: "common" }) : t("save")}
           </Button>
         </CardFooter>
       </form>
@@ -222,18 +225,18 @@ function SetPriceCard() {
           }}
         >
           <AlertDialogHeader>
-            <AlertDialogTitle>ยืนยันราคาทองวันนี้</AlertDialogTitle>
+            <AlertDialogTitle>{t("typo.title")}</AlertDialogTitle>
             <AlertDialogDescription>{typo?.warning}</AlertDialogDescription>
           </AlertDialogHeader>
-          <p className="text-sm">ถ้าราคาถูกต้องให้กดยืนยัน ถ้าพิมพ์ผิดให้กลับไปแก้ไข</p>
+          <p className="text-sm">{t("typo.body")}</p>
           <AlertDialogFooter>
-            <AlertDialogCancel>กลับไปแก้ไข</AlertDialogCancel>
+            <AlertDialogCancel>{t("typo.back")}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 if (typo) save.mutate({ bar_sell: typo.barSell, confirm_typo: true });
               }}
             >
-              ยืนยันบันทึกราคานี้
+              {t("typo.confirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -258,24 +261,25 @@ function QuotePreview({
   warning: string | undefined;
   error: Error | null;
 }) {
+  const { t } = useTranslation("goldPrice");
   return (
     <section aria-labelledby={titleId} className="grid gap-3 rounded-lg border p-4">
       <h3 id={titleId} className="text-sm font-medium">
-        ราคาที่จะบันทึก
+        {t("preview.title")}
       </h3>
       <div role="status" aria-busy={busy} className="grid gap-3">
         {idle ? (
-          <p className="text-sm text-muted-foreground">กรอกราคาทองแท่งขายออก แล้วระบบจะคำนวณราคารับซื้อให้</p>
+          <p className="text-sm text-muted-foreground">{t("preview.idle")}</p>
         ) : (
           <>
             <PriceList prices={prices} muted={busy} />
             {busy ? (
               <p className="flex items-center gap-2 text-sm text-muted-foreground">
                 <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
-                กำลังคำนวณ…
+                {t("preview.busy")}
               </p>
             ) : error ? (
-              <p className="text-sm text-destructive">{requestErrorMessage(error, "คำนวณราคา")}</p>
+              <p className="text-sm text-destructive">{requestErrorMessage(error, "quote")}</p>
             ) : (
               warning && (
                 <p className="flex gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
@@ -293,6 +297,7 @@ function QuotePreview({
 
 /** ราคาของสาขาปัจจุบันจาก GET /gold-price/today — ราคาเฉพาะสาขามาก่อนราคากลาง (null = ยังไม่ได้ตั้ง) */
 function TodayPriceCard() {
+  const { t } = useTranslation("goldPrice");
   const titleId = useId();
   const me = useMe();
   const today = useBusinessDate();
@@ -303,14 +308,14 @@ function TodayPriceCard() {
       <Card>
         <CardHeader>
           <CardTitle>
-            <h2 id={titleId}>ราคาที่สาขานี้ใช้เปิดบิลวันนี้</h2>
+            <h2 id={titleId}>{t("todayCard.title")}</h2>
           </CardTitle>
           <CardDescription>
-            {me.branch?.name ?? "ยังไม่ได้เลือกสาขา"} · {formatThaiDate(price?.date ?? today, "long")}
+            {me.branch?.name ?? t("noBranch", { ns: "common" })} · {formatThaiDate(price?.date ?? today, "long")}
           </CardDescription>
           {price && (
             <CardAction>
-              <Badge variant="outline">{GOLD_PRICE_SOURCE_LABEL[price.source]}</Badge>
+              <Badge variant="outline">{t(`goldPrice.source.${price.source}`, { ns: "common" })}</Badge>
             </CardAction>
           )}
         </CardHeader>
@@ -320,9 +325,11 @@ function TodayPriceCard() {
               <Skeleton className="h-24 w-full" />
             ) : (
               <div className="grid justify-items-start gap-2">
-                <p className="text-destructive">โหลดราคาทองวันนี้ไม่ได้</p>
+                <p className="text-destructive">
+                  {t("loadFailed", { ns: "common", what: t("goldPrice.today", { ns: "common" }) })}
+                </p>
                 <Button variant="outline" size="sm" onClick={() => void refetch()}>
-                  ลองใหม่
+                  {t("retry", { ns: "common" })}
                 </Button>
               </div>
             )
@@ -330,13 +337,11 @@ function TodayPriceCard() {
             <>
               <PriceList prices={price} />
               {price.source === "branch" && (
-                <p className="text-sm text-muted-foreground">
-                  สาขานี้ตั้งราคาเฉพาะสาขาไว้ — ราคากลางที่บันทึกจากหน้านี้ไม่เปลี่ยนราคาของสาขานี้
-                </p>
+                <p className="text-sm text-muted-foreground">{t("todayCard.branchOverride")}</p>
               )}
             </>
           ) : (
-            <p>ยังไม่ได้ตั้งราคาทองวันนี้ — เปิดบิลซื้อเข้าไม่ได้จนกว่าจะตั้งราคา</p>
+            <p>{t("todayCard.notSet")}</p>
           )}
         </CardContent>
       </Card>
@@ -345,11 +350,12 @@ function TodayPriceCard() {
 }
 
 function PriceList({ prices, muted = false }: { prices: Prices | undefined; muted?: boolean }) {
+  const { t } = useTranslation();
   return (
     <dl className="grid gap-2">
-      <PriceRow label="ทองแท่งขายออก" value={formatBoardPrice(prices?.bar_sell)} muted={muted} />
-      <PriceRow label="ทองแท่งรับซื้อ" value={formatBoardPrice(prices?.bar_buy)} muted={muted} />
-      <PriceRow label="ทองรูปพรรณรับซื้อ" value={formatInteger(prices?.jewelry_buy)} muted={muted} />
+      <PriceRow label={t("goldPrice.barSell")} value={formatBoardPrice(prices?.bar_sell)} muted={muted} />
+      <PriceRow label={t("goldPrice.barBuy")} value={formatBoardPrice(prices?.bar_buy)} muted={muted} />
+      <PriceRow label={t("goldPrice.jewelryBuy")} value={formatInteger(prices?.jewelry_buy)} muted={muted} />
     </dl>
   );
 }

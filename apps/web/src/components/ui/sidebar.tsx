@@ -13,6 +13,7 @@ import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useTranslation } from "react-i18next";
 
 const SIDEBAR_COOKIE_NAME = "sidebar_state";
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
@@ -146,6 +147,7 @@ function Sidebar({
   variant?: "sidebar" | "floating" | "inset";
   collapsible?: "offcanvas" | "icon" | "none";
 }) {
+  const { t } = useTranslation("shell");
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
 
   if (collapsible === "none") {
@@ -193,8 +195,8 @@ function Sidebar({
           }}
         >
           <SheetHeader className="sr-only">
-            <SheetTitle>เมนู</SheetTitle>
-            <SheetDescription>เมนูหลักของระบบ</SheetDescription>
+            <SheetTitle>{t("sheetTitle")}</SheetTitle>
+            <SheetDescription>{t("sheetDescription")}</SheetDescription>
           </SheetHeader>
           <div className="flex h-full w-full flex-col">{children}</div>
         </SheetContent>
@@ -251,6 +253,7 @@ function Sidebar({
 }
 
 function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<typeof Button>) {
+  const { t } = useTranslation("shell");
   const { toggleSidebar } = useSidebar();
 
   return (
@@ -267,22 +270,23 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       {...props}
     >
       <PanelLeftIcon />
-      <span className="sr-only">แสดง/ซ่อนเมนู</span>
+      <span className="sr-only">{t("toggleSidebar")}</span>
     </Button>
   );
 }
 
 function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
+  const { t } = useTranslation("shell");
   const { toggleSidebar } = useSidebar();
 
   return (
     <button
       data-sidebar="rail"
       data-slot="sidebar-rail"
-      aria-label="แสดง/ซ่อนเมนู"
+      aria-label={t("toggleSidebar")}
       tabIndex={-1}
       onClick={toggleSidebar}
-      title="แสดง/ซ่อนเมนู"
+      title={t("toggleSidebar")}
       className={cn(
         "absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-sidebar-border sm:flex",
         "in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize",

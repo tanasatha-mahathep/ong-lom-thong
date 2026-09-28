@@ -1,19 +1,22 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { Outlet, createRootRouteWithContext } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { Toaster } from "@/components/ui/sonner";
 import { usePageMeta } from "@/hooks/use-page-meta";
-import { SHOP_NAME } from "@/lib/shop";
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   component: RootLayout,
 });
 
 function RootLayout() {
+  const { t } = useTranslation("shell");
   const { title } = usePageMeta();
+  const shopName = t("shopName", { ns: "common" });
+  const pageTitle = title ? t(`routes.${title}`) : undefined;
   useEffect(() => {
-    document.title = title ? `${title} · ${SHOP_NAME}` : SHOP_NAME;
-  }, [title]);
+    document.title = pageTitle ? `${pageTitle} · ${shopName}` : shopName;
+  }, [pageTitle, shopName]);
 
   return (
     <>

@@ -11,13 +11,18 @@ import {
   UserCog,
   Users,
 } from "lucide-react";
+import type shellLocale from "@/i18n/locales/th";
 import type { Role } from "@/lib/queries";
 import type { FileRouteTypes } from "@/routeTree.gen";
 
 export type AppPath = FileRouteTypes["to"];
 
+/** key ใน namespace `shell` — ข้อความอยู่ใน src/i18n/locales/th.ts */
+type NavKey = keyof (typeof shellLocale)["shell"]["nav"];
+type GroupKey = keyof (typeof shellLocale)["shell"]["groups"];
+
 export interface NavItem {
-  title: string;
+  title: NavKey;
   to: AppPath;
   icon: LucideIcon;
   /** role ที่เห็นเมนูนี้ — ไม่ระบุ = ทุก role */
@@ -26,7 +31,7 @@ export interface NavItem {
 
 export interface NavGroup {
   /** ไม่มีชื่อ = กลุ่มเมนูหลักด้านบน */
-  title?: string;
+  title?: GroupKey;
   items: readonly NavItem[];
 }
 
@@ -44,26 +49,26 @@ const ADMINS: readonly Role[] = ["admin"];
 const NAV: readonly NavGroup[] = [
   {
     items: [
-      { title: "หน้าแรก", to: "/", icon: House },
-      { title: "ซื้อเข้า", to: "/buy", icon: HandCoins, roles: BILL_CREATORS },
-      { title: "ค้นบิล", to: "/bills", icon: ReceiptText },
-      { title: "ลูกค้า", to: "/customers", icon: Users },
+      { title: "home", to: "/", icon: House },
+      { title: "buy", to: "/buy", icon: HandCoins, roles: BILL_CREATORS },
+      { title: "bills", to: "/bills", icon: ReceiptText },
+      { title: "customers", to: "/customers", icon: Users },
     ],
   },
   {
-    title: "รายงาน",
+    title: "reports",
     items: [
-      { title: "ยอดซื้อ", to: "/reports/purchase", icon: ChartColumn, roles: REPORT_READERS },
-      { title: "สต็อก", to: "/reports/stock", icon: Boxes, roles: REPORT_READERS },
-      { title: "ส่งบัญชีรายเดือน", to: "/reports/export", icon: FileArchive, roles: EXPORTERS },
+      { title: "purchase", to: "/reports/purchase", icon: ChartColumn, roles: REPORT_READERS },
+      { title: "stock", to: "/reports/stock", icon: Boxes, roles: REPORT_READERS },
+      { title: "export", to: "/reports/export", icon: FileArchive, roles: EXPORTERS },
     ],
   },
   {
-    title: "ตั้งค่า",
+    title: "settings",
     items: [
-      { title: "ราคาทองวันนี้", to: "/settings/gold-price", icon: Coins, roles: GOLD_PRICE_SETTERS },
-      { title: "สาขา", to: "/settings/branches", icon: Store, roles: ADMINS },
-      { title: "ผู้ใช้", to: "/settings/users", icon: UserCog, roles: ADMINS },
+      { title: "goldPrice", to: "/settings/gold-price", icon: Coins, roles: GOLD_PRICE_SETTERS },
+      { title: "branches", to: "/settings/branches", icon: Store, roles: ADMINS },
+      { title: "users", to: "/settings/users", icon: UserCog, roles: ADMINS },
     ],
   },
 ];

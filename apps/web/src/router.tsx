@@ -1,6 +1,9 @@
 import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type RouterHistory, createRouter } from "@tanstack/react-router";
+import { I18nextProvider } from "react-i18next";
 import { ErrorPage, NotFoundPage } from "@/components/status-page";
+import i18n from "@/i18n";
+import type shellLocale from "@/i18n/locales/th";
 import { ApiError } from "@/lib/api";
 import type { AppPath } from "@/lib/nav";
 import { routeTree } from "@/routeTree.gen";
@@ -10,9 +13,12 @@ interface RequestMeta extends Record<string, unknown> {
   handlesUnauthorized?: boolean;
 }
 
+/** ชื่อหน้า = key ใน `shell.routes` (src/i18n/locales/th.ts) — แปลตอนแสดง */
+export type RouteTitle = keyof (typeof shellLocale)["shell"]["routes"];
+
 /** ขั้นก่อนหน้าใน breadcrumb — ไม่มี `to` = ชื่อกลุ่มเมนู ไม่ใช่ลิงก์ */
 export interface Crumb {
-  title: string;
+  title: RouteTitle;
   to?: AppPath;
 }
 
@@ -28,8 +34,8 @@ declare module "@tanstack/react-router" {
     router: AppRouter;
   }
   interface StaticDataRouteOption {
-    /** ชื่อหน้าภาษาไทย — หัวหน้า · breadcrumb · document.title */
-    title?: string;
+    /** key ของชื่อหน้าใน `shell.routes` — หัวหน้า · breadcrumb · document.title */
+    title?: RouteTitle;
     /** ขั้นก่อนหน้าใน breadcrumb (ไม่รวมหน้านี้) */
     crumbs?: readonly Crumb[];
   }
@@ -65,7 +71,12 @@ export function createAppRouter({ history }: { history?: RouterHistory } = {}) {
     scrollRestoration: true,
     defaultNotFoundComponent: NotFoundPage,
     defaultErrorComponent: ErrorPage,
-    Wrap: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>,
+    // ครอบทั้ง router (รวม error/not-found ของ root) — i18n + TanStack Query
+    Wrap: ({ children }) => (
+      <I18nextProvider i18n={i18n}>
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      </I18nextProvider>
+    ),
   });
 
   /** session หมดอายุระหว่างใช้งาน → ไปหน้า login แล้วล้าง cache (ข้อมูลลูกค้า/บิลไม่ค้างในเครื่อง) */

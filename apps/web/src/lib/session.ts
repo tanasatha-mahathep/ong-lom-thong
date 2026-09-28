@@ -1,4 +1,5 @@
 import { z } from "zod";
+import i18next from "@/i18n";
 import { ApiError, apiFetch, errorMessage } from "@/lib/api";
 import { BranchSchema } from "@/lib/queries";
 
@@ -23,17 +24,18 @@ export async function switchBranch(branchId: string) {
   return branch;
 }
 
-/** ข้อความภาษาไทยของ error ตอน login (เรียงตามสิ่งที่พนักงานเจอบ่อย) */
+/** ข้อความของ error ตอน login (เรียงตามสิ่งที่พนักงานเจอบ่อย) — ข้อความอยู่ใน auth.errors */
 export function signInErrorMessage(e: unknown, origin: string): string {
-  if (!(e instanceof ApiError)) return "เข้าสู่ระบบไม่สำเร็จ ลองใหม่อีกครั้ง";
+  const t = i18next.getFixedT(null, "auth");
+  if (!(e instanceof ApiError)) return t("errors.failed");
   if (e.status === 0 || e.status === 429) return errorMessage(e);
   // บัญชีถูกปิด — databaseHooks ของ api ไม่ยอมสร้าง session
-  if (e.code === "FAILED_TO_CREATE_SESSION") return "บัญชีนี้ถูกปิดใช้งาน ติดต่อผู้ดูแลระบบ";
-  if (e.status === 400 || e.status === 401) return "อีเมลหรือรหัสผ่านไม่ถูกต้อง";
+  if (e.code === "FAILED_TO_CREATE_SESSION") return t("errors.disabled");
+  if (e.status === 400 || e.status === 401) return t("errors.invalidCredentials");
   if (e.status === 403 && (e.error === "forbidden origin" || e.code?.includes("ORIGIN"))) {
-    return `เซิร์ฟเวอร์ปฏิเสธ origin ของหน้านี้ — ตั้ง BETTER_AUTH_URL ของ api ให้ตรงกับ ${origin} แล้วเปิด api ใหม่`;
+    return t("errors.forbiddenOrigin", { origin });
   }
-  return "เข้าสู่ระบบไม่สำเร็จ ลองใหม่อีกครั้ง";
+  return t("errors.failed");
 }
 
 /** อักขระควบคุม (tab/ขึ้นบรรทัด ฯลฯ) และ backslash — browser ตัดทิ้งหรือแปลงเป็น "/" จน path กลายเป็นโดเมนอื่นได้ */

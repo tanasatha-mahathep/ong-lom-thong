@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import type { ComponentProps } from "react";
+import { useTranslation } from "react-i18next";
 import { BrandMark } from "@/components/brand-mark";
 import { NavMain } from "@/components/nav-main";
 import { NavUser } from "@/components/nav-user";
@@ -13,16 +14,16 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { useMe } from "@/lib/queries";
-import { SHOP_NAME } from "@/lib/shop";
 
 /** sidebar ของ dashboard-01 — หัว = ชื่อร้าน + สาขาปัจจุบัน · เมนูตาม role · ท้าย = เมนูผู้ใช้ */
 export function AppSidebar(props: ComponentProps<typeof Sidebar>) {
+  const { t } = useTranslation("shell");
   const me = useMe();
 
   return (
     <Sidebar collapsible="offcanvas" {...props}>
       {/* landmark ของทั้งแถบ — หัว (ชื่อร้าน/สาขา) และเมนูผู้ใช้ไม่หลุดอยู่นอก landmark */}
-      <aside aria-label="แถบเมนู" className="flex h-full min-h-0 w-full flex-col">
+      <aside aria-label={t("sidebar")} className="flex h-full min-h-0 w-full flex-col">
         <SidebarHeader>
           <SidebarMenu>
             <SidebarMenuItem>
@@ -30,9 +31,9 @@ export function AppSidebar(props: ComponentProps<typeof Sidebar>) {
                 <Link to="/">
                   <BrandMark className="size-8!" />
                   <span className="grid flex-1 text-left leading-snug">
-                    <span className="truncate font-semibold">{SHOP_NAME}</span>
+                    <span className="truncate font-semibold">{t("shopName", { ns: "common" })}</span>
                     <span className="truncate text-xs text-muted-foreground">
-                      {me.branch ? me.branch.name : "ยังไม่ได้เลือกสาขา"}
+                      {me.branch ? me.branch.name : t("noBranch", { ns: "common" })}
                     </span>
                   </span>
                 </Link>

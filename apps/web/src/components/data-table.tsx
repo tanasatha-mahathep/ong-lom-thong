@@ -1,6 +1,7 @@
 import { type RowData, type TableOptions, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { MouseEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -56,8 +57,9 @@ export function DataTable<TData>({
   isLoading = false,
   onRowClick,
   getRowId,
-  emptyMessage = "ไม่พบข้อมูล",
+  emptyMessage,
 }: DataTableProps<TData>) {
+  const { t } = useTranslation("shell");
   // แอปไม่ได้ใช้ React Compiler — คำเตือนเรื่อง memo ของ TanStack Table v8 ไม่เกี่ยว
   // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
@@ -102,7 +104,7 @@ export function DataTable<TData>({
             ) : rows.length === 0 ? (
               <TableRow className="hover:bg-transparent">
                 <TableCell colSpan={columnCount} className="h-24 text-center text-muted-foreground">
-                  {emptyMessage}
+                  {emptyMessage ?? t("table.empty")}
                 </TableCell>
               </TableRow>
             ) : (
@@ -131,16 +133,16 @@ export function DataTable<TData>({
         </Table>
       </div>
       {(page > 1 || hasMore) && (
-        <nav aria-label="เปลี่ยนหน้า" className="flex items-center justify-end gap-2">
+        <nav aria-label={t("table.pager")} className="flex items-center justify-end gap-2">
           <span className="text-sm text-muted-foreground tabular-nums" aria-live="polite">
-            หน้า {page}
+            {t("table.page", { page })}
           </span>
           <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
             <ChevronLeft aria-hidden="true" />
-            ก่อนหน้า
+            {t("table.previous")}
           </Button>
           <Button variant="outline" size="sm" disabled={!hasMore} onClick={() => onPageChange(page + 1)}>
-            ถัดไป
+            {t("table.next")}
             <ChevronRight aria-hidden="true" />
           </Button>
         </nav>
