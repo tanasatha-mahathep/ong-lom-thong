@@ -1,0 +1,23 @@
+# zizmor — GitHub Actions security audit (https://docs.zizmor.sh/configuration/)
+# Loaded explicitly by scripts/ci/ci-lint.sh (make ci-lint) with --config, so it applies to every input.
+#
+# Suppress a finding only after triage — never to turn a real vulnerability green. ci-lint.sh enforces:
+#   - no `disable:` — a disabled audit vanishes even from zizmor's "suppressed" count
+#   - unpinned-uses stays hash-pin for every pattern (no ref-pin, no any)
+#   - every ignore names a line, <workflow>.yml:<line>[:<column>] (the narrowest scope zizmor offers — it
+#     has no job scope), under a comment with the reason and an expiry at most 90 days ahead:
+#       rules:
+#         <audit-id>:
+#           ignore:
+#             # <why it is not exploitable here> · <who decided> · until YYYY-MM-DD
+#             - ci.yml:123
+#   - composite actions can only be ignored inline: `# zizmor: ignore[<audit-id>] <reason> · until YYYY-MM-DD`
+# When the workflow changes, the line moves, the finding comes back and has to be triaged again.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # every action — actions/* and github/* included — pinned to a full commit SHA with a `# vX.Y.Z`
+        # comment (repo rule · OpenSSF Scorecard Pinned-Dependencies). zizmor's implicit default since
+        # v1.20.0, written out so that neither a new default nor an added pattern can loosen it.
+        "*": hash-pin
