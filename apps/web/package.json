@@ -13,6 +13,7 @@
   "scripts": {
     "build": "vite build && tsc --noEmit",
     "dev": "vite",
+    "e2e": "playwright test",
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
@@ -33,6 +34,8 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/vite": "^4",
     "@tanstack/router-plugin": "^1",
     "@testing-library/dom": "^10.4.2",
