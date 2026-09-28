@@ -26,8 +26,11 @@ function expectSecurityHeaders(headers: Record<string, string>, where: string): 
   expect.soft(headers["cross-origin-resource-policy"], `${where}: CORP`).toBe("same-origin");
   // HSTS ≥ 1 year. The app sends it on every response, over plain http://localhost too: browsers ignore HSTS
   // received over an insecure connection (RFC 6797 §8.1) and apply it once Railway serves the site over HTTPS.
-  const maxAge = /(?:^|;)\s*max-age=(\d+)/i.exec(headers["strict-transport-security"] ?? "")?.[1];
+  const hsts = headers["strict-transport-security"] ?? "";
+  const maxAge = /(?:^|;)\s*max-age=(\d+)/i.exec(hsts)?.[1];
   expect.soft(Number(maxAge ?? 0), `${where}: Strict-Transport-Security max-age`).toBeGreaterThanOrEqual(ONE_YEAR);
+  // ASVS 5.0 3.4.1 (L2): subdomains too — the api sets it since PR #68
+  expect.soft(/(?:^|;)\s*includesubdomains\s*(?:;|$)/i.test(hsts), `${where}: HSTS includeSubDomains`).toBe(true);
 
   const csp = parseCsp(headers["content-security-policy"]);
   expect.soft(csp.get("default-src"), `${where}: CSP default-src`).toEqual(["'self'"]);
@@ -35,7 +38,8 @@ function expectSecurityHeaders(headers: Record<string, string>, where: string): 
   const scripts = csp.get("script-src") ?? csp.get("default-src") ?? [];
   expect.soft(scripts, `${where}: CSP scripts only from 'self'`).toEqual(["'self'"]);
   expect.soft(csp.get("object-src"), `${where}: CSP object-src`).toEqual(["'none'"]);
-  expect.soft(csp.get("base-uri"), `${where}: CSP base-uri`).toEqual(["'self'"]);
+  // ASVS 5.0 3.4.3: the SPA has no <base>, so nothing may set one (PR #68)
+  expect.soft(csp.get("base-uri"), `${where}: CSP base-uri`).toEqual(["'none'"]);
   expect.soft(csp.get("frame-ancestors"), `${where}: CSP frame-ancestors`).toEqual(["'none'"]);
   expect.soft(csp.get("form-action"), `${where}: CSP form-action`).toEqual(["'self'"]);
 }
@@ -49,6 +53,13 @@ test.describe("security headers and caching (ASVS V14.4 · spec §10)", () => {
       expect(res.headers()["content-type"], path).toContain("text/html");
       expect.soft(res.headers()["cache-control"], `${path}: Cache-Control`).toBe("no-cache");
       expectSecurityHeaders(res.headers(), path);
+      // documents only: powerful features the counter never needs stay off (the ID photo comes by paste or upload)
+      const policy = res.headers()["permissions-policy"] ?? "";
+      for (const feature of ["camera", "microphone", "geolocation", "payment"]) {
+        expect
+          .soft(policy, `${path}: Permissions-Policy ${feature}=()`)
+          .toMatch(new RegExp(`(?:^|,)\\s*${feature}=\\(\\)`));
+      }
     }
     const hsts = (await site.get("/")).headers()["strict-transport-security"] ?? "(none)";
     test.info().annotations.push({ type: "Strict-Transport-Security", description: hsts });
