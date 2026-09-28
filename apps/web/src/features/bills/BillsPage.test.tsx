@@ -153,6 +153,22 @@ describe("หน้าค้นบิล — ช่องค้นหา", { tim
     await waitFor(() => expect(router.state.location.search).toEqual({}));
   });
 
+  it("เลขบัตรประชาชนเต็ม 13 หลัก: ค้นได้ตามปกติแต่ไม่ลงใน URL (nit)", async () => {
+    const { api, user, router } = openBills();
+    await waitForRows();
+
+    await user.type(searchBox(), "1234567890123");
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: "1234567890123" }));
+    expect(router.state.location.search).toEqual({});
+    expect(searchBox()).toHaveValue("1234567890123");
+
+    // คำค้นปกติทับคำค้นที่เป็นเลขบัตรได้ตามเดิม (ไม่ค้างอยู่นอก URL ตลอดไป)
+    await user.clear(searchBox());
+    await user.type(searchBox(), "สมชาย{Enter}");
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: "สมชาย" }));
+    expect(router.state.location.search).toEqual({ q: "สมชาย" });
+  });
+
   it("400 ที่ชี้ช่องคำค้น แสดงใต้ช่องนั้น ไม่ใช่กล่องแจ้งรวม", async () => {
     const { user } = openBills({
       list: ({ path }) =>

@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
-import { type KeyboardEvent, useEffect, useId, useMemo, useRef } from "react";
+import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { DataTable } from "@/components/data-table";
 import { PageHeader } from "@/components/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -25,6 +25,7 @@ import {
   MAX_QUERY_LENGTH,
   MIN_QUERY_LENGTH,
   cleanQuery,
+  looksLikeNationalId,
   parseDateFilter,
   toListParams,
 } from "./search";
@@ -74,8 +75,11 @@ export function BillsPage() {
   const me = useMe();
   const search = route.useSearch();
   const navigate = route.useNavigate();
+  // เลขบัตรประชาชนเต็ม 13 หลักที่พิมพ์ค้น: ใช้ค้นได้แต่ไม่เก็บลง URL (ต่างจากตัวกรองอื่นที่อยู่ใน URL ทั้งหมด)
+  const [sensitiveQuery, setSensitiveQuery] = useState<string | undefined>(undefined);
+  const effectiveSearch = sensitiveQuery === undefined ? search : { ...search, q: sensitiveQuery };
   // ค้างผลของตัวกรองก่อนหน้าไว้ระหว่างโหลด ตารางไม่กระพริบ — ยอดรวมขึ้น "กำลังค้นหา…" แทนยอดเก่า
-  const list = useQuery({ ...buyListQuery(toListParams(search)), placeholderData: keepPreviousData });
+  const list = useQuery({ ...buyListQuery(toListParams(effectiveSearch)), placeholderData: keepPreviousData });
 
   const showBranchFilter = me.branches.length > 1;
   const columns = useMemo(
@@ -84,9 +88,20 @@ export function BillsPage() {
   );
 
   // replace: ปุ่มย้อนกลับของ browser ออกจากหน้านี้ ไม่ไล่ย้อนตัวกรองทีละขั้น
-  const applyFilters = (patch: FilterPatch) =>
+  // ตัวกรองทางปกติทุกตัวรวมถึงคำค้นที่ไม่ใช่เลขบัตร ทับคำค้นที่พิมพ์เข้ามาก่อนหน้าเสมอ
+  const applyFilters = (patch: FilterPatch) => {
+    setSensitiveQuery(undefined);
     void navigate({ search: (prev) => withFilters(prev, patch), replace: true });
-  const clearFilters = () => void navigate({ search: {}, replace: true });
+  };
+  const clearFilters = () => {
+    setSensitiveQuery(undefined);
+    void navigate({ search: {}, replace: true });
+  };
+  // เลขบัตรประชาชนเต็ม 13 หลัก: เก็บไว้ในหน้านี้เท่านั้น ล้างเลขหน้าใน URL เหมือนตัวกรองอื่นเปลี่ยน
+  const applySensitiveQuery = (q: string) => {
+    setSensitiveQuery(q);
+    void navigate({ search: (prev) => ({ ...prev, page: undefined }), replace: true });
+  };
   const goToPage = (page: number) =>
     void navigate({ search: (prev) => ({ ...prev, page: page > 1 ? page : undefined }), replace: true });
 
@@ -100,6 +115,7 @@ export function BillsPage() {
         branches={showBranchFilter ? me.branches : null}
         problem={problem}
         onApply={applyFilters}
+        onSensitiveQuery={applySensitiveQuery}
         onClear={clearFilters}
       />
       {list.error && !problem && (
@@ -140,11 +156,13 @@ interface BillFiltersProps {
   /** 400 ของ API ที่ชี้ช่องค้น/วันที่ */
   problem: FieldProblem | undefined;
   onApply: (patch: FilterPatch) => void;
+  /** คำค้นเป็นเลขบัตรประชาชนเต็ม 13 หลัก — ค้นได้แต่ไม่ผ่าน onApply (ไม่ลง URL) */
+  onSensitiveQuery: (q: string) => void;
   onClear: () => void;
 }
 
 /** การ์ดตัวกรอง — ลำดับ DOM = ลำดับ Tab: คำค้น → วันที่ → โลหะ → สาขา → ช่วงวันที่สำเร็จรูป → ล้าง */
-function BillFilters({ search, branches, problem, onApply, onClear }: BillFiltersProps) {
+function BillFilters({ search, branches, problem, onApply, onSensitiveQuery, onClear }: BillFiltersProps) {
   const { t } = useTranslation("bills");
   const id = useId();
   const today = useBusinessDate();
@@ -158,12 +176,19 @@ function BillFilters({ search, branches, problem, onApply, onClear }: BillFilter
   // ออกจากหน้าก่อนครบเวลาหน่วง (เช่น กดเปิดบิล) — คำค้นที่ค้างต้องไม่พากลับมาหน้านี้
   useEffect(() => () => clearTimeout(timer.current), []);
 
-  /** ส่งคำค้นเข้า URL — 1 ตัวอักษรไม่ส่ง (ช่องแสดงคำแนะนำ) · ช่องว่าง = เลิกกรอง */
+  /**
+   * ส่งคำค้นเข้า URL — 1 ตัวอักษรไม่ส่ง (ช่องแสดงคำแนะนำ) · ช่องว่าง = เลิกกรอง
+   * เลขบัตรประชาชนเต็ม 13 หลัก: ค้นเหมือนกันแต่ไม่ผ่าน onApply เพื่อไม่ให้เลขบัตรเต็มไปอยู่ใน URL
+   */
   const commitQuery = (text: string) => {
     clearTimeout(timer.current);
     const q = cleanQuery(text);
     if (q.length > 0 && q.length < MIN_QUERY_LENGTH) return;
     query.commit(q);
+    if (looksLikeNationalId(q)) {
+      onSensitiveQuery(q);
+      return;
+    }
     onApply({ q: q || undefined });
   };
 
