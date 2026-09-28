@@ -16,10 +16,10 @@ environment → branch: `dev` → `dev` · `testing` → `testing` · `staging` 
 
 ## สถานะ (28 ก.ย. 2569)
 
-| environment  | สถานะ                                              | URL                                          |
-| ------------ | -------------------------------------------------- | -------------------------------------------- |
-| `staging`    | api · gotenberg · Postgres online · bucket `files` | https://ong-lom-thong-staging.up.railway.app |
-| `production` | ว่าง — ยังไม่ apply                                | —                                            |
+| environment  | สถานะ                                                                                  | URL                                          |
+| ------------ | -------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `staging`    | api · gotenberg · Postgres online · bucket `files`                                     | https://ong-lom-thong-staging.up.railway.app |
+| `production` | api · gotenberg · Postgres online · bucket `files` (แยก key จาก staging) · ยังไม่ seed | https://ong-lom-thong.up.railway.app         |
 
 staging สร้างจาก dashboard ก่อนมี IaC: rename bucket `bundled-taco` → `files` และ service `ong-lom-thong` → `api` ให้ IaC รับไปแก้ในที่ (ไม่มีการลบ)
 ล้างแล้ว 28 ก.ย.: volume `postgres-volume` และ `postgres-volume-GJW5` (detached · ถูกตั้งลบถาวร 29 ก.ย. — กู้ได้ก่อนนั้น) · service `@ong/web` `@ong/api` ไม่มีแล้ว
@@ -77,5 +77,11 @@ export `RAILWAY_SET_*` ค่าใหม่แล้ว `pnpm railway:apply` �
 
 ## production
 
-`railway link --environment production` แล้วทำขั้น 4–5 ด้วยค่าลับชุดใหม่ (ค่า sealed ไม่ถูกคัดลอกข้าม environment)
-production ไม่ seed อัตโนมัติ — seed เองหลังได้รหัสสาขา 5 หลักจริง (`railway ssh --service api -- node dist/seed.js`)
+ตั้งแล้ว 28 ก.ย. — `railway link --environment production` แล้วทำขั้น 4–5 ด้วยค่าลับชุดใหม่ (ค่า sealed ไม่ถูกคัดลอกข้าม environment)
+
+เรื่องที่เจอตอนตั้ง production (แก้แล้ว แต่ต้องรู้ไว้):
+
+- **IaC สร้าง bucket ใน environment ที่สองไม่ได้** — apply ขึ้น ✓ แต่ไม่มี bucket · แก้ด้วย API `environmentPatchCommit` ใส่ `buckets.<bucket id> = { region: "sin", isCreated: true }` แล้ว plan กลับมา up to date
+- **Postgres ของ production ใช้ volume ชื่อ `postgres-volume` ซ้ำกับ instance ใน staging ที่ถูกตั้งลบ** (29 ก.ย.) · API แสดงว่าตั้งลบเฉพาะ instance ของ staging แต่เอกสารไม่ยืนยัน → **เจ้าของบัญชีกด restore ในอีเมล "volume deleted" ของ `postgres-volume`** กันไว้ก่อน
+- ค่าที่ไม่ได้ประกาศใน `railway.ts` จะถูกล้างตอน apply (เช่น pre-deploy timeout) — ประกาศทุกค่าที่ต้องการไว้ในไฟล์
+  production ไม่ seed อัตโนมัติ — seed เองหลังได้รหัสสาขา 5 หลักจริง (`railway ssh --service api -- node dist/seed.js`)
