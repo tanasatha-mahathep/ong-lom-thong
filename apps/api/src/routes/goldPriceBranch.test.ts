@@ -1,4 +1,4 @@
-import { auditLog, branch, customer, goldPrice, metal } from "@ong/db";
+import { auditLog, branch, customer, goldPrice, metal, user } from "@ong/db";
 import { and, eq, isNull } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TestApp, databaseAvailable, startTestApp } from "../test/harness";
@@ -40,6 +40,7 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
       { who: "acct", role: "accounting" as const, branch: "00000", viewAll: true },
       { who: "staff1", branch: "00001" },
       { who: "staff2", branch: "00002" },
+      { who: "multi", branch: "00001", allow: ["00002"] }, // สาขาหลัก 00001 + อนุญาต 00002
       { who: "nobranch", role: "manager" as const },
     ];
     for (const a of accounts) {
@@ -100,16 +101,29 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
     expect(await overrides()).toHaveLength(1);
   });
 
-  it("manager สาขาอื่น / สาขาไม่มีจริง / uuid ผิดรูป / ไม่มีสาขา = 404 เหมือนกัน (ไม่บอกว่ามีอยู่)", async () => {
+  it("manager สาขาอื่น / สาขาไม่มีจริง / uuid ผิดรูป = 404 เหมือนกัน (ไม่บอกว่ามีอยู่)", async () => {
     for (const res of [
       await put("mgr0", b1, { bar_sell: "70100" }),
       await del("mgr0", b1),
       await put("mgr1", NO_UUID, { bar_sell: "70100" }),
       await put("mgr1", "not-a-uuid", { bar_sell: "70100" }),
-      await put("nobranch", b0, { bar_sell: "70100" }),
     ]) {
       expect(res.status).toBe(404);
       expect(await res.json()).toEqual({ error: "not found" });
+    }
+    expect(await overrides()).toHaveLength(1);
+  });
+
+  it("ไม่มีสาขาที่เปิดอยู่เลย = 403 ทุก endpoint ราคาทอง (requireAnyBranch · fail-closed)", async () => {
+    for (const res of [
+      await t.request("/api/gold-price/today/branches", { cookie: cookies.nobranch }),
+      await today("nobranch"),
+      await quote({ bar_sell: "70100", branch_id: b0 }, "nobranch"),
+      await put("nobranch", b0, { bar_sell: "70100" }),
+      await del("nobranch", b0),
+    ]) {
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: "forbidden" });
     }
     expect(await overrides()).toHaveLength(1);
   });
@@ -150,7 +164,7 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
     expect(central).toMatchObject({ barSell: "67900.00", barBuy: "67700.00" });
   });
 
-  it("GET /today/branches: ทุกสาขาที่อ่านได้ พร้อมที่มา · manager เห็นเฉพาะสาขาตัวเอง · ไม่มีสาขา = []", async () => {
+  it("GET /today/branches: ทุกสาขาที่อ่านได้ พร้อมที่มา · manager เห็นเฉพาะสาขาตัวเอง", async () => {
     expect(await list("admin")).toEqual([
       {
         branch: { id: b0, code: "00000", name: "สำนักงานใหญ่ (สาขา 1)" },
@@ -176,7 +190,6 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
     ]);
     expect((await list("mgr0")).map((r) => r.branch.code)).toEqual(["00000"]);
     expect((await list("staff1")).map((r) => [r.branch.code, r.source])).toEqual([["00001", "branch"]]);
-    expect(await list("nobranch")).toEqual([]);
   });
 
   it("ด่านพิมพ์ผิดเทียบราคาที่สาขาใช้จริงเมื่อวาน — ของสาขาก่อน ไม่มีจึงราคากลาง (quote = บันทึก)", async () => {
@@ -299,7 +312,7 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
     expect(await (await today("mgr0")).json()).toMatchObject({ bar_sell: "67950.00", source: "central" });
   });
 
-  it("สาขาที่ปิดแล้ว: ตั้ง/ลบไม่ได้แม้ admin (404) · ไม่อยู่ในรายการ · ผู้ใช้สาขานั้นไม่เห็นราคาเฉพาะสาขา", async () => {
+  it("สาขาที่ปิดแล้ว: ตั้ง/ลบไม่ได้แม้ admin (404) · ไม่อยู่ในรายการ · ผู้ใช้ที่เหลือแต่สาขานั้น = 403", async () => {
     // 00002 มีราคาเฉพาะสาขาจากเทสต์ด่านพิมพ์ผิด (70,100)
     expect(await (await today("staff2")).json()).toMatchObject({ bar_sell: "70100.00", source: "branch" });
     await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
@@ -307,11 +320,37 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
       expect((await put("admin", b2, { bar_sell: "70000" })).status).toBe(404);
       expect((await del("admin", b2)).status).toBe(404);
       expect((await list("admin")).map((r) => r.branch.code)).toEqual(["00000", "00001"]);
-      expect(await (await today("staff2")).json()).toMatchObject({ bar_sell: "67950.00", source: "central" });
+      expect((await today("staff2")).status).toBe(403);
     } finally {
       await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
     }
     expect(await (await today("staff2")).json()).toMatchObject({ bar_sell: "70100.00", source: "branch" });
+  });
+
+  it("GET /today: สาขาปัจจุบันถูกถอนสิทธิ์หรือถูกปิด (ยังมีสาขาอื่น) = ราคากลาง ไม่ใช่ราคาของสาขานั้น", async () => {
+    // multi ทำงานอยู่ที่ 00002 ซึ่งมีราคาเฉพาะสาขา 70,100 (จากเทสต์ด่านพิมพ์ผิด)
+    expect((await t.request("/api/me/branch", { cookie: cookies.multi, body: { branch_id: b2 } })).status).toBe(200);
+    expect(await (await today("multi")).json()).toMatchObject({ bar_sell: "70100.00", source: "branch" });
+
+    await t.db
+      .update(user)
+      .set({ allowedBranchIds: [] })
+      .where(eq(user.id, ids.multi ?? ""));
+    try {
+      expect(await (await today("multi")).json()).toMatchObject({ bar_sell: "67950.00", source: "central" });
+    } finally {
+      await t.db
+        .update(user)
+        .set({ allowedBranchIds: [b2] })
+        .where(eq(user.id, ids.multi ?? ""));
+    }
+    await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
+    try {
+      expect(await (await today("multi")).json()).toMatchObject({ bar_sell: "67950.00", source: "central" });
+    } finally {
+      await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
+    }
+    expect(await (await today("multi")).json()).toMatchObject({ bar_sell: "70100.00", source: "branch" });
   });
 
   it("วันที่ยังไม่ตั้งราคาใดเลย = source null ทุกสาขา · ตั้งราคาสาขาได้แม้ยังไม่มีราคากลาง", async () => {

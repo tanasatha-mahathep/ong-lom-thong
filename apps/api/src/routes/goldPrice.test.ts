@@ -1,4 +1,4 @@
-import { auditLog, goldPrice, goldPriceSetting } from "@ong/db";
+import { auditLog, branch, goldPrice, goldPriceSetting } from "@ong/db";
 import { and, eq, isNull } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TestApp, databaseAvailable, startTestApp } from "../test/harness";
@@ -17,7 +17,11 @@ describe.skipIf(!available)("ราคาทองวันนี้ (R7 · R8 �
     await t.createUser({ email: "manager@ong.test", password: PW, role: "manager", branch: "00000" });
     await t.createUser({ email: "staff@ong.test", password: PW, branch: "00000" });
     await t.createUser({ email: "staff2@ong.test", password: PW, branch: "00001" });
-    for (const who of ["manager", "staff", "staff2"]) cookies[who] = await t.login(`${who}@ong.test`, PW);
+    await t.createUser({ email: "nobranch@ong.test", password: PW, role: "manager" });
+    await t.createUser({ email: "mgr2@ong.test", password: PW, role: "manager", branch: "00002" });
+    for (const who of ["manager", "staff", "staff2", "nobranch", "mgr2"]) {
+      cookies[who] = await t.login(`${who}@ong.test`, PW);
+    }
   });
   afterAll(async () => {
     await t?.close();
@@ -34,6 +38,25 @@ describe.skipIf(!available)("ราคาทองวันนี้ (R7 · R8 �
     const rows = (await res.json()) as { code: string; name_th: string; unit: string; assessment_enabled: boolean }[];
     expect(rows.map((m) => m.code)).toEqual(["gold", "nak", "silver", "platinum"]);
     expect(rows[0]).toMatchObject({ name_th: "ทอง", unit: "g", assessment_enabled: false });
+  });
+
+  it("ไม่มีสาขาที่เปิดอยู่ (ไม่ผูกสาขา / สาขาถูกปิดหมด) = 403 ทั้งราคาทองและโลหะ (fail-closed)", async () => {
+    // app.request อาจคืน Response ตรง ๆ (ไม่ใช่ Promise) — await ทีละตัว
+    const endpoints = async (who: string) => [
+      await t.request("/api/metals", { cookie: cookies[who] }),
+      await today(who),
+      await t.request("/api/gold-price/quote", { cookie: cookies[who], body: { bar_sell: "67850" } }),
+      await put(who, { bar_sell: "67850" }),
+    ];
+    for (const res of await endpoints("nobranch")) expect(res.status).toBe(403);
+    await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
+    try {
+      for (const res of await endpoints("mgr2")) expect(res.status).toBe(403);
+    } finally {
+      await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
+    }
+    expect(await t.db.select().from(goldPrice)).toEqual([]);
+    expect((await t.request("/api/metals", { cookie: cookies.mgr2 })).status).toBe(200);
   });
 
   it("ยังไม่ตั้งราคา = 404 พร้อมข้อความ R7", async () => {

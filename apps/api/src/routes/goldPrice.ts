@@ -1,7 +1,7 @@
 import { businessDate } from "@ong/core";
 import { type Context, Hono } from "hono";
 import { z } from "zod";
-import { type AppEnv, apiError, requireRole, requireSession } from "../lib/context";
+import { type AppEnv, apiError, requireAnyBranch, requireRole, requireSession } from "../lib/context";
 import { type BranchRef, currentBranch, forUser } from "../lib/scope";
 import {
   GoldPriceInputError,
@@ -53,8 +53,9 @@ async function writableBranch(c: Context<AppEnv>): Promise<BranchRef | null> {
   return readable.find((b) => b.id === c.req.param("branchId")) ?? null;
 }
 
+// ต้องมีสิทธิ์อย่างน้อยหนึ่งสาขาที่เปิดอยู่ (fail-closed) — บัญชีที่ไม่มีสาขา/สาขาถูกปิดหมด = 403 ทุก endpoint
 export const goldPriceRoutes = new Hono<AppEnv>()
-  .use(requireSession)
+  .use(requireSession, requireAnyBranch)
   // ราคาที่สาขาปัจจุบันใช้วันนี้ — สาขาที่ไม่อยู่ในสิทธิ์แล้ว (ถูกถอน/ปิด) ไม่นับ → ราคากลาง (fail-closed)
   .get("/today", async (c) => {
     const date = businessDate(c.var.now());
