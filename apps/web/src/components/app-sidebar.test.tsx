@@ -174,8 +174,7 @@ describe("sidebar ของแอป", () => {
     await waitFor(() => expect(screen.getByRole("menuitemradio", { name: /สำนักงานใหญ่/ })).toHaveFocus());
     await user.keyboard("{ArrowDown}{Enter}");
 
-    // sonner วาด toast ซ้ำชั่วครู่ระหว่างเข้า — รอจนเหลืออันเดียว
-    await waitFor(() => expect(screen.getByText("สลับสาขาแล้ว — สาขา 2")).toBeInTheDocument());
+    expect(await screen.findByText("สลับสาขาแล้ว — สาขา 2")).toBeInTheDocument();
     expect(api.callsTo("POST", "/api/me/branch").map((c) => c.body)).toEqual([{ branch_id: BRANCH_2.id }]);
     // invalidate ทุก query → ถามผู้ใช้และราคาทองใหม่
     expect(api.callsTo("GET", "/api/me").length).toBeGreaterThanOrEqual(2);
