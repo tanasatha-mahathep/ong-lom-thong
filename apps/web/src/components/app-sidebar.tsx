@@ -21,29 +21,32 @@ export function AppSidebar(props: ComponentProps<typeof Sidebar>) {
 
   return (
     <Sidebar collapsible="offcanvas" {...props}>
-      <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton size="lg" asChild>
-              <Link to="/">
-                <BrandMark className="size-8!" />
-                <span className="grid flex-1 text-left leading-snug">
-                  <span className="truncate font-semibold">{SHOP_NAME}</span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {me.branch ? me.branch.name : "ยังไม่ได้เลือกสาขา"}
+      {/* landmark ของทั้งแถบ — หัว (ชื่อร้าน/สาขา) และเมนูผู้ใช้ไม่หลุดอยู่นอก landmark */}
+      <aside aria-label="แถบเมนู" className="flex h-full min-h-0 w-full flex-col">
+        <SidebarHeader>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton size="lg" asChild>
+                <Link to="/">
+                  <BrandMark className="size-8!" />
+                  <span className="grid flex-1 text-left leading-snug">
+                    <span className="truncate font-semibold">{SHOP_NAME}</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {me.branch ? me.branch.name : "ยังไม่ได้เลือกสาขา"}
+                    </span>
                   </span>
-                </span>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarHeader>
-      <SidebarContent>
-        <NavMain role={me.role} />
-      </SidebarContent>
-      <SidebarFooter>
-        <NavUser me={me} />
-      </SidebarFooter>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarHeader>
+        <SidebarContent>
+          <NavMain role={me.role} />
+        </SidebarContent>
+        <SidebarFooter>
+          <NavUser me={me} />
+        </SidebarFooter>
+      </aside>
     </Sidebar>
   );
 }

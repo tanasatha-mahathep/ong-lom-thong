@@ -1,9 +1,9 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { BRANCH_2, BRANCH_HQ, GOLD_PRICE, fakeApi, json, makeMe, renderApp } from "@/test/app";
 import { navFor } from "@/lib/nav";
-import type { Role } from "@/lib/queries";
+import type { Me, Role } from "@/lib/queries";
 
 const titles = (role: Role) => navFor(role).flatMap((group) => group.items.map((item) => item.title));
 
@@ -37,10 +37,10 @@ describe("เมนูตาม role (spec §10)", () => {
   });
 });
 
-function renderShell(role: Role, branches = [BRANCH_HQ]) {
+function renderShell(role: Role, branches = [BRANCH_HQ], me: Me = makeMe(role, branches)) {
   let signedIn = true;
   const api = fakeApi({
-    "GET /api/me": () => (signedIn ? json(makeMe(role, branches)) : json({ error: "unauthorized" }, 401)),
+    "GET /api/me": () => (signedIn ? json(me) : json({ error: "unauthorized" }, 401)),
     "GET /api/gold-price/today": () => json(GOLD_PRICE),
     "POST /api/me/branch": () => json({ branch: BRANCH_2 }),
     "POST /api/auth/sign-out": () => {
@@ -56,6 +56,10 @@ describe("sidebar ของแอป", () => {
   it("ฝ่ายบัญชีไม่มีปุ่ม/เมนูซื้อเข้า แต่มีส่งบัญชีรายเดือน", async () => {
     renderShell("accounting");
     const nav = await screen.findByRole("navigation", { name: "เมนูหลัก" });
+    // ทั้งแถบ (หัว · เมนู · เมนูผู้ใช้) อยู่ใน landmark เดียว
+    const sidebar = screen.getByRole("complementary", { name: "แถบเมนู" });
+    expect(sidebar).toContainElement(nav);
+    expect(sidebar).toContainElement(screen.getByRole("button", { name: /ทดสอบ accounting/ }));
 
     expect(within(nav).queryByRole("link", { name: "ซื้อเข้า" })).not.toBeInTheDocument();
     expect(within(nav).getByRole("link", { name: "ส่งบัญชีรายเดือน" })).toHaveAttribute("href", "/reports/export");
@@ -115,6 +119,55 @@ describe("sidebar ของแอป", () => {
     expect(router.state.location.pathname).toBe("/login");
   });
 
+  it("ยังไม่มีสาขาปัจจุบัน (สาขาหลักถูกปิด) → เมนูผู้ใช้มีสลับสาขาแม้มีสิทธิ์สาขาเดียว", async () => {
+    const { api } = renderShell("staff", [BRANCH_2], { ...makeMe("staff", [BRANCH_2]), branch: null });
+    const user = userEvent.setup();
+    (await screen.findByRole("button", { name: /ทดสอบ staff/ })).focus();
+    expect(screen.getByText("สาขาปัจจุบัน").parentElement).toHaveTextContent("ยังไม่ได้เลือกสาขา");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "สลับสาขา" })).toHaveFocus());
+    await user.keyboard("{ArrowRight}");
+    await waitFor(() => expect(screen.getByRole("menuitemradio", { name: /สาขา 2/ })).toHaveFocus());
+    await user.keyboard("{Enter}");
+
+    await waitFor(() =>
+      expect(api.callsTo("POST", "/api/me/branch").map((c) => c.body)).toEqual([{ branch_id: BRANCH_2.id }]),
+    );
+  });
+
+  it("สลับสาขา → ข้อมูลของสาขาเดิมหายทันที ไม่ค้างใต้หัวสาขาใหม่ระหว่างโหลด", async () => {
+    let current = BRANCH_HQ;
+    let releasePrice = () => {};
+    const newPrice = new Promise<void>((resolve) => (releasePrice = resolve));
+    fakeApi({
+      "GET /api/me": () => json({ ...makeMe("manager", [BRANCH_HQ, BRANCH_2]), branch: current }),
+      "GET /api/gold-price/today": async () => {
+        if (current.id === BRANCH_HQ.id) return json(GOLD_PRICE);
+        await newPrice;
+        return json({ ...GOLD_PRICE, bar_sell: "68000.00" });
+      },
+      "POST /api/me/branch": () => {
+        current = BRANCH_2;
+        return json({ branch: BRANCH_2 });
+      },
+    });
+    renderApp("/");
+    const user = userEvent.setup();
+    expect(await screen.findByText("67,850.00")).toBeInTheDocument();
+    (await screen.findByRole("button", { name: /ทดสอบ manager/ })).focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "สลับสาขา" })).toHaveFocus());
+    await user.keyboard("{ArrowRight}");
+    await waitFor(() => expect(screen.getByRole("menuitemradio", { name: /สำนักงานใหญ่/ })).toHaveFocus());
+    await user.keyboard("{ArrowDown}{Enter}");
+
+    // หัวเป็นสาขาใหม่แล้ว แต่ราคาของสาขาเดิมต้องไม่ค้างอยู่ระหว่างรอราคาใหม่
+    await waitFor(() => expect(screen.getByText("สาขาปัจจุบัน").parentElement).toHaveTextContent(BRANCH_2.name));
+    expect(screen.queryByText("67,850.00")).not.toBeInTheDocument();
+    releasePrice();
+    expect(await screen.findByText("68,000.00")).toBeInTheDocument();
+  });
+
   it("หลายสาขา → สลับสาขาจากเมนูผู้ใช้ด้วยคีย์บอร์ด แล้วโหลดข้อมูลใหม่", async () => {
     const { api } = renderShell("manager", [BRANCH_HQ, BRANCH_2]);
     const user = userEvent.setup();
@@ -130,5 +183,36 @@ describe("sidebar ของแอป", () => {
     expect(api.callsTo("POST", "/api/me/branch").map((c) => c.body)).toEqual([{ branch_id: BRANCH_2.id }]);
     // invalidate ทุก query → ถามผู้ใช้และราคาทองใหม่
     expect(api.callsTo("GET", "/api/me").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("เมนูบนมือถือ (sheet)", () => {
+  it("เปิดแล้วโฟกัสเมนูแรก · เลือกหน้าแล้วปิดเองและคืนโฟกัสให้ปุ่มเมนู", async () => {
+    // จอแคบกว่า md
+    vi.stubGlobal("matchMedia", (media: string) => ({
+      matches: true,
+      media,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    }));
+    const { router } = renderShell("accounting");
+    const user = userEvent.setup();
+    const trigger = await screen.findByRole("button", { name: "แสดง/ซ่อนเมนู" });
+    await user.click(trigger);
+
+    const sheet = await screen.findByRole("dialog", { name: "เมนู" });
+    await waitFor(() => expect(within(sheet).getByRole("link", { name: "หน้าแรก" })).toHaveFocus());
+
+    within(sheet).getByRole("link", { name: "ลูกค้า" }).focus();
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "ลูกค้า" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "เมนู" })).not.toBeInTheDocument());
+    expect(router.state.location.pathname).toBe("/customers");
+    await waitFor(() => expect(screen.getByRole("button", { name: "แสดง/ซ่อนเมนู" })).toHaveFocus());
   });
 });
