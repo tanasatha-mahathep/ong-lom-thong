@@ -8,6 +8,7 @@ import { type AppEnv, apiError } from "./lib/context";
 import { loggableError } from "./lib/log";
 import { sameOriginOnly } from "./lib/origin";
 import type { Storage } from "./lib/storage";
+import type { ReceiptPdfService } from "./services/receiptPdf";
 import { buyRoutes } from "./routes/buy";
 import { customerRoutes } from "./routes/customers";
 import { goldPriceRoutes } from "./routes/goldPrice";
@@ -21,13 +22,15 @@ export interface AppDeps {
   auth: Auth;
   env: Env;
   storage: Storage;
+  /** สร้าง/เก็บ PDF ของบิล — renderer จริง (Gotenberg) ใน index.ts · ตัวปลอมใน test harness */
+  pdf: ReceiptPdfService;
   now?: () => Date;
 }
 
 const health = () => ({ ok: true, time: new Date().toISOString() });
 
 /** ประกอบแอปจาก dependency ที่ส่งเข้ามา — เทสต์เรียก app.request() ได้โดยไม่ต้องเปิดพอร์ต */
-export function createApp({ db, auth, env, storage, now = () => new Date() }: AppDeps) {
+export function createApp({ db, auth, env, storage, pdf, now = () => new Date() }: AppDeps) {
   const app = new Hono<AppEnv>();
   // ก่อนทุก route (รวม SPA ใน index.ts): access log ไม่มี PII · header ความปลอดภัย · API ไม่ cache
   app.use(accessLog(env.NODE_ENV === "test" ? null : (line) => console.log(line)));
@@ -38,6 +41,7 @@ export function createApp({ db, auth, env, storage, now = () => new Date() }: Ap
     c.set("auth", auth);
     c.set("env", env);
     c.set("storage", storage);
+    c.set("pdf", pdf);
     c.set("now", now);
     await next();
   });

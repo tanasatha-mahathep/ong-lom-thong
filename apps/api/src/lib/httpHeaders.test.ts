@@ -4,7 +4,7 @@ import { noStoreByDefault, securityHeaders } from "./httpHeaders";
 
 const CSP =
   "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; " +
-  "connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'";
+  "connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
 
 function app() {
   return new Hono()
@@ -29,7 +29,8 @@ describe("securityHeaders + noStoreByDefault", () => {
       expect(res.headers.get("content-security-policy"), path).toBe(CSP);
       expect(res.headers.get("x-frame-options"), path).toBe("DENY");
       expect(res.headers.get("x-content-type-options"), path).toBe("nosniff");
-      expect(res.headers.get("strict-transport-security"), path).toBe("max-age=31536000");
+      expect(res.headers.get("strict-transport-security"), path).toBe("max-age=31536000; includeSubDomains");
+      expect(res.headers.get("permissions-policy"), path).toBe("camera=(), microphone=(), geolocation=(), payment=()");
       expect(res.headers.get("cross-origin-opener-policy"), path).toBe("same-origin");
       expect(res.headers.get("referrer-policy"), path).toBe("strict-origin-when-cross-origin");
     }
