@@ -43,6 +43,11 @@ export default defineConfig(
     languageOptions: { globals: globals.browser },
   },
   {
+    // component จาก shadcn CLI export ตัวแปร/hook คู่กับ component (buttonVariants · useSidebar) โดยออกแบบ
+    files: ["apps/web/src/components/ui/**/*.tsx"],
+    rules: { "react-refresh/only-export-components": "off" },
+  },
+  {
     // file route ของ TanStack Router: component อยู่คู่ `Route` โดยตั้งใจ — router plugin ทำ code-split + HMR เอง
     files: ["apps/web/src/routes/**/*.tsx"],
     rules: { "react-refresh/only-export-components": "off" },
