@@ -230,6 +230,11 @@ class PermanentPdfError extends Error {
   override name = "PermanentPdfError";
 }
 
+/** lease ของงานหลุดก่อนเขียนไฟล์ (ผู้อื่นรับงานต่อแล้ว) — ยกเลิกทั้งงาน ไม่เขียนอะไรลง bucket/DB */
+class LeaseLostError extends Error {
+  override name = "LeaseLostError";
+}
+
 /** ReceiptDataError ของ @ong/core/receipt (ข้อมูลใบไม่ครบ/ขัดกัน) · RangeError จาก key = ข้อมูลผิด */
 const isPermanent = (e: unknown) =>
   e instanceof PermanentPdfError || e instanceof ReceiptDataError || e instanceof RangeError;
@@ -347,7 +352,7 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
     return { ok: true, key, sha256: actual };
   }
 
-  async function produce(kind: PdfKind, src: ReceiptSource): Promise<Outcome> {
+  async function produce(kind: PdfKind, src: ReceiptSource, renewLease: () => Promise<void>): Promise<Outcome> {
     // รหัสสาขาใน key มาจาก snapshot — key ของบิลคงที่ตลอดอายุเอกสาร
     const where = { branchCode: headerOf(src, company).branch_code, date: src.receipt.date, docNo: src.receipt.docNo };
     try {
@@ -357,7 +362,9 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
       const pdf = await render(kind, src);
       let sha256: string;
       try {
-        ({ sha256 } = await putNew(storage, key, pdf, PDF_CONTENT_TYPE, { "receipt-id": src.receipt.id, kind }));
+        // ต่อ lease ทันทีก่อน PUT ทุกครั้ง — หลุดแล้ว (งานนานเกิน 3 นาที มีผู้อื่นรับต่อ) = ไม่เขียนทับไฟล์ของเขา
+        const owner = { "receipt-id": src.receipt.id, kind };
+        ({ sha256 } = await putNew(storage, key, pdf, PDF_CONTENT_TYPE, owner, renewLease));
       } catch (e) {
         if (!(e instanceof ObjectExistsError)) throw e;
         const winner = await storage.get(key);
@@ -376,6 +383,7 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
       }
       return { ok: true, key, sha256 };
     } catch (e) {
+      if (e instanceof LeaseLostError) throw e;
       const reason = reasonOf(e);
       const permanent = isPermanent(e);
       log.error(
@@ -438,6 +446,15 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
       return row ? { ...statusesOf(row), busy: row.leased === true } : null;
     }
 
+    // ตรวจ + ต่อ lease แบบ atomic — ยังเป็นของเรา = ขยายอีก 3 นาที · ไม่ใช่แล้ว = LeaseLostError
+    const renewLease = async () => {
+      const [held] = await db
+        .update(buyReceipt)
+        .set({ pdfLeaseUntil: LEASE })
+        .where(and(eq(buyReceipt.id, receiptId), eq(buyReceipt.pdfLeaseToken, token)))
+        .returning({ id: buyReceipt.id });
+      if (!held) throw new LeaseLostError(`lease lost before upload (${receiptId})`);
+    };
     const release = () =>
       db
         .update(buyReceipt)
@@ -453,7 +470,7 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
       const set: PgUpdateSetSource<typeof buyReceipt> = {};
       let transient = false;
       for (const kind of missingFiles(src.receipt, { includeInvalid: manual })) {
-        const out = await produce(kind, src);
+        const out = await produce(kind, src, renewLease);
         Object.assign(set, columnsFor(kind, out, now()));
         if (!out.ok && !out.permanent) transient = true;
       }
@@ -480,7 +497,10 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
     } catch (e) {
       // DB/อื่น ๆ ล้มกลางทาง — ปล่อย lease (ถ้ายังเป็นของเรา) รอบหน้าไม่ต้องรอ 3 นาที
       await release().catch(() => undefined);
-      throw e;
+      if (!(e instanceof LeaseLostError)) throw e;
+      log.error(`[pdf] !!! ${receiptId}: lease lost before upload — job aborted, nothing written`);
+      const [row] = await db.select(statusColumns).from(buyReceipt).where(eq(buyReceipt.id, receiptId));
+      return row ? { ...statusesOf(row), busy: true } : null;
     }
   }
 

@@ -196,9 +196,12 @@ export async function putNew(
   body: Uint8Array<ArrayBuffer>,
   contentType: string,
   metadata: ObjectMetadata = {},
+  /** เรียกทันทีก่อน PUT (หลัง HEAD) — throw = ไม่เขียน เช่น ตรวจว่ายังถือ lease ของงานนี้อยู่ */
+  beforeWrite?: () => Promise<void>,
 ): Promise<{ sha256: string }> {
   const existing = await storage.exists(key);
   if (existing) throw new ObjectExistsError(key, existing.metadata);
+  await beforeWrite?.();
   const sha256 = sha256Hex(body);
   await storage.putImmutable(key, body, contentType, { ...metadata, sha256 });
   return { sha256 };

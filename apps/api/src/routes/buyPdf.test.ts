@@ -339,7 +339,33 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
     expect(r).toMatchObject({ pdfStatus: "ready", pdfLeaseToken: null });
     expect(r.pdfSha256).toBe(sha256Hex((await stored(r.pdfKey)) ?? new Uint8Array()));
     expect(puts.filter((k) => k === r.pdfKey)).toHaveLength(1);
-    expect(logged).toContain("lease expired before recording");
+    // ผู้ถือเดิมเช็ก lease ก่อน PUT แล้วพบว่าหลุด — ยกเลิกเอง ไม่เขียนอะไร
+    expect(logged).toContain("lease lost before upload");
+  });
+
+  it("lease ถูกยึดก่อน PUT → ไม่ PUT เลย · ไม่บันทึกอะไร (ตรวจ+ต่อ lease ทันทีก่อนเขียนทุกไฟล์)", async () => {
+    const release = t.fake.hold();
+    const bill = await save({ customer_id: s.custC });
+    await vi.waitFor(() => expect(t.fake.calls.some((c) => c.trace === bill.doc_no)).toBe(true));
+    // ผู้เขียนอื่นยึด lease ระหว่างที่งานนี้ค้างใน Gotenberg
+    const other = "11111111-1111-4111-8111-111111111111";
+    await t.db
+      .update(buyReceipt)
+      .set({ pdfLeaseToken: other, pdfLeaseUntil: new Date(Date.now() + 60_000) })
+      .where(eq(buyReceipt.id, bill.id));
+    const key = receiptPdfKey({ branchCode: "00000", date: TODAY, docNo: bill.doc_no });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    release();
+    await t.tasks.idle();
+    const logged = log.mock.calls.flat().join(" ");
+    log.mockRestore();
+    expect(logged).toContain("lease lost before upload");
+    expect(puts).not.toContain(key);
+    expect(await t.storage.exists(key)).toBeNull();
+    expect(await row(bill.id)).toMatchObject({ pdfStatus: "pending", pdfKey: null, pdfLeaseToken: other });
+    // ผู้ยึดหายไป (lease ถูกปล่อย) → งานรอบถัดไปทำต่อได้ตามปกติ
+    await t.db.update(buyReceipt).set({ pdfLeaseToken: null, pdfLeaseUntil: null }).where(eq(buyReceipt.id, bill.id));
+    expect(await t.pdf.archive(bill.id)).toMatchObject({ pdf_status: "ready", busy: false });
   });
 
   it("มีไฟล์อยู่แล้วใน bucket (รอบก่อนอัปโหลดแต่ DB ไม่ทัน) → รับไฟล์เดิม ไม่ render ทับ", async () => {
