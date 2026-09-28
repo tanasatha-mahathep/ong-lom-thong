@@ -1,5 +1,21 @@
+import type Decimal from "decimal.js";
 import { CARD_STATUS_MESSAGE, type CardStatus } from "./card";
-import { ZERO, fmtMoney, fmtWeight, halfUp, parseDecimal } from "./money";
+import { D, type Numeric, ZERO, fmtMoney, fmtWeight, halfUp, parseDecimal } from "./money";
+
+/** วิธีชำระที่รับได้ — ระบบเดิมตั้งไว้แค่เงินสด · โอนเงินเผื่อไว้ (spec §12 ข้อ 6) · key เก็บลง payment.method */
+export const PAYMENT_METHODS = { cash: "เงินสด", transfer: "โอนเงิน" } as const;
+export type PaymentMethod = keyof typeof PAYMENT_METHODS;
+
+export const isPaymentMethod = (v: unknown): v is PaymentMethod =>
+  typeof v === "string" && Object.hasOwn(PAYMENT_METHODS, v);
+
+/**
+ * ราคา/กรัม = ราคา ÷ น้ำหนัก ปัดครึ่งขึ้น 2 ตำแหน่ง (R3) — แสดงเท่านั้น ไม่ใช้คำนวณต่อ
+ * สูตรเดียวของทั้งระบบ: quoteBuy() ใช้ต่อแถว · ใบรับซื้อใช้ต่อกลุ่มโลหะ (groupLinesByMetal)
+ */
+export function pricePerGram(amount: Decimal, weight: Decimal): Decimal {
+  return halfUp(amount.div(weight), 2);
+}
 
 export interface BuyLineInput {
   metalId: string;
@@ -29,6 +45,8 @@ export interface QuoteError {
 }
 
 export interface QuotedLine {
+  /** ตำแหน่งของแถวใน input — แถวที่ผิดถูกข้าม จอจึงต้องใช้ตัวนี้จับคู่กับแถวที่กรอก */
+  index: number;
   metalId: string;
   weightG: string;
   amount: string;
@@ -36,12 +54,25 @@ export interface QuotedLine {
   pricePerG: string;
 }
 
+export interface QuotedPayment {
+  /** ตำแหน่งของแถวใน input */
+  index: number;
+  method: PaymentMethod;
+  bank: string | null;
+  /** จำนวนเงินรูปมาตรฐาน 2 ตำแหน่ง — ค่าที่บันทึกลง payment */
+  amount: string;
+}
+
 export interface QuoteBuyResult {
   ok: boolean;
   errors: QuoteError[];
   lines: QuotedLine[];
+  /** แถวชำระที่ถูกต้อง (แถวที่ผิดถูกข้าม) */
+  payments: QuotedPayment[];
   totalWeight: string;
   totalAmount: string;
+  /** ราคาเฉลี่ย/กรัม — แสดงเท่านั้น (ดู avgPricePerG) */
+  avgPricePerG: string;
   paid: string;
   balance: string;
 }
@@ -53,13 +84,34 @@ export const BUY_MSG = {
   badNumber: "ตัวเลขไม่ถูกต้อง",
   weightPositive: "น้ำหนักต้องมากกว่า 0",
   weightScale: "น้ำหนักทศนิยมไม่เกิน 3 ตำแหน่ง",
+  weightMax: "น้ำหนักเกิน 999,999.999 กรัม — ตรวจตัวเลขอีกครั้ง",
   amountPositive: "ราคาต้องมากกว่า 0",
   amountScale: "จำนวนเงินทศนิยมไม่เกิน 2 ตำแหน่ง",
+  amountMax: "ราคาเกิน 99,999,999.99 บาท — ตรวจตัวเลขอีกครั้ง",
+  paymentMethod: "กรุณาเลือกประเภทเงินที่ชำระ",
   paymentAmount: "กรุณากรอกจำนวนเงิน",
   paymentDup: "มีวิธีการชำระนี้อยู่แล้ว",
   overpaid: "เกินยอดที่ต้องชำระ",
   unbalanced: (balance: string) => `ยอดชำระไม่ตรงกับยอดบิล — คงเหลือ ${balance} บาท (ต้องเป็น 0.00)`,
 } as const;
+
+/**
+ * เพดานต่อแถว — กันเลขที่พิมพ์/สแกนหลุดช่อง (เช่น Siam ID พิมพ์เลขบัตร 13 หลักลงช่องราคา) ไม่ให้ล้น numeric ใน DB
+ * 50 แถว × เพดาน ยังพอดี numeric(14,2) / numeric(12,3) · ราคา/กรัม สูงสุด 99,999,999.99 ÷ 0.001 ก็ยังพอดี
+ */
+export const MAX_LINE_WEIGHT_G = "999999.999";
+export const MAX_LINE_AMOUNT = "99999999.99";
+
+/**
+ * ราคาเฉลี่ย/กรัม (ระบบเดิม "ราคาเฉลี่ย/กรัม" = ยอดรวม ÷ น้ำหนักรวม) ปัดครึ่งขึ้น 2 ตำแหน่ง — แสดงเท่านั้น
+ * น้ำหนักรวม 0 = "0.00" · ใช้ทั้งใน quoteBuy และตอนแสดงบิลที่บันทึกแล้ว
+ * สูตรคือ pricePerGram() ตัวเดียวกับราคา/กรัมต่อแถวและราคาต่อหน่วยบนใบรับซื้อ — ห้ามเขียนการหารซ้ำที่นี่
+ */
+export function avgPricePerG(totalAmount: Numeric, totalWeight: Numeric): string {
+  const w = D(totalWeight);
+  if (w.lte(0)) return fmtMoney(ZERO);
+  return fmtMoney(pricePerGram(D(totalAmount), w));
+}
 
 /**
  * ฟังก์ชันเดียวที่ใช้ทั้ง live preview (POST /buy/quote) และตอนบันทึก (POST /buy)
@@ -92,6 +144,9 @@ export function quoteBuy(input: QuoteBuyInput): QuoteBuyResult {
     } else if (w.decimalPlaces() > 3) {
       errors.push({ field: `lines.${i}.weight_g`, message: BUY_MSG.weightScale });
       bad = true;
+    } else if (w.gt(MAX_LINE_WEIGHT_G)) {
+      errors.push({ field: `lines.${i}.weight_g`, message: BUY_MSG.weightMax });
+      bad = true;
     }
     if (!a) {
       errors.push({ field: `lines.${i}.amount`, message: BUY_MSG.badNumber });
@@ -102,37 +157,50 @@ export function quoteBuy(input: QuoteBuyInput): QuoteBuyResult {
     } else if (a.decimalPlaces() > 2) {
       errors.push({ field: `lines.${i}.amount`, message: BUY_MSG.amountScale });
       bad = true;
+    } else if (a.gt(MAX_LINE_AMOUNT)) {
+      errors.push({ field: `lines.${i}.amount`, message: BUY_MSG.amountMax });
+      bad = true;
     }
     if (bad || !w || !a) return;
     totalWeight = totalWeight.plus(w);
     totalAmount = totalAmount.plus(a);
     lines.push({
+      index: i,
       metalId: line.metalId,
       weightG: fmtWeight(w),
       amount: fmtMoney(a),
-      pricePerG: fmtMoney(halfUp(a.div(w), 2)),
+      pricePerG: fmtMoney(pricePerGram(a, w)),
     });
   });
 
   let paid = ZERO;
+  const payments: QuotedPayment[] = [];
   const seen = new Set<string>();
   input.payments.forEach((p, i) => {
+    let bad = false;
+    const method = isPaymentMethod(p.method) ? p.method : null;
+    if (!method) {
+      errors.push({ field: `payments.${i}.method`, message: BUY_MSG.paymentMethod });
+      bad = true;
+    }
     const a = parseDecimal(p.amount);
     if (!a || a.lte(0)) {
       errors.push({ field: `payments.${i}.amount`, message: BUY_MSG.paymentAmount });
-      return;
-    }
-    if (a.decimalPlaces() > 2) {
+      bad = true;
+    } else if (a.decimalPlaces() > 2) {
       errors.push({ field: `payments.${i}.amount`, message: BUY_MSG.amountScale });
-      return;
+      bad = true;
     }
-    const key = `${p.method}|${p.bank ?? ""}`;
+    if (bad || !method || !a) return;
+    const bank = p.bank?.trim() || null;
+    const key = `${method}|${bank ?? ""}`;
     if (seen.has(key)) {
       errors.push({ field: `payments.${i}.method`, message: BUY_MSG.paymentDup });
       return;
     }
     seen.add(key);
     paid = paid.plus(a);
+    payments.push({ index: i, method, bank, amount: fmtMoney(a) });
   });
 
   const balance = totalAmount.minus(paid);
@@ -146,8 +214,10 @@ export function quoteBuy(input: QuoteBuyInput): QuoteBuyResult {
     ok: errors.length === 0,
     errors,
     lines,
+    payments,
     totalWeight: fmtWeight(totalWeight),
     totalAmount: fmtMoney(totalAmount),
+    avgPricePerG: avgPricePerG(totalAmount, totalWeight),
     paid: fmtMoney(paid),
     balance: fmtMoney(balance),
   };

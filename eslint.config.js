@@ -41,11 +41,28 @@ export default defineConfig(
     files: ["apps/web/**/*.{ts,tsx}"],
     extends: [reactHooks.configs.flat.recommended, reactRefresh.configs.vite()],
     languageOptions: { globals: globals.browser },
+    rules: {
+      // TanStack Router: `throw redirect()` / `throw notFound()` คือกลไกของ router (ไม่ใช่ Error) — ตามคู่มือ TanStack
+      "@typescript-eslint/only-throw-error": [
+        "error",
+        { allow: [{ from: "package", package: "@tanstack/router-core", name: ["Redirect", "NotFoundError"] }] },
+      ],
+    },
+  },
+  {
+    // component จาก shadcn CLI export ตัวแปร/hook คู่กับ component (buttonVariants · useSidebar) โดยออกแบบ
+    files: ["apps/web/src/components/ui/**/*.tsx"],
+    rules: { "react-refresh/only-export-components": "off" },
   },
   {
     // file route ของ TanStack Router: component อยู่คู่ `Route` โดยตั้งใจ — router plugin ทำ code-split + HMR เอง
     files: ["apps/web/src/routes/**/*.tsx"],
     rules: { "react-refresh/only-export-components": "off" },
+  },
+  {
+    // @ong/core/receipt — component ที่ render ทั้งบนเว็บและใน API (PDF) · ไม่ใช่แอป vite จึงไม่ใช้ react-refresh
+    files: ["packages/core/src/**/*.tsx"],
+    extends: [reactHooks.configs.flat.recommended],
   },
   { files: ["**/*.js"], extends: [tseslint.configs.disableTypeChecked] },
   prettier,

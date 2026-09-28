@@ -5,6 +5,7 @@ import type { Env } from "./env";
 import { type AppEnv, apiError } from "./lib/context";
 import { sameOriginOnly } from "./lib/origin";
 import type { Storage } from "./lib/storage";
+import { buyRoutes } from "./routes/buy";
 import { customerRoutes } from "./routes/customers";
 import { goldPriceRoutes } from "./routes/goldPrice";
 import { me } from "./routes/me";
@@ -43,6 +44,7 @@ export function createApp({ db, auth, env, storage, now = () => new Date() }: Ap
   api.route("/gold-price", goldPriceRoutes);
   api.route("/metals", metalRoutes);
   api.route("/customers", customerRoutes);
+  api.route("/buy", buyRoutes);
 
   api.notFound((c) => c.json(apiError("not found"), 404));
   app.route("/api", api);

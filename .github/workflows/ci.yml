@@ -33,11 +33,21 @@ jobs:
           --health-cmd "pg_isready -U ong" --health-interval 5s --health-timeout 3s --health-retries 10
     env:
       TEST_DATABASE_URL: postgres://ong:ong@localhost:5432/postgres
+      # เทสต์แปลง PDF ภาษาไทยจริง — ตั้งไว้แล้ว = ต้องมี Gotenberg (ต่อไม่ได้ = fail ไม่ข้าม)
+      TEST_GOTENBERG_URL: http://localhost:3000
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # commitlint ต้องเห็นประวัติ
           persist-credentials: false
+      # Gotenberg จาก services/gotenberg/Dockerfile ตัวเดียวกับ Railway (FROM ปัก digest · ฟอนต์ Sarabun · basic auth)
+      # ไม่ใช้ services: เพราะต้อง build และส่ง flag เอง · ดึง image (~700 MB) เบื้องหลังระหว่าง install/lint/typecheck
+      - name: start gotenberg (background)
+        run: |
+          { docker build -q -t ong-gotenberg services/gotenberg \
+            && docker run -d --name gotenberg -p 3000:3000 \
+              -e GOTENBERG_API_BASIC_AUTH_USERNAME=ong -e GOTENBERG_API_BASIC_AUTH_PASSWORD=ongongong ong-gotenberg
+          } > "$RUNNER_TEMP/gotenberg.log" 2>&1 &
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0 — เวอร์ชัน pnpm จาก packageManager
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -66,6 +76,14 @@ jobs:
       - run: pnpm lint
       - run: pnpm format:check
       - run: pnpm typecheck
+      - name: wait for gotenberg
+        run: |
+          for _ in $(seq 1 120); do
+            curl -fsS http://localhost:3000/health >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/gotenberg.log"; docker logs gotenberg || true
+          exit 1
       - run: pnpm test
       - run: pnpm build
 
