@@ -97,7 +97,7 @@ export const goldPriceRoutes = new Hono<AppEnv>()
       throw e;
     }
   })
-  // ตั้งราคากลางของวัน — manager/admin (spec §10) · ห่างเกินเกณฑ์ต้องยืนยัน (409)
+  // ตั้งราคากลางของวัน — manager/admin (spec §10) · ห่างเกินเกณฑ์ต้องยืนยัน (409 ชี้ confirm_typo)
   .put("/today", requireRole("manager", "admin"), async (c) => {
     const body = SetBody.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json(BAR_SELL_ERROR, 400);
@@ -105,7 +105,7 @@ export const goldPriceRoutes = new Hono<AppEnv>()
     try {
       const q = await quoteGoldPrice(c.var.db, body.data.bar_sell, date);
       if (q.warning && !body.data.confirm_typo) {
-        return c.json({ ...apiError(q.warning, "bar_sell"), warning: q.warning }, 409);
+        return c.json({ ...apiError(q.warning, "confirm_typo"), warning: q.warning }, 409);
       }
       await setCentralPrice(c.var.db, date, q, c.var.viewer.userId, !!q.warning);
       const price = await priceForBranch(c.var.db, date, null);
@@ -127,7 +127,7 @@ export const goldPriceRoutes = new Hono<AppEnv>()
     try {
       const q = await quoteGoldPrice(c.var.db, body.data.bar_sell, date, target.id);
       if (q.warning && !body.data.confirm_typo) {
-        return c.json({ ...apiError(q.warning, "bar_sell"), warning: q.warning }, 409);
+        return c.json({ ...apiError(q.warning, "confirm_typo"), warning: q.warning }, 409);
       }
       await setBranchPrice(c.var.db, date, target, q, c.var.viewer.userId, !!q.warning);
       return c.json(toBranchJson(target, await priceForBranch(c.var.db, date, target.id)));

@@ -203,7 +203,7 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
     expect(q.warning).toBe(central.warning);
     const rejected = await put("admin", b2, { bar_sell: "70100" });
     expect(rejected.status).toBe(409);
-    expect(await rejected.json()).toEqual({ error: q.warning, field: "bar_sell", warning: q.warning });
+    expect(await rejected.json()).toEqual({ error: q.warning, field: "confirm_typo", warning: q.warning });
     expect((await overrides()).filter((r) => r.branchId === b2)).toHaveLength(0);
 
     const confirmed = await put("admin", b2, { bar_sell: "70100", confirm_typo: true });

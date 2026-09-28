@@ -126,7 +126,8 @@ describe.skipIf(!available)("ราคาทองวันนี้ (R7 · R8 �
 
     const rejected = await put("manager", { bar_sell: "76000" });
     expect(rejected.status).toBe(409);
-    expect(await rejected.json()).toMatchObject({ field: "bar_sell", warning: q.warning });
+    // 409 ชี้ช่องยืนยัน (confirm_typo) · คำเตือนอยู่ใน warning
+    expect(await rejected.json()).toEqual({ error: q.warning, field: "confirm_typo", warning: q.warning });
     expect((await today("staff")).status).toBe(404);
 
     const confirmed = await put("manager", { bar_sell: "76000", confirm_typo: true });
