@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { avgPricePerG, pricePerGram, quoteBuy } from "./buy";
+import { D, fmtMoney } from "./money";
 import { groupLinesByMetal } from "./receiptLines";
 
 describe("groupLinesByMetal — ใบจริงพิมพ์ 1 บรรทัดต่อโลหะ", () => {
@@ -41,5 +43,52 @@ describe("groupLinesByMetal — ใบจริงพิมพ์ 1 บรรท
     expect(() => groupLinesByMetal([{ metalName: "ทอง", weightG: "0", amount: "100" }])).toThrow();
     expect(() => groupLinesByMetal([{ metalName: "ทอง", weightG: "abc", amount: "100" }])).toThrow();
     expect(() => groupLinesByMetal([{ metalName: "ทอง", weightG: "1", amount: "Infinity" }])).toThrow();
+  });
+});
+
+describe("ราคา/กรัม สูตรเดียว (CLAUDE.md กฎ 2) — ทุกทางให้ค่าเดียวกัน", () => {
+  // [ราคา, น้ำหนัก, ที่ควรได้] — มีจุดปัดครึ่งขึ้นที่ float ปัดผิด (10.05 ÷ 2 · 1 ÷ 8)
+  it.each([
+    ["20030.00", "5.860", "3418.09"],
+    ["10.05", "2.000", "5.03"],
+    ["1", "8", "0.13"],
+    ["21530.00", "105.860", "203.38"],
+    ["3015.00", "101.000", "29.85"],
+    ["0.01", "3.000", "0.00"],
+    ["99999999.99", "0.001", "99999999990.00"],
+  ])("%s ÷ %s = %s: pricePerGram · quoteBuy (แถว/เฉลี่ย) · avgPricePerG · ใบรับซื้อ", (amount, weight, want) => {
+    const q = quoteBuy({
+      lines: [{ metalId: "gold", weightG: weight, amount }],
+      payments: [],
+      customer: null,
+      goldPriceSet: true,
+    });
+    expect(fmtMoney(pricePerGram(D(amount), D(weight)))).toBe(want);
+    expect(q.lines[0]?.pricePerG).toBe(want);
+    expect(q.avgPricePerG).toBe(want);
+    expect(avgPricePerG(amount, weight)).toBe(want);
+    expect(groupLinesByMetal([{ metalName: "ทอง", weightG: weight, amount }])[0]?.unitPrice).toBe(want);
+  });
+
+  it("หลายแถวโลหะเดียว: ราคาเฉลี่ยบนจอ = ราคาต่อหน่วยบนใบรับซื้อ", () => {
+    const lines = [
+      { weightG: "2.000", amount: "8000" },
+      { weightG: "1.860", amount: "6000" },
+      { weightG: "2.000", amount: "6030" },
+    ];
+    const q = quoteBuy({
+      lines: lines.map((l) => ({ metalId: "gold", ...l })),
+      payments: [],
+      customer: null,
+      goldPriceSet: true,
+    });
+    const printed = groupLinesByMetal(lines.map((l) => ({ metalName: "ทอง", ...l })));
+    expect(q.avgPricePerG).toBe("3418.09");
+    expect(printed[0]?.unitPrice).toBe(q.avgPricePerG);
+  });
+
+  it("น้ำหนักรวม 0: จอแสดง 0.00 (avgPricePerG) · ใบรับซื้อไม่พิมพ์ราคามั่ว (throw)", () => {
+    expect(avgPricePerG("100", "0")).toBe("0.00");
+    expect(() => groupLinesByMetal([{ metalName: "ทอง", weightG: "0", amount: "100" }])).toThrow();
   });
 });
