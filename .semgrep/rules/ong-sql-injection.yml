@@ -1,0 +1,81 @@
+# Project rules (scripts/ci/sast.sh). Test: semgrep --test .semgrep/rules (fixture = same name, .js).
+rules:
+  - id: ong-drizzle-sql-raw-non-literal
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      sql.raw() copies its argument into the SQL text verbatim — no bound parameter, no escaping — so a
+      non-literal argument is a SQL injection risk. Pass values through the sql`… ${value}` tag (bound
+      parameter), names through sql.identifier(), and give sql.raw() string literals only.
+    metadata:
+      category: security
+      subcategory: [vuln]
+      technology: [drizzle-orm]
+      cwe:
+        - "CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')"
+      owasp:
+        - A03:2021 - Injection
+        - A05:2025 - Injection
+      confidence: HIGH
+      likelihood: MEDIUM
+      impact: HIGH
+      references:
+        - https://orm.drizzle.team/docs/sql#sqlraw
+        - https://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html
+    patterns:
+      - pattern-either:
+          - pattern: sql.raw($QUERY)
+          - patterns:
+              - pattern-either:
+                  - pattern-inside: |
+                      import { sql as $SQL } from "drizzle-orm";
+                      ...
+                  - pattern-inside: |
+                      import { sql as $SQL } from "drizzle-orm/sql";
+                      ...
+              - pattern: $SQL.raw($QUERY)
+      # string literals (also constants that Semgrep can resolve to one) are safe
+      - metavariable-pattern:
+          metavariable: $QUERY
+          patterns:
+            - pattern: $ANY
+            - pattern-not: '"..."'
+
+  - id: ong-sql-string-query
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      SQL text assembled from a JavaScript string (template literal with ${…} or + concatenation) reaches
+      a raw query API — SQL injection risk. Drizzle's db.execute() also accepts a plain string, so a
+      forgotten sql tag still compiles. Use db.execute(sql`… ${value}`) (bound parameters) or, with
+      postgres.js, the sql`…` tag / sql.unsafe(constantQuery, [params]).
+    metadata:
+      category: security
+      subcategory: [vuln]
+      technology: [drizzle-orm, postgres.js]
+      cwe:
+        - "CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')"
+      owasp:
+        - A03:2021 - Injection
+        - A05:2025 - Injection
+      confidence: HIGH
+      likelihood: MEDIUM
+      impact: HIGH
+      references:
+        - https://orm.drizzle.team/docs/sql
+        - https://github.com/porsager/postgres#unsafe-raw-string-queries
+        - https://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html
+    mode: taint
+    pattern-sources:
+      - pattern: "`...${$X}...`"
+      - pattern: '"..." + $X'
+      - pattern: '$X + "..."'
+    pattern-sanitizers:
+      # values inside the drizzle sql`…` tag become bound parameters, even when they are strings
+      - pattern: sql`...`
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $DB.execute($QUERY, ...)
+              - pattern: $DB.unsafe($QUERY, ...)
+          - focus-metavariable: $QUERY

@@ -1,0 +1,18 @@
+# osv-scanner config — used by scripts/ci/sca.sh (make sca) to scan pnpm-lock.yaml against OSV.dev
+# (GitHub Advisory Database, OpenSSF malicious packages, NVD, …).
+#
+# Gate: a finding fails the scan when it is HIGH or CRITICAL (CVSS base score >= 7.0, or the advisory's
+# own severity is HIGH/CRITICAL, whichever is higher), a known malicious package (MAL-*), or carries no
+# severity at all (fail-closed). MEDIUM and LOW are listed in the report but do not fail.
+#
+# The default answer to a finding is to upgrade (Renovate PR to dev). Ignore one only when the vulnerable
+# code is provably unreachable here or no fixed version exists yet, and always with an expiry:
+#
+#   [[IgnoredVulns]]
+#   id = "GHSA-xxxx-xxxx-xxxx"          # the id sca.sh prints
+#   ignoreUntil = 2026-12-31T00:00:00Z  # required · RFC 3339 UTC · at most 90 days ahead
+#   reason = "why it is not exploitable here or what blocks the upgrade · who decided · tracking link"
+#
+# After ignoreUntil osv-scanner stops honouring the entry, so the finding comes back by itself and must
+# be triaged again. sca.sh rejects entries without a reason or expiry, expiries further than 90 days
+# ahead, and [[PackageOverrides]] without reason/effectiveUntil. One key per line; reason on one line.

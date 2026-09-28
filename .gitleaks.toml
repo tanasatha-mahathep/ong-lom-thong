@@ -1,0 +1,55 @@
+# gitleaks config — used by scripts/ci/secret-scan.sh (make secret-scan) for the working tree and the
+# full history. It extends gitleaks' built-in ruleset (the version is pinned by the image digest in the
+# script) with rules for this stack and a minimal set of allowlists.
+#
+# Suppression policy — every entry carries a reason:
+#   - structural false positives → an [[allowlists]] block here with a `description` (reason)
+#   - one-off historical findings → a fingerprint in .gitleaksignore under a "# reason" comment line
+#   - inline `gitleaks:allow` comments are ignored on purpose (--ignore-gitleaks-allow)
+#   gitleaks has no expiry field, so allowlists must stay narrow (one rule, one anchored pattern).
+#   A real secret is never allowlisted: rotate it first, then decide about the history.
+
+title = "ong-lom-thong"
+
+[extend]
+useDefault = true
+
+# DATABASE_URL on Railway looks like postgresql://postgres:<password>@<host>.rlwy.net:<port>/railway.
+# The built-in rules key on names such as "password"/"secret", so a bare connection string slips past them.
+[[rules]]
+id = "postgres-url-with-password"
+description = "Postgres connection URL with an inline password (e.g. a Railway DATABASE_URL)"
+regex = '''postgres(?:ql)?://[^:\s/@'"`]+:([^@\s'"`]+)@([A-Za-z0-9.-]+)'''
+secretGroup = 1
+keywords = ["postgres"]
+tags = ["database", "railway"]
+
+  [[rules.allowlists]]
+  description = "Local docker compose / CI service container on localhost: the documented dev credentials (.env.example), not a secret"
+  regexTarget = "match"
+  regexes = ['''@(?:localhost|127\.0\.0\.1)$''']
+
+  [[rules.allowlists]]
+  description = "The documented dev user/password ong:ong (.env.example, docker-compose.yml) on any host, e.g. a compose service name such as @postgres inside a test network"
+  regexTarget = "match"
+  regexes = ['''^postgres(?:ql)?://ong:ong@''']
+
+  [[rules.allowlists]]
+  description = "The password is a shell/compose variable reference (${PG_PASSWORD}, $PGPASSWORD) resolved at runtime, not a literal secret"
+  regexTarget = "secret"
+  regexes = ['''^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$''']
+
+# Railway API/project tokens are UUIDs, which the generic rule does not treat as high-entropy secrets.
+[[rules]]
+id = "railway-token"
+description = "Railway API or project token assigned to RAILWAY_TOKEN / RAILWAY_API_TOKEN"
+regex = '''(?i)\brailway_(?:api_)?token\b["']?\s*[:=]\s*["']?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b'''
+secretGroup = 1
+keywords = ["railway_token", "railway_api_token"]
+tags = ["railway"]
+
+[[allowlists]]
+description = "Reading a secret from the environment (env.X, process.env.X, c.env.X, import.meta.env.X) is the intended way to inject it: the matched value is an identifier, not a secret (e.g. `secretAccessKey: env.S3_SECRET_KEY` in apps/api/src/lib/storage.ts)"
+targetRules = ["generic-api-key"]
+regexTarget = "secret"
+regexes = ['''^(?:[A-Za-z_$][A-Za-z0-9_$]*\.)*env\.[A-Z][A-Z0-9_]*$''']
