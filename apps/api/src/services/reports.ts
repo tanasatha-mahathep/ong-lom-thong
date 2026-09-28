@@ -3,13 +3,13 @@ import { type Db, branch, buyLine, buyReceipt, metal, stockMovement, user } from
 import { and, asc, eq, exists, gte, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { csvText, toCsv } from "../lib/csv";
-import { type BranchRef, type Viewer, forUser } from "../lib/scope";
+import { type BranchRef, type Viewer, forUserHistory } from "../lib/scope";
 
 /**
  * ชุดสาขาของรายงานทุกตัว — จุดเดียวที่เลือก (fail-closed: ไม่มีสิทธิ์ = [] → route ตอบ 403 ไม่ใช่ทุกสาขา)
- * ตอนนี้ = forUser (สาขาที่เปิดอยู่) · เมื่อ forUserHistory (accounting/admin อ่านสาขาที่ปิดแล้ว) เข้า dev ให้เปลี่ยนที่นี่ที่เดียว
+ * = forUserHistory: accounting/admin อ่านย้อนหลังของสาขาที่ปิดแล้วได้ (เอกสารภาษีเก็บ ≥ 5 ปี) · role อื่น = forUser
  */
-export const reportBranches = (db: Db, viewer: Viewer): Promise<BranchRef[]> => forUser(db, viewer);
+export const reportBranches = (db: Db, viewer: Viewer): Promise<BranchRef[]> => forUserHistory(db, viewer);
 
 /** branch_id ที่ส่งมา = เฉพาะสาขานั้น ถ้าอ่านได้ · อ่านไม่ได้/ไม่มีจริง = [] (รายงานว่าง ไม่ใช่ทุกสาขา) */
 export const scopeTo = (readable: BranchRef[], branchId: string | undefined): BranchRef[] =>

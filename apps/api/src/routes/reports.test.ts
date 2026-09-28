@@ -165,6 +165,7 @@ describe.skipIf(!available)("รายงาน (M3.6 · finance_report3 · stoc
       { who: "mgr1", role: "manager" as const, branch: "00001" },
       { who: "mgr2", role: "manager" as const, branch: "00002" },
       { who: "acct", role: "accounting" as const, branch: "00000", viewAll: true },
+      { who: "acct2", role: "accounting" as const, branch: "00002" }, // บัญชีที่ดูแลเฉพาะสาขา 00002
       { who: "admin", role: "admin" as const, viewAll: true },
       { who: "nobranch", role: "manager" as const },
     ];
@@ -481,13 +482,22 @@ describe.skipIf(!available)("รายงาน (M3.6 · finance_report3 · stoc
       expect(r.total).toMatchObject({ count: "1", total_amount: "25555.55" });
     });
 
-    it("สาขาที่ปิดแล้ว: manager ของสาขานั้น = 403 · ไม่อยู่ในรายงานของผู้อื่น (ยังใช้ forUser)", async () => {
+    it("สาขาที่ปิดแล้ว: manager ของสาขานั้น = 403 · accounting/admin ยังอ่านย้อนหลังได้ (forUserHistory)", async () => {
       await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
       try {
         expect((await get("/purchase", "mgr2")).status).toBe(403);
-        const r = await purchase("");
-        expect(r.by_branch.map((b) => b.branch.code)).toEqual(["00000", "00001"]);
-        expect(r.rows.map((x) => x.id)).not.toContain(bills.b7);
+        for (const who of ["acct", "admin"]) {
+          const r = await purchase("", who);
+          expect(r.by_branch.map((b) => b.branch.code)).toEqual(["00000", "00001", "00002"]);
+          expect(r.rows.map((x) => x.id)).toContain(bills.b7);
+          expect(r.total).toMatchObject({ count: "5", total_amount: "85985.80" });
+        }
+        // บัญชีที่มีสิทธิ์เฉพาะสาขาที่ปิด: ยังเห็นเฉพาะสาขานั้น ไม่ใช่ทุกสาขา
+        const own = await purchase("", "acct2");
+        expect(own.rows.map((x) => x.id)).toEqual([bills.b7]);
+        expect(own.by_branch.map((b) => b.branch.code)).toEqual(["00002"]);
+        // manager สาขาอื่นไม่เห็นสาขาที่ปิด
+        expect((await purchase("", "mgr1")).by_branch.map((b) => b.branch.code)).toEqual(["00001"]);
       } finally {
         await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
       }
@@ -677,13 +687,16 @@ describe.skipIf(!available)("รายงาน (M3.6 · finance_report3 · stoc
       expect(fmtWeight(sumOf(own.total.by_metal.map((m) => m.grams)))).toBe(fmtWeight(D(sums[0]?.grams ?? "0")));
     });
 
-    it("สาขาที่ปิดแล้ว: manager ของสาขานั้น = 403 · ไม่อยู่ในรายงานของผู้อื่น (ยังใช้ forUser)", async () => {
+    it("สาขาที่ปิดแล้ว: manager ของสาขานั้น = 403 · accounting ยังเห็นสต็อกของสาขานั้น (forUserHistory)", async () => {
       await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
       try {
         expect((await get("/stock", "mgr2")).status).toBe(403);
         const r = await stock("");
-        expect(r.by_branch.map((b) => b.branch.code)).toEqual(["00000", "00001"]);
-        expect(r.total.by_metal.map((m) => m.grams)).toEqual(["17.360", "3.250", "100.000", "6.990"]);
+        expect(r.by_branch.map((b) => b.branch.code)).toEqual(["00000", "00001", "00002"]);
+        expect(r.total.by_metal.map((m) => m.grams)).toEqual(["25.137", "3.250", "18269.697", "6.990"]);
+        const own = await stock("", "acct2");
+        expect(own.by_branch.map((b) => b.branch.code)).toEqual(["00002"]);
+        expect(own.total.by_metal.map((m) => m.grams)).toEqual(["7.777", "0.000", "18169.697", "0.000"]);
       } finally {
         await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
       }
