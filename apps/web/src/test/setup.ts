@@ -1,3 +1,5 @@
+// zod แบบไม่ใช้ eval เหมือนในแอป (main.tsx import เป็นบรรทัดแรก)
+import "@/lib/zod-config";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
 import { toast } from "sonner";
