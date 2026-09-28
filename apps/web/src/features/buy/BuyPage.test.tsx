@@ -22,9 +22,11 @@ interface Options {
   customers?: FakeCustomer[];
   /** แทนคำตอบของ POST /api/buy (ค่าเริ่มต้น 201 + SAVED) — คืน Promise ได้เพื่อคุมเวลาตอบเอง (ดู defer()) */
   save?: (body: SaveBody, attempt: number) => Response | Promise<Response>;
+  /** แทนคำตอบของ POST /api/buy/quote (ค่าเริ่มต้น fakeQuote ที่คำนวณจริงด้วย quoteBuy) */
+  quote?: (body: QuoteBody) => Response;
 }
 
-function setup({ role = "staff", me, customers = [CUSTOMER_OK, CUSTOMER_EXPIRED], save }: Options = {}) {
+function setup({ role = "staff", me, customers = [CUSTOMER_OK, CUSTOMER_EXPIRED], save, quote }: Options = {}) {
   const db = { customers: [...customers] };
   let attempts = 0;
   const api = fakeApi({
@@ -32,7 +34,8 @@ function setup({ role = "staff", me, customers = [CUSTOMER_OK, CUSTOMER_EXPIRED]
     "GET /api/gold-price/today": () => json(GOLD_PRICE),
     "GET /api/metals": () => json(METALS),
     "GET /api/customers": ({ path }) => fakeCustomerSearch(path, db.customers),
-    "POST /api/buy/quote": ({ body }) => json(fakeQuote(body as QuoteBody, db.customers)),
+    "POST /api/buy/quote": ({ body }) =>
+      quote ? quote(body as QuoteBody) : json(fakeQuote(body as QuoteBody, db.customers)),
     "POST /api/buy": ({ body }) => (save ? save(body as SaveBody, ++attempts) : json(SAVED, 201)),
   });
   const user = userEvent.setup();
@@ -502,5 +505,21 @@ describe("/buy", () => {
     expect(removePayment).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(screen.getByText(t("payments.empty"))).toBeInTheDocument();
+  });
+
+  it("shows a payment's amount from the fresh quote by index, like lines' price_per_g (#77)", async () => {
+    const { user } = setup({
+      quote: (body) => {
+        const q = fakeQuote(body, [CUSTOMER_OK]);
+        // จงใจให้ยอดที่ quote ตอบต่างจากตัวเลขที่พิมพ์ ("100" → "100.50") พิสูจน์ว่าตารางอ่านจาก quote ไม่ใช่ข้อความที่พิมพ์เอง
+        return json({ ...q, payments: q.payments.map((p) => (p.index === 0 ? { ...p, amount: "100.50" } : p)) });
+      },
+    });
+    await insertCard(user, CUSTOMER_OK.national_id);
+    await waitFor(() => expect(weight()).toHaveFocus());
+    await addLine(user, "5.86", "20030");
+    await user.click(payAmount());
+    await user.keyboard("100{Enter}");
+    expect(await screen.findByText("100.50")).toBeInTheDocument();
   });
 });

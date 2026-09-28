@@ -46,6 +46,7 @@ const quote = (patch: Partial<Quote> = {}): Quote => ({
   branch: { id: "b1", code: "00000", name: "สำนักงานใหญ่" },
   gold_price_snapshot: "67850.00",
   lines: [],
+  payments: [],
   total_weight: "5.860",
   total_amount: "20030.00",
   avg_price_per_g: "3418.09",
