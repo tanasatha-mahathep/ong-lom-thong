@@ -28,7 +28,7 @@ import { cardFormat, syntheticNationalId, testName } from "./test/synthetic";
  * โดนตรวจทุกข้อข้างล่างทันทีโดยไม่ต้องแก้ไฟล์นี้ — ลืม requireSession · ลืมกัน CSRF · id ผิดรูปแล้ว 500 · error หลุด
  * ร่องรอยภายใน · หลุดเลขบัตร · เงินเป็น float · เปิด CORS · ผู้ใช้ไม่มีสาขาได้ข้อมูล · body ผิดรูปแล้ว 500 = แดง
  * ข้อยกเว้นทุกข้ออยู่ใน allowlist ด้านล่างพร้อมเหตุผล · ช่องโหว่ที่รู้แล้วมี it.fails ของตัวเองหนึ่งข้อต่อ finding
- * (F7 · F8 · F17) — แก้แล้ว it.fails จะแดง: เปลี่ยนเป็น it และลบค่าคงที่ของ finding นั้นออก (F4 · F9 · F13 แก้แล้ว — ตรึงเป็น it)
+ * แก้แล้ว it.fails จะแดง: เปลี่ยนเป็น it และลบค่าคงที่ของ finding นั้นออก — F4 · F7 · F8 · F9 · F13 · F17 แก้แล้ว (ตรึงเป็น it)
  *
  * มาตรฐาน: OWASP ASVS 4.0.3 (V3.3 · V4.1 · V4.2 · V5.1 · V7.4.1 · V8.2.1 · V8.3 · V13.2 · V14.5.3) และ 5.0 ·
  * OWASP API Security Top 10 2023 (API1 · API2 · API3 · API5 · API8 · API9) · RFC 9110 §9.2.1 (safe methods) ·
@@ -85,16 +85,23 @@ const BRANCHLESS_ALLOWED = new Map<string, (body: unknown) => void>([
   ],
 ]);
 
-// F8 — GET ที่ต้อง login แต่ยังไม่ส่ง Cache-Control: no-store · sweep ข้ามไว้ ตรวจใน it.fails "F8 — …" แทน · แก้แล้วลบออก
-const NO_STORE_PENDING_F8 = new Set([
-  "GET /api/me",
-  "GET /api/customers",
-  "GET /api/gold-price/today",
-  "GET /api/metals",
-]);
+/**
+ * 404 JSON ของ path ที่ไม่มีใต้ /api ทุก method (app.all("/api/*") · PR #61 แก้ F7) — ไม่ใช่ endpoint: ไม่ต้อง login
+ * (path ที่ไม่มีตอบ 404 เหมือนกันทุกคน) · ยังอยู่ใต้ sameOriginOnly (Origin แปลก = 403 ก่อน 404) · ตรวจแยกใน "path/method ที่ไม่มี"
+ */
+const NOT_FOUND_FALLBACK = "/api/*";
+const isFallback = (e: Endpoint) => e.path === NOT_FOUND_FALLBACK;
 
-// F17 — route ใหม่ของ PR #60 ที่ยังไม่ส่ง Cache-Control: no-store · sweep ข้ามไว้ ตรวจใน it.fails "F17 — …" แทน · แก้แล้วลบออก
-const NO_STORE_PENDING_F17 = new Set(["GET /api/gold-price/today/branches"]);
+/** header ความปลอดภัยที่ทุก response ของ /api ต้องมี (PR #61 · OWASP ASVS 4.0.3 V14.4 · RFC 9111 §5.2.2.5) */
+const SECURITY_HEADERS: [string, RegExp][] = [
+  ["cache-control", /\bno-store\b/],
+  ["x-content-type-options", /^nosniff$/],
+  ["x-frame-options", /^DENY$/],
+  ["content-security-policy", /frame-ancestors 'none'/],
+  ["referrer-policy", /^strict-origin-when-cross-origin$/],
+  ["strict-transport-security", /^max-age=\d+/],
+  ["cross-origin-opener-policy", /^same-origin$/],
+];
 
 /** route ที่ต้องเห็นเสมอ — กันชุดเทสต์ผ่านแบบว่างเปล่า (router อ่านไม่ออก = ไม่มีเทสต์ = เขียวหลอก) */
 const KNOWN_ROUTES = [
@@ -195,7 +202,7 @@ const isApi = (e: Endpoint) => e.path === "/api" || e.path.startsWith("/api/");
 const isStateChanging = (e: Endpoint) => (STATE_CHANGING as readonly string[]).includes(e.method);
 // HEAD ได้จาก GET เสมอ (Hono) — ตรวจคู่กับ GET ใน 401 sweep
 const swept = endpoints.filter((e) => e.method !== "HEAD");
-const guarded = swept.filter((e) => isApi(e) && !PUBLIC.has(e.key));
+const guarded = swept.filter((e) => isApi(e) && !PUBLIC.has(e.key) && !isFallback(e));
 const guardedGets = guarded.filter((e) => e.method === "GET");
 const guardedWrites = guarded.filter(isStateChanging);
 const csrfTargets = swept.filter((e) => isApi(e) && isStateChanging(e));
@@ -247,7 +254,6 @@ const seen = async (res: Response): Promise<Seen> => ({
 });
 const isJson = (type: string | null) => /^application\/json\b/.test(type ?? "");
 const noStore = /\bno-store\b/i;
-const pathOf = (key: string) => key.slice(key.indexOf(" ") + 1);
 /** id ในข้อความของเทสต์ — ตัวที่ยาวมากตัดให้สั้น · ตัวควบคุมถูก escape */
 const show = (id: string) => JSON.stringify(id.length > 40 ? `${id.slice(0, 12)}…(${id.length} ตัว)` : id);
 
@@ -442,20 +448,13 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
         NO_DELETE_ALLOWED: [...NO_DELETE_ALLOWED],
         PII_EXCEPTION: [PII_EXCEPTION],
         BRANCHLESS_ALLOWED: [...BRANCHLESS_ALLOWED.keys()],
-        NO_STORE_PENDING_F8: [...NO_STORE_PENDING_F8],
-        NO_STORE_PENDING_F17: [...NO_STORE_PENDING_F17],
       };
       for (const [name, entries] of Object.entries(lists)) {
         for (const key of entries)
           expect(keys.has(key), `${name} มี "${key}" ซึ่งไม่มี route นี้แล้ว — ลบออก`).toBe(true);
       }
       // ข้อยกเว้นของ GET sweep ต้องเป็น GET ที่ต้อง login จริง — ไม่งั้นข้ามไปเปล่า ๆ
-      for (const key of [
-        PII_EXCEPTION,
-        ...BRANCHLESS_ALLOWED.keys(),
-        ...NO_STORE_PENDING_F8,
-        ...NO_STORE_PENDING_F17,
-      ]) {
+      for (const key of [PII_EXCEPTION, ...BRANCHLESS_ALLOWED.keys()]) {
         expect(
           guardedGets.map((e) => e.key),
           key,
@@ -468,7 +467,9 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
       expect(outside, "route นอก /api ไม่ผ่าน sameOriginOnly — ย้ายเข้า /api หรือเพิ่มใน NON_API พร้อมเหตุผล").toEqual(
         [],
       );
-      const deletes = endpoints.filter((e) => e.method === "DELETE" && !NO_DELETE_ALLOWED.has(e.key)).map((e) => e.key);
+      const deletes = endpoints
+        .filter((e) => e.method === "DELETE" && !isFallback(e) && !NO_DELETE_ALLOWED.has(e.key))
+        .map((e) => e.key);
       expect(deletes, "ไม่มีการลบ — ยกเลิก = เอกสารใหม่ (CLAUDE.md กฎ 5 · spec §5)").toEqual([]);
     });
   });
@@ -632,6 +633,7 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
   describe("GET ทุกตัวที่ต้อง login — super · ข้อมูลจริง (ยิงครั้งเดียว ตรวจสามเรื่อง)", () => {
     interface Fetched extends Target, Seen {
       cacheControl: string | null;
+      headers: Record<string, string | null>;
     }
     const fetched = new Map<string, Fetched[]>();
     beforeAll(async () => {
@@ -639,7 +641,8 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
         const list: Fetched[] = [];
         for (const target of getTargets(e)) {
           const res = await hit(target.path, { cookie: cookies.super });
-          list.push({ ...target, cacheControl: res.headers.get("cache-control"), ...(await seen(res)) });
+          const headers = Object.fromEntries(SECURITY_HEADERS.map(([name]) => [name, res.headers.get(name)]));
+          list.push({ ...target, cacheControl: res.headers.get("cache-control"), headers, ...(await seen(res)) });
         }
         fetched.set(e.key, list);
       }
@@ -647,7 +650,7 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
     const responsesOf = (e: Endpoint) => fetched.get(e.key) ?? [];
 
     describe("Cache-Control: no-store (ASVS 4.0.3 V8.2.1 · API8:2023)", () => {
-      for (const e of guardedGets.filter((e) => !NO_STORE_PENDING_F8.has(e.key) && !NO_STORE_PENDING_F17.has(e.key))) {
+      for (const e of guardedGets) {
         it(`${e.key} → 2xx พร้อม Cache-Control: no-store`, (ctx) => {
           const ok = responsesOf(e).find((r) => r.status >= 200 && r.status < 300);
           if (!ok) return ctx.skip(`${e.key}: ไม่มีข้อมูลในไฟล์นี้ที่ทำให้ได้ 2xx — ตรวจ header ไม่ได้`);
@@ -655,26 +658,43 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
         });
       }
 
-      // วันนี้มีแค่ GET /api/customers/:id และ /:id/photo ที่ตั้ง no-store
-      // แก้: ตั้ง header ใน route (หรือ middleware ของ /api หลัง requireSession) แล้วลบออกจาก NO_STORE_PENDING_F8
-      it.fails(
-        "F8 — GET /api/me · /api/customers · /api/gold-price/today · /api/metals ต้องส่ง Cache-Control: no-store",
-        async () => {
-          for (const key of NO_STORE_PENDING_F8) {
-            const res = await hit(pathOf(key), { cookie: cookies.super });
-            expect(res.status, key).toBe(200);
-            expect(res.headers.get("cache-control"), key).toMatch(noStore);
-          }
-        },
-      );
+      // F8 · F17 — แก้แล้วใน dev (PR #61 · fix(api): send security headers and no-store on every api response):
+      // /api/* ตั้ง Cache-Control: no-store เป็นค่าเริ่มต้น (route ที่ตั้งเองใช้ค่าของ route) · เดิมเป็น it.fails สองตัว
+      // (F8: /api/me · รายการลูกค้า · ราคาวันนี้ · โลหะ · F17: ราคาวันนี้ทุกสาขาของ PR #60) — sweep ข้างบนครอบทุก GET แล้ว
+      it("F8 (แก้แล้ว) — รายการลูกค้า · /api/me · response ของ PUT /api/customers/:id (+ ราคาวันนี้ · โลหะ) ส่ง Cache-Control: no-store", async () => {
+        for (const path of ["/api/customers", "/api/me", "/api/gold-price/today", "/api/metals"]) {
+          const res = await hit(path, { cookie: cookies.super });
+          expect(res.status, path).toBe(200);
+          expect(res.headers.get("cache-control") ?? "(ไม่มี Cache-Control)", path).toMatch(noStore);
+        }
+        const put = await hit(`/api/customers/${custNoPhoto}`, {
+          method: "PUT",
+          cookie: cookies.super,
+          body: customerForm(ID_NO_PHOTO, "ลูกค้าไม่มีรูป"),
+        });
+        expect(put.status).toBe(200);
+        expect(put.headers.get("cache-control") ?? "(ไม่มี Cache-Control)", "PUT /api/customers/:id").toMatch(noStore);
+      });
 
-      // F17 — PR #60 เพิ่ม GET /api/gold-price/today/branches (ราคาวันนี้ของทุกสาขาที่อ่านได้) โดยไม่ตั้ง no-store — แบบเดียวกับ F8
-      // แก้: ตั้ง header ใน route (หรือ middleware ของ /api หลัง requireSession) แล้วลบออกจาก NO_STORE_PENDING_F17
-      it.fails("F17 — GET /api/gold-price/today/branches ต้องส่ง Cache-Control: no-store", async () => {
+      it("F17 (แก้แล้ว) — GET /api/gold-price/today/branches ส่ง Cache-Control: no-store", async () => {
         const res = await hit("/api/gold-price/today/branches", { cookie: cookies.super });
         expect(res.status).toBe(200);
         expect(res.headers.get("cache-control") ?? "(ไม่มี Cache-Control)").toMatch(noStore);
       });
+    });
+
+    describe("header ความปลอดภัยทุก response (PR #61 · ASVS 4.0.3 V14.4.3–V14.4.7 · V8.2.1)", () => {
+      for (const e of guardedGets) {
+        it(`${e.key} — nosniff · X-Frame-Options DENY · CSP frame-ancestors 'none' · Referrer-Policy · HSTS · COOP · no-store`, () => {
+          const responses = responsesOf(e);
+          expect(responses, e.key).not.toEqual([]);
+          for (const r of responses) {
+            for (const [name, pattern] of SECURITY_HEADERS) {
+              expect(r.headers[name] ?? `(ไม่มี ${name})`, `${e.key} [${r.path}] ${name}`).toMatch(pattern);
+            }
+          }
+        });
+      }
     });
 
     describe("เลขบัตรเต็มออกได้ที่ GET /api/customers/:id เท่านั้น (R13 · CLAUDE.md กฎ 7 · API3:2023)", () => {
@@ -866,19 +886,29 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
   });
 
   describe("path/method ที่ไม่มี", () => {
-    // สาเหตุ: app.ts ตั้ง api.notFound(...) ให้ sub-app แต่ Hono ไม่คัดลอก notFound ตอน app.route("/api", api)
-    // → ได้ notFound ของ app หลัก (ค่า default ของ Hono: text/plain "404 Not Found")
-    // production แย่กว่านี้: index.ts:16-17 ต่อ serveStatic + SPA fallback (GET /*) ท้ายแอป → GET /api/<ไม่มี> ได้
-    // index.html 200 text/html · แก้: app.notFound(JSON) ใน createApp และให้ SPA fallback ข้าม /api/*
-    // (ถ้าแก้ด้วย api.all("*") ใน sub-app แทน route นั้นจะโผล่ใน listEndpoints — ต้องเพิ่มเป็นข้อยกเว้นในไฟล์นี้)
-    it.fails(
-      'F7 — GET /api/does-not-exist และ DELETE /api/customers/:id → 404 JSON {error:"not found"} (spec §5)',
-      async () => {
-        const unknown = await hit("/api/does-not-exist", { cookie: cookies.super });
-        await expectError(unknown, 404, "not found", "GET /api/does-not-exist");
-        const del = await hit(`/api/customers/${randomUUID()}`, { method: "DELETE", cookie: cookies.super });
-        await expectError(del, 404, "not found", "DELETE /api/customers/:id");
-      },
-    );
+    // F7 — แก้แล้วใน dev (PR #61 · fix(api): answer unknown /api paths with a JSON 404): app.all("/api/*") ท้ายแอป
+    // เดิมเป็น it.fails (api.notFound ของ sub-app ไม่ถูกใช้ → text/plain "404 Not Found" · production ตกไป SPA index.html 200)
+    it('F7 (แก้แล้ว) — path/method ที่ไม่มีใต้ /api ทุก method → 404 JSON {error:"not found"} ทั้งมีและไม่มี session · Origin แปลก = 403 ก่อน', async () => {
+      for (const cookie of [cookies.super, undefined]) {
+        const who = cookie ? "super" : "ไม่มี cookie";
+        for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE"]) {
+          const res = await hit("/api/does-not-exist", { method, cookie, body: method === "GET" ? undefined : {} });
+          await expectError(res, 404, "not found", `${method} /api/does-not-exist [${who}]`);
+        }
+        const head = await hit("/api/does-not-exist", { method: "HEAD", cookie });
+        expect(head.status, `HEAD [${who}]`).toBe(404);
+        // method ที่ไม่มีบน prefix ที่ต้อง login (/api/customers/*): ไม่มี session = 401 ก่อน (ด่านของ router ครอบทุก method)
+        const del = await hit(`/api/customers/${randomUUID()}`, { method: "DELETE", cookie });
+        if (cookie) await expectError(del, 404, "not found", `DELETE /api/customers/:id [${who}]`);
+        else await expectError(del, 401, "unauthorized", `DELETE /api/customers/:id [${who}]`);
+      }
+      const foreign = await hit("/api/does-not-exist", {
+        method: "POST",
+        cookie: cookies.super,
+        origin: "https://evil.test",
+        body: {},
+      });
+      await expectError(foreign, 403, "forbidden origin", "POST /api/does-not-exist [Origin อื่น]");
+    });
   });
 });
