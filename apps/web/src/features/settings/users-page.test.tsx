@@ -1,4 +1,4 @@
-import { configure, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { AdminUser } from "@/features/settings/api";
@@ -17,9 +17,8 @@ import {
 } from "@/test/admin";
 import { fakeApi, json, renderApp } from "@/test/app";
 
-// ทุกเทสต์โหลดทั้งแอป (router + route chunk) — เครื่องที่รันเทสต์ขนานหนัก ๆ ช้าได้ · เพดานเท่านั้น
-configure({ asyncUtilTimeout: 10_000 });
-// เพดานต่อเทสต์: หลายขั้น (เปิดฟอร์ม → กรอก → บันทึก → dialog) ที่ load 40+ เกิน 15 วินาทีได้ — เทสต์ที่ผ่านไม่ช้าลง
+// เพดานต่อเทสต์ (ค่ากลาง 30 วินาที): หลายขั้น (เปิดฟอร์ม → กรอก → บันทึก → dialog) ทั้งแอปที่ load 50+ เกินได้
+// เพดานเท่านั้น — เทสต์ที่ผ่านไม่ช้าลง
 vi.setConfig({ testTimeout: 45_000 });
 
 /** กรอกทั้งข้อความในครั้งเดียว (เร็วกว่าพิมพ์ทีละตัวบนเครื่องที่โหลดหนัก) — ช่องที่ไม่ได้ทดสอบการพิมพ์ทีละตัว */
@@ -84,8 +83,8 @@ describe("/settings/users — สิทธิ์", () => {
 });
 
 describe("/settings/users — รายการและตัวกรอง", () => {
-  it("บทบาทภาษาไทย · สาขาหลัก/ที่อนุญาต (สาขาที่ปิดมีป้าย) · ทำงานได้ทุกสาขา · สถานะ · ป้าย “คุณ”", async () => {
-    await openUsers();
+  it("บทบาทภาษาไทย · สาขาหลัก/ที่อนุญาต (สาขาที่ปิดมีป้าย) · ทำงานได้ทุกสาขา · สถานะ · ป้าย “คุณ” · คลิกแถว = แก้ไข", async () => {
+    const { user } = await openUsers();
     expect(screen.getByRole("table", { name: "รายชื่อผู้ใช้" })).toBeInTheDocument();
 
     const me = rowOf(ME_ADMIN.name);
@@ -101,6 +100,13 @@ describe("/settings/users — รายการและตัวกรอง",
     const old = rowOf(INACTIVE_MANAGER.name);
     expect(old).toHaveTextContent("ผู้จัดการ");
     expect(old).toHaveTextContent("ปิดแล้ว");
+
+    // คลิกที่แถว (เมาส์) = ทางลัดเปิดฟอร์มแก้ไข · ปิดแล้วโฟกัสกลับปุ่มชื่อของแถวนั้น
+    await user.click(screen.getByText(STAFF.email));
+    const sheet = await screen.findByRole("dialog", { name: "แก้ไขผู้ใช้" });
+    expect(within(sheet).getByLabelText("อีเมล")).toHaveValue(STAFF.email);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.getByRole("button", { name: `${STAFF.name} — แก้ไข` })).toHaveFocus());
   });
 
   it("ตัวกรอง → URL (q · สาขา · บทบาท · สถานะ) และ API ได้ตัวกรองเดียวกัน · ล้างตัวกรอง", async () => {

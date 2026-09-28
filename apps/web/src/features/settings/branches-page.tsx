@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { createColumnHelper } from "@tanstack/react-table";
 import { CircleAlert, Plus, TriangleAlert, X } from "lucide-react";
-import { type MouseEvent, useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { DataTable } from "@/components/data-table";
 import { PageHeader } from "@/components/page-header";
@@ -16,7 +16,7 @@ import { AdminOnlyNotice } from "./admin-only";
 import type { AdminBranch, AffectedUser } from "./api";
 import { BranchForm } from "./branch-form";
 import { type BranchFormValues, branchValuesOf, newBranchValues, toBranchCreate, toBranchUpdate } from "./branch-model";
-import { focusMarkedField, useReturnFocus } from "./dialog-focus";
+import { editButtonOf, focusMarkedField, useReturnFocus } from "./dialog-focus";
 import { isForbidden } from "./errors";
 import { useTranslation } from "./i18n";
 import { adminBranchesQuery, useCreateBranch, useUpdateBranch } from "./queries";
@@ -57,8 +57,8 @@ function BranchesAdmin() {
   const [closed, setClosed] = useState<ClosedBranch | null>(null);
 
   const openEditor = useCallback(
-    (next: Editor, event: MouseEvent<HTMLElement>) => {
-      returnFocus.remember(event.currentTarget);
+    (next: Editor, opener: HTMLElement | null) => {
+      returnFocus.remember(opener);
       setEditor(next);
       setOpen(true);
     },
@@ -99,7 +99,8 @@ function BranchesAdmin() {
             type="button"
             className="text-left font-medium underline-offset-4 hover:underline"
             aria-label={t("branches.edit", { name: info.getValue() })}
-            onClick={(event) => openEditor({ mode: "edit", branch: info.row.original }, event)}
+            data-edit-id={info.row.original.id}
+            onClick={(event) => openEditor({ mode: "edit", branch: info.row.original }, event.currentTarget)}
           >
             {info.getValue()}
           </button>
@@ -160,7 +161,7 @@ function BranchesAdmin() {
         description={t("branches.description")}
         actions={
           !forbidden && (
-            <Button type="button" onClick={(event) => openEditor({ mode: "create" }, event)}>
+            <Button type="button" onClick={(event) => openEditor({ mode: "create" }, event.currentTarget)}>
               <Plus aria-hidden="true" />
               {t("branches.add")}
             </Button>
@@ -188,6 +189,8 @@ function BranchesAdmin() {
             columns={columns}
             data={branches}
             getRowId={(branch) => branch.id}
+            // ทางลัดของเมาส์ — คีย์บอร์ด/screen reader ใช้ปุ่มชื่อสาขา
+            onRowClick={(branch) => openEditor({ mode: "edit", branch }, editButtonOf(branch.id))}
             page={1}
             hasMore={false}
             onPageChange={() => undefined}

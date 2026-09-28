@@ -1,13 +1,12 @@
-import { configure, screen, waitFor, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Role } from "@/lib/queries";
 import { BRANCHES, BRANCH_2, BRANCH_2_ID, HQ, HQ_ID, shellFor } from "@/test/admin";
 import { fakeApi, json, renderApp } from "@/test/app";
 
-// ทุกเทสต์โหลดทั้งแอป (router + route chunk) — เครื่องที่รันเทสต์ขนานหนัก ๆ ช้าได้ · เพดานเท่านั้น
-configure({ asyncUtilTimeout: 10_000 });
-// เพดานต่อเทสต์: หลายขั้น (เปิดฟอร์ม → กรอก → บันทึก → dialog) ที่ load 40+ เกิน 15 วินาทีได้ — เทสต์ที่ผ่านไม่ช้าลง
+// เพดานต่อเทสต์ (ค่ากลาง 30 วินาที): หลายขั้น (เปิดฟอร์ม → กรอก → บันทึก → dialog) ทั้งแอปที่ load 50+ เกินได้
+// เพดานเท่านั้น — เทสต์ที่ผ่านไม่ช้าลง
 vi.setConfig({ testTimeout: 45_000 });
 
 /** กรอกทั้งข้อความในครั้งเดียว (เร็วกว่าพิมพ์ทีละตัวบนเครื่องที่โหลดหนัก) — ช่องที่ไม่ได้ทดสอบการพิมพ์ทีละตัว */
@@ -57,8 +56,8 @@ describe("/settings/branches — สิทธิ์", () => {
 });
 
 describe("/settings/branches — รายการ", () => {
-  it("รหัส · สาขาตามสรรพากร (รหัส + ป้ายบนใบ) · อักษรนำ · สถานะ · มีบิล", async () => {
-    await openAsAdmin();
+  it("รหัส · สาขาตามสรรพากร (รหัส + ป้ายบนใบ) · อักษรนำ · สถานะ · มีบิล · คลิกแถว = แก้ไข", async () => {
+    const { user } = await openAsAdmin();
     const [hq, second, closed] = dataRows();
 
     expect(hq).toHaveTextContent("00000 · สำนักงานใหญ่");
@@ -69,6 +68,12 @@ describe("/settings/branches — รายการ", () => {
     expect(second).toHaveTextContent("ยังไม่มี");
     expect(closed).toHaveTextContent("ยังไม่ได้ตั้ง — ออกใบรับซื้อไม่ได้");
     expect(closed).toHaveTextContent("ปิดแล้ว");
+
+    // คลิกที่แถว (เมาส์) = ทางลัดเปิดฟอร์มแก้ไข · ปิดแล้วโฟกัสกลับปุ่มชื่อของแถวนั้น
+    await user.click(within(second ?? document.body).getByText("PT"));
+    expect(await screen.findByRole("dialog", { name: "แก้ไขสาขา 00001" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.getByRole("button", { name: `${BRANCH_2.name} — แก้ไข` })).toHaveFocus());
   });
 });
 

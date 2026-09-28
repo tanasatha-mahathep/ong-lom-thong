@@ -44,3 +44,9 @@ export function useReturnFocus() {
     [],
   );
 }
+
+/** ปุ่มชื่อ (เปิดฟอร์มแก้ไข) ของแถว — คลิกที่แถวด้วยเมาส์แล้วปิดฟอร์ม โฟกัสกลับที่ปุ่มนี้ */
+export function editButtonOf(id: string): HTMLElement | null {
+  const buttons = document.querySelectorAll<HTMLElement>("[data-edit-id]");
+  return Array.from(buttons).find((button) => button.dataset.editId === id) ?? null;
+}

@@ -25,7 +25,7 @@ import { EMPTY } from "@/lib/format";
 import { useMe } from "@/lib/queries";
 import { AdminOnlyNotice } from "./admin-only";
 import type { AdminUser } from "./api";
-import { focusMarkedField, useReturnFocus } from "./dialog-focus";
+import { editButtonOf, focusMarkedField, useReturnFocus } from "./dialog-focus";
 import { isForbidden } from "./errors";
 import { FormAlert } from "./form-controls";
 import { useTranslation } from "./i18n";
@@ -86,8 +86,8 @@ function UsersAdmin() {
     void navigate({ search: (prev) => ({ ...prev, ...patch }), replace: true });
 
   const openEditor = useCallback(
-    (next: Editor, event: MouseEvent<HTMLElement>) => {
-      returnFocus.remember(event.currentTarget);
+    (next: Editor, opener: HTMLElement | null) => {
+      returnFocus.remember(opener);
       setEditor(next);
       setEditorOpen(true);
     },
@@ -165,7 +165,8 @@ function UsersAdmin() {
               type="button"
               className="text-left font-medium underline-offset-4 hover:underline"
               aria-label={t("users.edit", { name: info.getValue() })}
-              onClick={(event) => openEditor({ mode: "edit", user: info.row.original }, event)}
+              data-edit-id={info.row.original.id}
+              onClick={(event) => openEditor({ mode: "edit", user: info.row.original }, event.currentTarget)}
             >
               {info.getValue()}
             </button>
@@ -270,7 +271,7 @@ function UsersAdmin() {
         description={t("users.description")}
         actions={
           !forbidden && (
-            <Button type="button" onClick={(event) => openEditor({ mode: "create" }, event)}>
+            <Button type="button" onClick={(event) => openEditor({ mode: "create" }, event.currentTarget)}>
               <UserPlus aria-hidden="true" />
               {t("users.add")}
             </Button>
@@ -298,6 +299,8 @@ function UsersAdmin() {
             columns={columns}
             data={list.data ?? []}
             getRowId={(user) => user.id}
+            // ทางลัดของเมาส์ — คีย์บอร์ด/screen reader ใช้ปุ่มชื่อผู้ใช้
+            onRowClick={(user) => openEditor({ mode: "edit", user }, editButtonOf(user.id))}
             page={1}
             hasMore={false}
             onPageChange={() => undefined}
