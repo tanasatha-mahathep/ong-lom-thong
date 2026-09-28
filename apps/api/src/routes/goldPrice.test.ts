@@ -211,6 +211,7 @@ const DAY = {
   money: "2026-10-06",
   race: "2026-10-07",
   guard: "2026-10-08", // request ที่ต้องถูกปฏิเสธ — ถ้าหลุดจะเขียนลงวันนี้
+  cap: "2026-10-09", // เพดานราคา 999,999.99 (PR #60) — ค่าที่ผ่านเขียนลงวันนี้
 } as const;
 /** role ที่ตั้งราคาได้ (spec §10) — role อื่นทุกตัว รวมถึง role ที่เพิ่มในอนาคต ต้องได้ 403 */
 const PRICE_SETTERS: readonly Role[] = ["manager", "admin"];
@@ -549,56 +550,53 @@ describe.skipIf(!available)("สัญญา API ราคาทอง: สิ�
     expect(moneyShapeViolations(added[0]?.diff)).toEqual([]);
   });
 
-  // F3 — root cause: apps/api/src/routes/goldPrice.ts:31 ส่ง c.var.viewer.currentBranchId (ค่าดิบใน session) ให้
-  // priceForBranch ตรง ๆ ไม่ผ่าน currentBranch(viewer, await forUser(db, viewer)) ตามที่ lib/scope.ts:39-42 กำหนด
-  // ("สิทธิ์ถูกถอนระหว่าง session = null") → คนที่ถูกถอนสิทธิ์ / สาขาที่ปิดแล้วยังได้ราคาเฉพาะสาขา (API1 · ASVS V4.2.1)
-  // แก้: const b = currentBranch(v, await forUser(db, v)) แล้ว priceForBranch(db, date, b?.id ?? null)
-  it.fails(
-    "F3 — ถูกถอนสิทธิ์สาขา 00001 ระหว่าง session หรือสาขา 00001 ถูกปิด: GET /today ต้องได้ราคากลาง ไม่ใช่ราคาเฉพาะสาขา 00001",
-    async () => {
-      onDay(DAY.seeded);
-      const view = async () => {
-        const res = await today(cookies.multi);
-        const body = (await res.json()) as { bar_sell?: string; source?: string };
-        return { status: res.status, bar_sell: body.bar_sell, source: body.source };
-      };
-      const seen: Record<string, unknown> = {};
+  // F3 — แก้แล้วใน dev (PR #60 · fix(api): require an open branch …): GET /today หาสาขาปัจจุบันผ่าน
+  // currentBranch(viewer, await forUser(db, viewer)) — ถูกถอนสิทธิ์/สาขาถูกปิดระหว่าง session = ราคากลาง (fail-closed)
+  // เดิมเป็น it.fails (ได้ราคาเฉพาะสาขา 00001 ทั้งที่ไม่มีสิทธิ์แล้ว) · ตอนนี้ตรึงพฤติกรรมที่ถูกไว้
+  it("F3 (แก้แล้ว) — ถูกถอนสิทธิ์สาขา 00001 ระหว่าง session หรือสาขา 00001 ถูกปิด: GET /today ได้ราคากลาง ไม่ใช่ราคาเฉพาะสาขา 00001", async () => {
+    onDay(DAY.seeded);
+    const view = async () => {
+      const res = await today(cookies.multi);
+      const body = (await res.json()) as { bar_sell?: string; source?: string };
+      return { status: res.status, bar_sell: body.bar_sell, source: body.source };
+    };
+    const seen: Record<string, unknown> = {};
 
-      await switchBranch("multi", "00001");
+    await switchBranch("multi", "00001");
+    await t.db
+      .update(user)
+      .set({ allowedBranchIds: [] })
+      .where(eq(user.id, uid("multi")));
+    try {
+      seen.revoked = await view();
+    } finally {
       await t.db
         .update(user)
-        .set({ allowedBranchIds: [] })
+        .set({ allowedBranchIds: [bid("00001")] })
         .where(eq(user.id, uid("multi")));
-      try {
-        seen.revoked = await view();
-      } finally {
-        await t.db
-          .update(user)
-          .set({ allowedBranchIds: [bid("00001")] })
-          .where(eq(user.id, uid("multi")));
-      }
+    }
 
-      await switchBranch("multi", "00001");
+    await switchBranch("multi", "00001");
+    await t.db
+      .update(branch)
+      .set({ isActive: false })
+      .where(eq(branch.id, bid("00001")));
+    try {
+      seen.closed = await view();
+    } finally {
       await t.db
         .update(branch)
-        .set({ isActive: false })
+        .set({ isActive: true })
         .where(eq(branch.id, bid("00001")));
-      try {
-        seen.closed = await view();
-      } finally {
-        await t.db
-          .update(branch)
-          .set({ isActive: true })
-          .where(eq(branch.id, bid("00001")));
-      }
+    }
 
-      const central = { status: 200, bar_sell: "67850.00", source: "central" };
-      expect(seen).toEqual({ revoked: central, closed: central });
-    },
-  );
+    const central = { status: 200, bar_sell: "67850.00", source: "central" };
+    expect(seen).toEqual({ revoked: central, closed: central });
+  });
 
-  // F5 — root cause: apps/api/src/routes/goldPrice.ts:54-55 ทุกความผิดของ SetBody ตอบ field "bar_sell"
-  // (confirm_typo ผิดชนิดก็ชี้ bar_sell) · แก้: ใช้ path ของ issue แรกจาก zod (body.error.issues[0].path[0]) เป็น field
+  // F5 — ยังไม่แก้: routes/goldPrice.ts PUT /today ตอบ BAR_SELL_ERROR (field "bar_sell") ทุกครั้งที่ SetBody ไม่ผ่าน
+  // (confirm_typo ผิดชนิดก็ชี้ bar_sell) · PR #60 แก้อีกเรื่อง: 409 ของด่านพิมพ์ผิดชี้ confirm_typo แล้ว (เทสต์ของ dev ข้างบน)
+  // แก้: ใช้ path ของ issue แรกจาก zod (body.error.issues[0].path[0]) เป็น field
   it.fails(
     "F5 — PUT /today: confirm_typo ที่ไม่ใช่ boolean → 400 ชี้ช่อง confirm_typo (ไม่ใช่ bar_sell) · ไม่เขียนอะไร",
     async () => {
@@ -651,6 +649,28 @@ describe.skipIf(!available)("สัญญา API ราคาทอง: สิ�
       expect(res.status, bar_sell).toBe(200);
       expect(((await res.json()) as { bar_sell: string }).bar_sell, bar_sell).toBe(normalised);
     }
+  });
+
+  it("เพดานราคาทองแท่ง (PR #60): 999,999.99 ผ่านทั้ง quote และ PUT · 1,000,000.00 → 400 ชี้ bar_sell · ไม่เขียนอะไร (boundary value)", async () => {
+    onDay(DAY.cap);
+    const tooHigh = { error: "ราคาทองสูงผิดปกติ — ตรวจตัวเลขอีกครั้ง", field: "bar_sell" };
+    for (const bar_sell of ["1000000", "1000000.00", "1,000,000.00"]) {
+      expect(await expectApiError(await quote(cookies.staff, { bar_sell }), 400, `quote ${bar_sell}`)).toEqual(tooHigh);
+      const before = await writes();
+      const res = await put(cookies.manager, { bar_sell, confirm_typo: true });
+      expect(await expectApiError(res, 400, `PUT ${bar_sell}`)).toEqual(tooHigh);
+      expect(await writes(), `PUT ${bar_sell} ต้องไม่เขียนอะไร`).toEqual(before);
+    }
+    const top = { bar_sell: "999999.99", bar_buy: "999799.99", jewelry_buy: "949810" };
+    for (const bar_sell of ["999999.99", "999,999.99"]) {
+      const q = await quote(cookies.staff, { bar_sell });
+      expect(q.status, bar_sell).toBe(200);
+      expect(await q.json(), bar_sell).toMatchObject(top);
+    }
+    // ห่างจากราคาวันก่อนมาก → ต้องยืนยันด่านพิมพ์ผิด แล้วบันทึกได้ที่เพดานพอดี
+    const saved = await put(cookies.manager, { bar_sell: "999,999.99", confirm_typo: true });
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({ date: DAY.cap, ...top, source: "central" });
   });
 
   // F11 — root cause: apps/api/src/services/goldPrice.ts:94-98 setCentralPrice อ่าน before ด้วย SELECT … FOR UPDATE
@@ -708,31 +728,26 @@ describe.skipIf(!available)("สัญญา API ราคาทอง: สิ�
     },
   );
 
-  // F10 — root cause: apps/api/src/services/goldPrice.ts:38-44 quoteGoldPrice ไม่มีเพดานราคา แต่คอลัมน์เงินเป็น
-  // numeric(14,2) (packages/db/src/schema.ts:21 · :154) เก็บได้ไม่ถึง 1,000,000,000,000 → quote ตอบ 200 แต่ PUT
-  // โยน numeric field overflow → 500 (apps/api/src/app.ts:50-53) — preview กับ save ให้ผลต่างกัน (กฎ 2 · ASVS V5.1.4)
-  // แก้: เพดานใน quoteGoldPrice (ไม่เกินที่คอลัมน์เก็บได้ หรือเพดานธุรกิจ) → GoldPriceInputError → 400 ชี้ช่อง bar_sell
-  it.fails(
-    "F10 — bar_sell เกินที่คอลัมน์เงินเก็บได้ (1,000,000,000,000) → 400 ชี้ช่อง bar_sell ทั้ง quote และ PUT · ไม่ใช่ 200/500 · ไม่เขียนอะไร",
-    async () => {
-      onDay(DAY.guard);
-      const before = await writes();
-      // ตอนนี้ PUT เป็น 500 → app.onError พิมพ์ PostgresError — ปิดเสียงเฉพาะเทสต์นี้
-      const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-      const seen: Record<string, { status: number; field: string | null }> = {};
-      try {
-        for (const [method, path] of BODY_ROUTES) {
-          const body = JSON.stringify({ bar_sell: "1000000000000", confirm_typo: true });
-          seen[method] = await outcome(await raw(method, path, { cookie: cookies.manager, body }));
-        }
-      } finally {
-        consoleError.mockRestore();
+  // F10 — แก้แล้วใน dev (PR #60 · fix(api): cap the gold bar price at 999,999.99): เดิม quote ตอบ 200 แต่ PUT ล้น
+  // numeric(14,2) → 500 (preview กับ save ตัดสินต่างกัน · กฎ 2) · ตอนนี้ทั้งคู่ 400 ชี้ bar_sell ด้วยเหตุผลเดียวกัน
+  it("F10 (แก้แล้ว) — bar_sell เกินที่คอลัมน์เงินเก็บได้ (1,000,000,000,000) → 400 ชี้ช่อง bar_sell ทั้ง quote และ PUT · ไม่ใช่ 200/500 · ไม่เขียนอะไร", async () => {
+    onDay(DAY.guard);
+    const before = await writes();
+    // ตอนนี้ PUT เป็น 500 → app.onError พิมพ์ PostgresError — ปิดเสียงเฉพาะเทสต์นี้
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const seen: Record<string, { status: number; field: string | null }> = {};
+    try {
+      for (const [method, path] of BODY_ROUTES) {
+        const body = JSON.stringify({ bar_sell: "1000000000000", confirm_typo: true });
+        seen[method] = await outcome(await raw(method, path, { cookie: cookies.manager, body }));
       }
-      const rejected = { status: 400, field: "bar_sell" };
-      expect(seen).toEqual({ POST: rejected, PUT: rejected });
-      expect(await writes()).toEqual(before);
-    },
-  );
+    } finally {
+      consoleError.mockRestore();
+    }
+    const rejected = { status: 400, field: "bar_sell" };
+    expect(seen).toEqual({ POST: rejected, PUT: rejected });
+    expect(await writes()).toEqual(before);
+  });
 
   // F12 — root cause: apps/api/src/routes/goldPrice.ts:37 และ :54 เรียก c.req.json() โดยไม่ดู Content-Type → body
   // JSON ที่มาเป็น text/plain (ชนิดที่ฟอร์ม HTML ข้ามเว็บส่งได้โดยไม่มี preflight) ถูกรับเหมือน application/json
