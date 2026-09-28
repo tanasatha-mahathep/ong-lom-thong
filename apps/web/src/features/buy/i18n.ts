@@ -2,8 +2,8 @@ import th from "./locales/th";
 
 /**
  * ตัวอ่านข้อความชั่วคราวของ namespace "buy" จนกว่า i18next (feat/web-i18n-theme) จะเข้า dev —
- * รูปการเรียกเหมือน `const { t } = useTranslation("buy")` ทุกอย่าง: `t("save.saved", { docNo })`
- * ตอนสลับ: แทน `useBuyT()` ด้วย `useTranslation("buy").t` แล้วลงทะเบียน locales/th.ts · en.ts เป็น resource
+ * เรียกแบบเดียวกับ react-i18next ทุกอย่าง: `const { t } = useTranslation("buy"); t("save.saved", { docNo })`
+ * ตอนสลับ: เปลี่ยน import เป็น "react-i18next" แล้วลงทะเบียน locales/th.ts เป็น resource ของ namespace "buy"
  */
 
 type Leaves<T, P extends string = ""> = {
@@ -29,6 +29,7 @@ export const t: BuyT = (key, vars) =>
     vars && name in vars ? String(vars[name]) : whole,
   );
 
-export function useBuyT(): BuyT {
-  return t;
+/** รูปเดียวกับ react-i18next — ตอนสลับเปลี่ยนแค่ import เป็น "react-i18next" */
+export function useTranslation(_ns: "buy"): { t: BuyT } {
+  return { t };
 }

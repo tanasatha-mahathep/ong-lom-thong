@@ -15,12 +15,12 @@ import { Button } from "@/components/ui/button";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { useBuyT } from "../i18n";
+import { useTranslation } from "../i18n";
 import type { BuyController } from "../use-buy-controller";
 
 /** แถบล่างติดจอ: ยอดรวม · ชำระแล้ว · คงเหลือ (จาก quote) · เหตุที่ยังบันทึกไม่ได้ · บันทึก · ล้างบิล */
 export function SaveBar({ c }: { c: BuyController }) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const id = useId();
   const { quote, fresh, saveBlock, saving, register, actions } = c;
   const cleared = useRef(false);
@@ -95,7 +95,7 @@ export function SaveBar({ c }: { c: BuyController }) {
 }
 
 function Total({ label, value, strong }: { label: string; value: string | undefined; strong?: boolean }) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   return (
     <div className="flex items-baseline gap-1.5">
       <dt className="text-sm text-muted-foreground">{label}</dt>
@@ -112,7 +112,7 @@ function Total({ label, value, strong }: { label: string; value: string | undefi
  * ให้เลือกเอง: เปิดบิลที่บันทึกแล้ว หรือบันทึกบิลที่กรอกอยู่เป็นใบใหม่ (key ใหม่)
  */
 export function ConflictDialog({ c }: { c: BuyController }) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const { conflict, actions } = c;
   return (
     <AlertDialog open={conflict !== null} onOpenChange={(open) => !open && actions.closeConflict()}>

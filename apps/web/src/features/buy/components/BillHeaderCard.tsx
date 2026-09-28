@@ -11,13 +11,13 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { formatBoardPrice, formatThaiDate } from "@/lib/format";
 import { canSetGoldPrice } from "@/lib/nav";
-import { useBuyT } from "../i18n";
+import { useTranslation } from "../i18n";
 import type { BuyController } from "../use-buy-controller";
 import { describedBy, isPlainEnter } from "./field-helpers";
 
 /** หัวบิล: วันที่ · เวลา · ราคาทองแท่งขายออกของวันบิล · สาขา — แก้ไม่ได้ ยกเว้นบิลย้อนหลัง (ผู้จัดการขึ้นไป) */
 export function BillHeaderCard({ c }: { c: BuyController }) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const id = useId();
   const { quote, state } = c;
   const goldPriceError = c.fieldError("gold_price");
@@ -99,7 +99,7 @@ function HeaderItem({ label, hint, children }: { label: string; hint?: string; c
 
 /** วันที่ (พ.ศ. แบบพิมพ์ ห้าม date picker) · เวลา · เหตุผล — ยืนยันวันที่ตอนออกจากช่องหรือกด Enter */
 function BackdateFields({ c }: { c: BuyController }) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const id = useId();
   const b = c.state.backdate;
   const { register, actions } = c;

@@ -13,7 +13,7 @@ import { ApiError, apiFetch, errorMessage } from "@/lib/api";
 import { normalizeDecimalInput } from "@/lib/decimal-input";
 import { type Me, meQueryOptions } from "@/lib/queries";
 import { todayIso } from "@/lib/thai-date";
-import { useBuyT } from "./i18n";
+import { useTranslation } from "./i18n";
 import {
   type BuyAction,
   type EntryError,
@@ -114,7 +114,7 @@ function entryErrorOf<F extends string>(
  * ค้นลูกค้า · บันทึก + idempotency key · โฟกัส — ตัวเลขเงินทั้งหมดมาจาก API
  */
 export function useBuyController(me: Me, metals: readonly Metal[]) {
-  const t = useBuyT();
+  const { t } = useTranslation("buy");
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [state, dispatch] = useReducer(buyReducer, initialBuyState);
