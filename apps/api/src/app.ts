@@ -4,6 +4,7 @@ import type { Auth } from "./auth";
 import type { Env } from "./env";
 import { type AppEnv, apiError } from "./lib/context";
 import { sameOriginOnly } from "./lib/origin";
+import type { Storage } from "./lib/storage";
 import { goldPriceRoutes } from "./routes/goldPrice";
 import { me } from "./routes/me";
 import { metalRoutes } from "./routes/metals";
@@ -12,18 +13,20 @@ export interface AppDeps {
   db: Db;
   auth: Auth;
   env: Env;
+  storage: Storage;
   now?: () => Date;
 }
 
 const health = () => ({ ok: true, time: new Date().toISOString() });
 
 /** ประกอบแอปจาก dependency ที่ส่งเข้ามา — เทสต์เรียก app.request() ได้โดยไม่ต้องเปิดพอร์ต */
-export function createApp({ db, auth, env, now = () => new Date() }: AppDeps) {
+export function createApp({ db, auth, env, storage, now = () => new Date() }: AppDeps) {
   const app = new Hono<AppEnv>();
   app.use(async (c, next) => {
     c.set("db", db);
     c.set("auth", auth);
     c.set("env", env);
+    c.set("storage", storage);
     c.set("now", now);
     await next();
   });

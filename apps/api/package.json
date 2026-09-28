@@ -18,6 +18,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1141.0",
     "@hono/node-server": "^1.14",
     "@ong/core": "workspace:*",
     "@ong/db": "workspace:*",
