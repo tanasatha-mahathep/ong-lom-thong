@@ -29,6 +29,16 @@ function expectDecimal(actual: Decimal | null, expected: string): void {
   expect(actual?.toFixed()).toBe(new Decimal(expected).toFixed());
 }
 
+/** คืน error ที่ fn throw — ถ้าไม่ throw เทสต์ fail ทันที (กันผ่านลอย ๆ) */
+function caught(fn: () => unknown): unknown {
+  try {
+    fn();
+  } catch (e) {
+    return e;
+  }
+  throw new Error("คาดว่าจะ throw แต่ไม่ throw");
+}
+
 // ข้อความไม่ว่างที่ไม่ใช่ตัวเลข — error guessing จากความผิดพลาดที่หน้าร้าน
 const NOT_A_NUMBER = [
   ",", // ถอดคอมมาแล้วว่าง
@@ -372,6 +382,201 @@ describe("ZERO — ค่าเริ่มของยอดสะสม", () =
     expectDecimal(total, "23030.50"); // 20,030 + 3,000.50
     expect(total).not.toBe(ZERO);
     expectDecimal(ZERO, "0");
+  });
+});
+
+describe("requireDecimal — ตัวเลขที่ต้องมีบนเอกสาร: ใช้ไม่ได้ = ReceiptDataError (แบ่งกลุ่มสมมูล · ข้อความ error แบบเป๊ะ)", () => {
+  it("Decimal → คืนตัวเดิม ไม่คัดลอก", () => {
+    const x = new Decimal("20030");
+    expect(requireDecimal(x)).toBe(x);
+  });
+
+  it.each<[string, string, string]>([
+    ['"20030"', "20030", "20030"],
+    ['"20,030.50" คอมมาหลักพัน', "20030.50", "20,030.50"],
+    ['" 5.860 " ช่องว่างรอบ', "5.86", " 5.860 "],
+    ['"0" — ศูนย์เป็นตัวเลข (ต้องมากกว่า 0 หรือไม่ ผู้เรียกตัดสิน)', "0", "0"],
+    ['"-970"', "-970", "-970"],
+  ])("ใช้ได้: %s → %s", (_label, expected, v) => {
+    expectDecimal(requireDecimal(v), expected);
+  });
+
+  // ข้อความ = `${what}ไม่ใช่ตัวเลข: "${String(v)}"` · what ค่าเริ่ม = "ตัวเลข" · v คือค่าดิบที่ส่งมา (ไม่ trim)
+  it.each<[string, string | Decimal, string]>([
+    ["ว่าง", "", 'ตัวเลขไม่ใช่ตัวเลข: ""'],
+    ["ช่องว่างล้วน", "   ", 'ตัวเลขไม่ใช่ตัวเลข: "   "'],
+    ["ตัวอักษร", "abc", 'ตัวเลขไม่ใช่ตัวเลข: "abc"'],
+    ["ตัวเลขปนอักษร", "12abc", 'ตัวเลขไม่ใช่ตัวเลข: "12abc"'],
+    ["เลขไทย", "๖๗๘๕๐", 'ตัวเลขไม่ใช่ตัวเลข: "๖๗๘๕๐"'],
+    ['"NaN"', "NaN", 'ตัวเลขไม่ใช่ตัวเลข: "NaN"'],
+    ['"Infinity"', "Infinity", 'ตัวเลขไม่ใช่ตัวเลข: "Infinity"'],
+    ['"-Infinity"', "-Infinity", 'ตัวเลขไม่ใช่ตัวเลข: "-Infinity"'],
+    ["Decimal NaN", new Decimal(NaN), 'ตัวเลขไม่ใช่ตัวเลข: "NaN"'],
+    ["Decimal -Infinity", new Decimal(-Infinity), 'ตัวเลขไม่ใช่ตัวเลข: "-Infinity"'],
+  ])("%s → ReceiptDataError ข้อความเป๊ะ (what ค่าเริ่ม)", (_label, v, message) => {
+    const err = caught(() => requireDecimal(v));
+    expect(err).toBeInstanceOf(ReceiptDataError);
+    expect(err).toHaveProperty("name", "ReceiptDataError");
+    expect(err).toHaveProperty("message", message);
+  });
+
+  it("what กำหนดเองขึ้นต้นข้อความ — งาน PDF บอกได้ว่าช่องไหนเสีย", () => {
+    const err = caught(() => requireDecimal("12abc", "ราคา"));
+    expect(err).toBeInstanceOf(ReceiptDataError);
+    expect(err).toHaveProperty("message", 'ราคาไม่ใช่ตัวเลข: "12abc"');
+  });
+
+  it("formatMoney · formatWeight ส่ง what ของตัวเอง: จำนวนเงิน · น้ำหนัก", () => {
+    expect(caught(() => formatMoney("abc"))).toHaveProperty("message", 'จำนวนเงินไม่ใช่ตัวเลข: "abc"');
+    expect(caught(() => formatWeight("abc"))).toHaveProperty("message", 'น้ำหนักไม่ใช่ตัวเลข: "abc"');
+  });
+});
+
+// เทมเพลตพิมพ์ Django ที่เทียบใบจริงแล้วใช้ floatformat (ROUND_HALF_UP · ศูนย์ไม่ใส่เครื่องหมายลบ) + intcomma
+describe("formatMoney — เงินบนใบพิมพ์ (ค่าขอบกลุ่มหลักพัน · HALF_UP ที่หลักทศนิยมที่ 3 · ศูนย์ติดลบ)", () => {
+  // ความยาวส่วนจำนวนเต็ม 3|4 · 6|7 · 9|10 หลัก และ 12 หลัก (สูงสุดของ numeric(14,2)) ทั้งบวกและลบ
+  it.each<[string, string]>([
+    ["5", "5.00"],
+    ["99999", "99,999.00"], // หัวกลุ่ม 2 หลัก
+    ["100000", "100,000.00"], // หัวกลุ่ม 3 หลัก
+    ["999999", "999,999.00"], // 6 หลัก ไม่มีคอมมานำหน้า
+    ["1000000", "1,000,000.00"],
+    ["999999999", "999,999,999.00"],
+    ["1000000000", "1,000,000,000.00"],
+    ["-999", "-999.00"],
+    ["-1000", "-1,000.00"], // ไม่มีคอมมาแทรกหลังเครื่องหมายลบ
+    ["-999999", "-999,999.00"],
+    ["-1000000", "-1,000,000.00"],
+    ["-999999999999.99", "-999,999,999,999.99"],
+  ])("กลุ่มหลัก: %s → %s", (v, want) => {
+    expect(formatMoney(v)).toBe(want);
+  });
+
+  it.each<[string, string]>([
+    ["1.004", "1.00"],
+    ["1.0049", "1.00"], // ไม่ปัดสองทอด
+    ["1.005", "1.01"],
+    ["1.006", "1.01"],
+    ["1.025", "1.03"], // HALF_EVEN ได้ 1.02
+    ["999.995", "1,000.00"], // ปัดแล้วทดข้ามขอบ → เกิดคอมมาใหม่
+    ["999999.995", "1,000,000.00"],
+    ["-1.004", "-1.00"],
+    ["-1.005", "-1.01"], // เสมอ → หนีศูนย์
+    ["-1.006", "-1.01"],
+    ["-999.995", "-1,000.00"],
+  ])("HALF_UP: %s → %s", (v, want) => {
+    expect(formatMoney(v)).toBe(want);
+  });
+
+  // ปัดแล้วเป็นศูนย์ต้องพิมพ์ 0.00 (เอกสารภาษีไม่มี −0.00) · ยังไม่เป็นศูนย์ต้องคงเครื่องหมาย
+  it.each<[string, string]>([
+    ["-0.004", "0.00"],
+    ["-0.005", "-0.01"], // เสมอ → หนีศูนย์ = −0.01 จริง
+    ["-0", "0.00"],
+    ["-0.00", "0.00"],
+  ])("ศูนย์ติดลบ: %s → %s", (v, want) => {
+    expect(formatMoney(v)).toBe(want);
+  });
+});
+
+describe("formatWeight — น้ำหนักบนใบพิมพ์ (ค่าขอบการเติมศูนย์และกลุ่มหลักพัน · HALF_UP ที่หลักทศนิยมที่ 4)", () => {
+  it.each<[string, string]>([
+    ["0", "0.000"],
+    ["5", "5.000"], // เติมศูนย์ 3 ตัว
+    ["5.8", "5.800"], // เติม 2 ตัว
+    ["0.001", "0.001"], // ขั้นเล็กสุดที่ R3 รับ ไม่ต้องเติม
+    ["999.999", "999.999"],
+    ["1000", "1,000.000"],
+    ["999999.999", "999,999.999"],
+    ["1000000", "1,000,000.000"],
+    ["-1000", "-1,000.000"],
+  ])("เติมศูนย์/กลุ่มหลัก: %s → %s", (v, want) => {
+    expect(formatWeight(v)).toBe(want);
+  });
+
+  // R3 รับน้ำหนัก ≤ 3 ตำแหน่งตั้งแต่ต้น — หลักที่ 4 จึงเป็นด่านสำรอง ปัด HALF_UP แบบ floatformat:3 ของเทมเพลตพิมพ์ Django
+  it.each<[string, string]>([
+    ["1.0004", "1.000"],
+    ["1.00049", "1.000"], // ไม่ปัดสองทอด
+    ["1.0005", "1.001"],
+    ["1.0006", "1.001"],
+    ["1.0025", "1.003"], // HALF_EVEN ได้ 1.002
+    ["999.9995", "1,000.000"], // ปัดแล้วทดข้ามขอบ → เกิดคอมมาใหม่
+    ["-1.0005", "-1.001"],
+    ["-0.0004", "0.000"], // ปัดแล้วเป็นศูนย์ → ไม่พิมพ์เครื่องหมายลบ
+    ["-0.0005", "-0.001"],
+  ])("HALF_UP: %s → %s", (v, want) => {
+    expect(formatWeight(v)).toBe(want);
+  });
+});
+
+describe("formatMoney · formatWeight — ชนิดข้อมูลเข้า: string มีคอมมา/ช่องว่าง · Decimal · format ซ้ำได้ค่าเดิม", () => {
+  // คอมมา: requireDecimal → parseDecimal → D ถอด "ทุก" คอมมาโดยไม่ดูตำแหน่ง → คอมมาหลักพันที่ถูกรูปอ่านกลับได้ตรง
+  // คอมมาผิดตำแหน่ง ("5,86" → 586) คือคำถามเปิด Q1 — ตั้งใจไม่ตรึงไว้ที่นี่ ทั้งทางรับและทางปฏิเสธ
+  it.each<[string, string]>([
+    ["1,234,567.891", "1,234,567.89"],
+    ["-1,234.50", "-1,234.50"],
+    [" 20,030 ", "20,030.00"],
+    ["\t3418.09\n", "3,418.09"],
+  ])("เงิน %j → %s", (v, want) => {
+    expect(formatMoney(v)).toBe(want);
+  });
+
+  it.each<[string, string]>([
+    ["1,250.5", "1,250.500"],
+    [" 5.86 ", "5.860"],
+    ["\t0.1\n", "0.100"],
+  ])("น้ำหนัก %j → %s", (v, want) => {
+    expect(formatWeight(v)).toBe(want);
+  });
+
+  it("Decimal: ราคา/กรัมจากใบจริง 20,030 ÷ 5.860 → 3,418.09 · 5.86 → 5.860 · −0.004 → 0.00", () => {
+    expect(formatMoney(new Decimal("20030").div(new Decimal("5.860")))).toBe("3,418.09");
+    expect(formatWeight(new Decimal("5.86"))).toBe("5.860");
+    expect(formatMoney(new Decimal("-0.004"))).toBe("0.00"); // ทาง API: fmtMoney(D("-0.004")) ยังได้ "-0.00" (คำถามเปิดเดิม)
+  });
+
+  // metamorphic: ผลของตัวเองมีคอมมาหลักพันที่ถูกรูปเสมอ → format ซ้ำต้องได้สตริงเดิม
+  it.each(["999999999999.99", "-1234.5", "999.995", "-0.004", "0.005", "67,850"])(
+    "format ซ้ำบนผลของ %j ได้สตริงเดิม",
+    (v) => {
+      const money = formatMoney(v);
+      expect(formatMoney(money)).toBe(money);
+      const weight = formatWeight(v);
+      expect(formatWeight(weight)).toBe(weight);
+    },
+  );
+});
+
+describe("formatMoney · formatWeight — ทุกค่ารอบขอบกลุ่มหลัก (property: รูปร่างสตริง · ไม่มี −0 · ค่าตรงนิยาม roundTiesToAway)", () => {
+  // ศูนย์กลาง 0 · ±10^3 · ±10^6 · ±10^9 บวกทุกค่า ±200 ขั้นที่ละเอียดกว่าหลักที่พิมพ์ 1 หลัก (หลักที่ถูกตัดครบ 0–9)
+  // → ข้ามขอบ 999|1,000 · 999,999|1,000,000 · 999,999,999|1,000,000,000 ทั้งสองฝั่ง รวมกรณีปัดแล้วทดข้ามขอบ
+  const centers = ["0", "1000", "-1000", "1000000", "-1000000", "1000000000", "-1000000000"].map((c) => new Decimal(c));
+
+  it.each<[string, (v: Decimal) => string, string, RegExp]>([
+    ["formatMoney: ขั้น 0.001 ช่วง ±0.2", formatMoney, "0.001", /^-?(0|[1-9]\d{0,2}(,\d{3})*)\.\d{2}$/],
+    ["formatWeight: ขั้น 0.0001 ช่วง ±0.02", formatWeight, "0.0001", /^-?(0|[1-9]\d{0,2}(,\d{3})*)\.\d{3}$/],
+  ])("%s", (_label, format, step, shape) => {
+    const unit = new Decimal(step);
+    const half = unit.times(5); // ครึ่งขั้นของหลักที่พิมพ์: 0.005 · 0.0005
+    const wrong: string[] = [];
+    let ties = 0;
+    for (const c of centers) {
+      for (let k = -200; k <= 200; k += 1) {
+        const x = c.plus(unit.times(k));
+        const s = format(x);
+        const printed = new Decimal(s.replace(/,/g, ""));
+        const gap = printed.minus(x).abs();
+        const tie = gap.eq(half);
+        if (tie) ties += 1;
+        const negativeZero = s.startsWith("-") && !/[1-9]/.test(s);
+        if (!shape.test(s) || negativeZero || gap.gt(half) || (tie && printed.abs().lte(x.abs()))) {
+          wrong.push(`${x.toFixed()} → ${s}`);
+        }
+      }
+    }
+    expect(wrong).toEqual([]);
+    expect(ties).toBe(280); // k ลงท้าย 5: ±5 … ±195 = 40 ค่าต่อศูนย์กลาง × 7 — กันผ่านลอย ๆ
   });
 });
 
