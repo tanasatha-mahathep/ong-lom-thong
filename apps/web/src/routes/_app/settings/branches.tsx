@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { PagePlaceholder } from "@/components/page-placeholder";
+import { BranchesPage } from "@/features/settings/branches-page";
 
 export const Route = createFileRoute("/_app/settings/branches")({
   staticData: { title: "branches", crumbs: [{ title: "settings" }] },
-  component: PagePlaceholder,
+  component: BranchesPage,
 });
