@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { businessDate } from "./businessDate";
+import { businessDate, businessTime } from "./businessDate";
 
 describe("businessDate — วันตามเวลาไทย ไม่ใช่ UTC", () => {
   it.each([
@@ -14,5 +14,20 @@ describe("businessDate — วันตามเวลาไทย ไม่ใ�
 
   it("เปลี่ยนเขตเวลาได้", () => {
     expect(businessDate(new Date("2026-09-27T18:30:00Z"), "UTC")).toBe("2026-09-27");
+  });
+});
+
+describe("businessTime — เวลาไทย HH:MM (24 ชม.)", () => {
+  it.each([
+    ["2026-09-28T03:05:00Z", "10:05"],
+    ["2026-09-27T16:59:59Z", "23:59"], // วินาทีตัดทิ้ง ไม่ปัดขึ้น
+    ["2026-09-27T17:00:00Z", "00:00"], // เที่ยงคืนไทย = 00 ไม่ใช่ 24
+    ["2026-09-27T17:30:00Z", "00:30"],
+  ])("%s → %s", (iso, expected) => {
+    expect(businessTime(new Date(iso))).toBe(expected);
+  });
+
+  it("เปลี่ยนเขตเวลาได้", () => {
+    expect(businessTime(new Date("2026-09-27T18:30:00Z"), "UTC")).toBe("18:30");
   });
 });

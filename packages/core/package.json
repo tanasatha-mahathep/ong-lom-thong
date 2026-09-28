@@ -2,16 +2,18 @@
   "name": "@ong/core",
   "version": "0.0.0",
   "private": true,
-  "description": "ตรรกะเงินทั้งหมด (decimal.js) — quoteBuy · ราคาทอง · สถานะบัตร · เลขที่เอกสาร",
+  "description": "ตรรกะเงินทั้งหมด (decimal.js) — quoteBuy · ราคาทอง · สถานะบัตร · เลขที่เอกสาร · ใบรับซื้อ A4 (React)",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/tanasatha-mahathep/ong-lom-thong.git",
     "directory": "packages/core"
   },
   "license": "UNLICENSED",
+  "sideEffects": false,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./receipt": "./src/receipt/index.ts"
   },
   "scripts": {
     "test": "vitest run",
@@ -22,7 +24,23 @@
     "decimal.js": "^10.5"
   },
   "devDependencies": {
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "react": "^19",
+    "react-dom": "^19",
     "typescript": "^5.9",
     "vitest": "^4.0.0"
+  },
+  "peerDependencies": {
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
   }
 }
