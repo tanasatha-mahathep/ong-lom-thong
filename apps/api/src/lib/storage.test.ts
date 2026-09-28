@@ -217,7 +217,7 @@ describe("createS3Storage — timeout (B1)", () => {
       await expect(storage.get("photos/x.png")).rejects.toThrow();
       await expect(storage.exists("photos/x.png")).rejects.toThrow();
       await expect(putNew(storage, KEY, bytes("%PDF-x"), "application/pdf", OWNER)).rejects.toThrow();
-      // SDK retry 3 ครั้งต่อคำสั่ง — ยังจบในไม่กี่วินาที (ค่าจริง 30 วินาที/ครั้ง)
+      // SDK ลอง 2 ครั้งต่อคำสั่ง (maxAttempts) — จบในไม่กี่วินาทีเมื่อ timeout สั้น (ค่าจริง 30 วินาที/ครั้ง)
       expect(Date.now() - started).toBeLessThan(15_000);
     } finally {
       await s3.close();

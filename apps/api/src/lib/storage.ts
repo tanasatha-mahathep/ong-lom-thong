@@ -82,6 +82,8 @@ export function createS3Storage(
     region: env.S3_REGION,
     forcePathStyle: env.S3_FORCE_PATH_STYLE,
     credentials: { accessKeyId: env.S3_ACCESS_KEY, secretAccessKey: env.S3_SECRET_KEY },
+    // ลองซ้ำครั้งเดียว — กรณีเลวสุดต่อคำสั่ง ~60 วินาที (ค่าเริ่มต้น 3 ครั้ง × 30 = 90) ให้ทั้งงานจบใน lease 3 นาที
+    maxAttempts: 2,
     // bucket ค้าง = request ค้างไม่รู้จบ → งาน PDF ค้าง · หมดเวลา = error (ไฟล์ไป failed แล้ว retry ภายหลัง)
     requestHandler: {
       connectionTimeout: timeouts.connectionMs,
