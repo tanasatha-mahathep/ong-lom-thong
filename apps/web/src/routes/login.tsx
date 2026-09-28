@@ -1,5 +1,5 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
-import { PagePlaceholder } from "@/components/page-placeholder";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { LoginForm } from "@/components/login-form";
 import { meQueryOptions } from "@/lib/queries";
 import { safeRedirect } from "@/lib/session";
 
@@ -17,5 +17,19 @@ export const Route = createFileRoute("/login")({
     if (signedIn) throw redirect({ href: safeRedirect(search.redirect) ?? "/", replace: true });
   },
   staticData: { title: "เข้าสู่ระบบ" },
-  component: PagePlaceholder,
+  component: LoginPage,
 });
+
+/** หน้า login-04 — การ์ดสองฝั่ง (ฟอร์ม · แผงชื่อร้าน) บนพื้น muted */
+function LoginPage() {
+  const search = Route.useSearch();
+  const navigate = useNavigate();
+
+  return (
+    <div className="flex min-h-svh flex-col items-center justify-center bg-muted p-4 sm:p-6 md:p-10">
+      <main className="w-full max-w-sm md:max-w-4xl">
+        <LoginForm onDone={() => void navigate({ href: safeRedirect(search.redirect) ?? "/", replace: true })} />
+      </main>
+    </div>
+  );
+}
