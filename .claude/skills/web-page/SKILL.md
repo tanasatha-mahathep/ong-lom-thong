@@ -21,7 +21,7 @@ description: สร้างหรือแก้หน้าใน apps/web (Vi
 - ผู้ใช้ปัจจุบัน: `useMe()` (role · branch · branches) — ห้ามอ่าน me จาก route context (ไม่อัปเดตหลังสลับสาขา)
 - 401 จาก query/mutation ใดก็ได้ → ตัวดักกลางใน `router.tsx` พาไป `/login?redirect=…` เอง · ยกเว้นตั้ง `meta: { handlesUnauthorized: true }`
 - error ใต้ช่อง: `ApiError.field` → `<FieldError id=…>` + `aria-describedby` ที่ input · ข้อความรวม: `errorMessage(e)`
-- สลับสาขาแล้ว invalidate ทุก query — query key ไม่ต้องใส่ branch id
+- สลับสาขาแล้ว **reset** ทุก query ยกเว้น `me` (ข้อมูลสาขาเดิมหายทันที ไม่ค้างใต้หัวสาขาใหม่) — query key ไม่ต้องใส่ branch id แต่หน้าต้องรับสถานะ "ยังไม่มีข้อมูล" (skeleton) ได้เสมอ
 
 ## shadcn/ui
 
@@ -29,7 +29,7 @@ description: สร้างหรือแก้หน้าใน apps/web (Vi
 - component ใน `ui/` แก้แล้วบางตัว — **ห้าม `add --overwrite`**: `sidebar` (SidebarInset เป็น `<div>`, ป้ายไทย, skeleton ไม่สุ่ม) · `input` (พื้นทึบ `bg-background`) · `breadcrumb` (หน้าปัจจุบันไม่ใช่ role=link, ป้ายไทย) · `sonner` (ไม่ใช้ next-themes) · `sheet` (ป้ายไทย)
 - ไอคอน `lucide-react` ชุดเดียว · ไอคอนประดับใส่ `aria-hidden="true"` · ปุ่มไอคอนล้วนต้องมี `aria-label` หรือ `sr-only`
 - block ที่ใช้: `dashboard-01` (app-sidebar · nav-main · nav-user · site-header) · `login-04` (login-form) — ส่วน demo ถูกลบแล้ว
-- ตาราง: `<DataTable columns data caption page hasMore onPageChange onRowActivate? isLoading?>` (`src/components/data-table.tsx`) — TanStack Table · แบ่งหน้าฝั่งเซิร์ฟเวอร์ด้วย `page` + `has_more` (ไม่มียอดรวมแถว) · คอลัมน์เงินใส่ `meta: { numeric: true }` · แถวกด Enter/คลิกได้เมื่อส่ง `onRowActivate` (↑/↓ ย้ายแถว)
+- ตาราง: `<DataTable columns data caption page hasMore onPageChange onRowClick? isLoading?>` (`src/components/data-table.tsx`) — TanStack Table · แบ่งหน้าฝั่งเซิร์ฟเวอร์ด้วย `page` + `has_more` (ไม่มียอดรวมแถว) · คอลัมน์เงินใส่ `meta: { numeric: true }` · **คอลัมน์หลัก (เลขที่บิล/ชื่อลูกค้า) ต้องเป็น `<Link>` จริง** = ทางของคีย์บอร์ด/screen reader (แถวไม่รับโฟกัส) · `onRowClick` เป็นแค่ทางลัดของเมาส์ (คลิกโดนลิงก์/ปุ่มในแถวไม่เรียกซ้ำ)
 
 ## เงินและตัวเลข
 
@@ -47,7 +47,7 @@ description: สร้างหรือแก้หน้าใน apps/web (Vi
 
 ## UX / a11y (WCAG 2.2 AA)
 
-- ภาษาไทยทั้งหมด · ฟอนต์ Sarabun (`/fonts`) · การ์ด/ตาราง/ฟอร์มเงินพื้นทึบ (`bg-card` / `bg-background` ห้ามโปร่ง) · `:focus-visible` เส้นน้ำเงิน 2px มาจาก `styles.css` อยู่แล้ว (แถวในกล่อง overflow ใส่ class `focus-inset`)
+- ภาษาไทยทั้งหมด · ฟอนต์ Sarabun (`/fonts`) · การ์ด/ตาราง/ฟอร์มเงินพื้นทึบ (`bg-card` / `bg-background` ห้ามโปร่ง) · `:focus-visible` เส้นน้ำเงิน 2px มาจาก `styles.css` อยู่แล้ว
 - ทุก input มี `<label>` ที่เห็นได้ · error ผูก `aria-describedby` · ใช้ `<button>` `<a>` `<table>` จริง · เป้ากด ≥ 24px · ไม่มี dark mode
 - คีย์บอร์ดล้วน: Tab/Enter ไล่ช่อง · `Ctrl+Enter` = บันทึก · `Esc` = ล้างแถวที่กำลังกรอก (สเปก §3.1)
 - ปุ่มบันทึกกันกดซ้ำ (disable ระหว่างส่ง + idempotency key)
