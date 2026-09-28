@@ -15,16 +15,23 @@ export function isBlank(v: unknown): boolean {
   return v === undefined || v === null || (typeof v === "string" && v.trim() === "");
 }
 
-/** Lenient parse for user input: null when blank or not a finite number. Never throws. */
+// ตัวเลขที่ผู้ใช้พิมพ์: ตัวเลขล้วน (มีทศนิยมได้) หรือคั่นหลักพันถูกต้อง "67,850" · "1,234,567.50"
+// กลุ่มแรกห้ามขึ้นต้นด้วย 0 ("0,123" ไม่ใช่การคั่นหลักพัน — น่าจะหมายถึง 0.123)
+const PLAIN_NUMBER = /^\d+(\.\d+)?$/;
+const GROUPED_NUMBER = /^[1-9]\d{0,2}(,\d{3})+(\.\d+)?$/;
+
+/**
+ * Strict parse ของตัวเลขที่ผู้ใช้กรอก — null เมื่อว่างหรือไม่ใช่รูปแบบข้างบน · ไม่ throw
+ * ไม่รับ: เครื่องหมาย +/− · hex · exponent · คอมมาผิดตำแหน่ง ("20,03" · "1,2345") · ช่องว่างกลางตัวเลข
+ * (Decimal/number ที่ finite มาจากโค้ด ไม่ใช่จากผู้ใช้ — ผ่านตามเดิม)
+ */
 export function parseDecimal(v: unknown): Decimal | null {
-  if (isBlank(v)) return null;
-  if (typeof v !== "string" && typeof v !== "number" && !(v instanceof Decimal)) return null;
-  try {
-    const d = D(v);
-    return d.isFinite() ? d : null;
-  } catch {
-    return null;
-  }
+  if (v instanceof Decimal) return v.isFinite() ? v : null;
+  if (typeof v === "number") return Number.isFinite(v) ? new Decimal(v) : null;
+  if (typeof v !== "string") return null;
+  const s = v.trim();
+  if (!PLAIN_NUMBER.test(s) && !GROUPED_NUMBER.test(s)) return null;
+  return new Decimal(s.replace(/,/g, ""));
 }
 
 export const halfUp = (v: Decimal, dp: number): Decimal => v.toDecimalPlaces(dp, Decimal.ROUND_HALF_UP);
