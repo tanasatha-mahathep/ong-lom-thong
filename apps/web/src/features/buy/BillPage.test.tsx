@@ -70,6 +70,34 @@ describe("/buy/$id", () => {
     await waitFor(() => expect(api.callsTo("GET", PATH).length).toBe(before + 1));
   });
 
+  it("keeps asking about the void PDF from when it was voided, not the older created_at (S5)", async () => {
+    setup(
+      makeBill({
+        status: "void",
+        pdf_status: "ready",
+        void_pdf_status: "pending",
+        created_at: "2026-09-01T00:00:00.000Z",
+        voided_at: new Date().toISOString(),
+      }),
+    );
+    expect(await screen.findByText(t("bill.pdf.pending"))).toBeInTheDocument();
+    expect(screen.queryByText(t("bill.pdf.stalled"))).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: t("bill.pdf.check") })).not.toBeInTheDocument();
+  });
+
+  it("gives up on the void PDF two minutes after it was voided, however old the bill is", async () => {
+    setup(
+      makeBill({
+        status: "void",
+        pdf_status: "ready",
+        void_pdf_status: "pending",
+        created_at: "2026-09-01T00:00:00.000Z",
+        voided_at: "2026-09-01T00:05:00.000Z",
+      }),
+    );
+    expect(await screen.findByText(t("bill.pdf.stalled"))).toBeInTheDocument();
+  });
+
   it("lets a manager retry a failed PDF and explains when the PDF service is not there yet", async () => {
     const { user } = setup(makeBill({ pdf_status: "failed" }), { role: "manager" });
     expect(await screen.findByText(t("bill.pdf.failed"))).toBeInTheDocument();

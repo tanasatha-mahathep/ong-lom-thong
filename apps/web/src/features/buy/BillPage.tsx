@@ -285,9 +285,10 @@ function PdfStatus({ bill }: { bill: Bill }) {
   const { t } = useTranslation("buy");
   const qc = useQueryClient();
   const { dataUpdatedAt, isFetching } = useSuspenseQuery(billQuery(bill.id));
-  // บิลที่ยกเลิกแล้ว: ไฟล์ที่ต้องรอคือ PDF ฉบับยกเลิก
+  // บิลที่ยกเลิกแล้ว: ไฟล์ที่ต้องรอคือ PDF ฉบับยกเลิก นับหน้าต่าง poll จากเวลายกเลิก ไม่ใช่เวลาสร้างบิล (มักห่างกันเกิน 2 นาที)
   const status = bill.status === "void" ? bill.void_pdf_status : bill.pdf_status;
-  const stalled = isFilePending(status) && dataUpdatedAt - Date.parse(bill.created_at) >= PDF_POLL_WINDOW_MS;
+  const since = bill.status === "void" ? (bill.voided_at ?? bill.created_at) : bill.created_at;
+  const stalled = isFilePending(status) && dataUpdatedAt - Date.parse(since) >= PDF_POLL_WINDOW_MS;
 
   const text =
     status === "ready"

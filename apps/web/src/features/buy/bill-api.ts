@@ -78,12 +78,25 @@ export type Bill = z.infer<typeof BillSchema>;
 
 /** ไฟล์ที่ยังรอสร้าง — หน้าบิลถามสถานะซ้ำเป็นระยะ */
 export const isFilePending = (status: string) => status === "pending";
-const anyFilePending = (b: Pick<Bill, "pdf_status" | "idcard_status" | "void_pdf_status">) =>
-  isFilePending(b.pdf_status) || isFilePending(b.idcard_status) || isFilePending(b.void_pdf_status);
 
 const POLL_MS = 3_000;
-/** ถามสถานะ PDF ต่อได้นานเท่านี้หลังเปิดบิล (นับจาก created_at) — เกินแล้วให้ผู้ใช้กดตรวจเอง */
+/** ถามสถานะ PDF ต่อได้นานเท่านี้หลังเริ่มสร้างไฟล์ — เกินแล้วให้ผู้ใช้กดตรวจเอง */
 export const PDF_POLL_WINDOW_MS = 2 * 60_000;
+
+/**
+ * ยังควรถามสถานะไฟล์ซ้ำไหม — ใบต้นฉบับ/สำเนาบัตรนับหน้าต่าง 2 นาทีจาก created_at
+ * ใบฉบับยกเลิกนับจาก voided_at แทน เพราะมักยกเลิกหลังสร้างบิลนานเกิน 2 นาทีไปแล้ว
+ * นับจาก created_at เหมือนกันจะถือว่าเลยเวลาทันทีที่ยกเลิกเสร็จ ทั้งที่เพิ่งเริ่มสร้างไฟล์
+ */
+export const awaitingFilePoll = (
+  bill: Pick<Bill, "pdf_status" | "idcard_status" | "void_pdf_status" | "created_at" | "voided_at">,
+  updatedAt: number,
+): boolean => {
+  const withinWindow = (since: string) => updatedAt - Date.parse(since) < PDF_POLL_WINDOW_MS;
+  const original = isFilePending(bill.pdf_status) || isFilePending(bill.idcard_status);
+  const voidFile = isFilePending(bill.void_pdf_status);
+  return (original && withinWindow(bill.created_at)) || (voidFile && withinWindow(bill.voided_at ?? bill.created_at));
+};
 
 export const billKeys = { detail: (id: string) => [...buyKeys.all, "detail", id] as const };
 
@@ -101,8 +114,8 @@ export const billQuery = (id: string) =>
     },
     refetchInterval: (query) => {
       const bill = query.state.data;
-      if (!bill || !anyFilePending(bill)) return false;
-      return query.state.dataUpdatedAt - Date.parse(bill.created_at) < PDF_POLL_WINDOW_MS ? POLL_MS : false;
+      if (!bill) return false;
+      return awaitingFilePoll(bill, query.state.dataUpdatedAt) ? POLL_MS : false;
     },
   });
 
