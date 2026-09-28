@@ -72,7 +72,7 @@ function TodayBills({ branchId, today, role }: { branchId: string; today: string
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-destructive">{t("today.loadError")}</p>
         <Button variant="outline" size="sm" onClick={() => void refetch()}>
-          {t("retry")}
+          {t("retry", { ns: "common" })}
         </Button>
       </div>
     );

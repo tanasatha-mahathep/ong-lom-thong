@@ -108,7 +108,7 @@ export function BillsPage() {
           <AlertDescription>
             <p>{errorMessage(list.error)}</p>
             <Button variant="outline" size="sm" onClick={() => void list.refetch()}>
-              {t("retry")}
+              {t("retry", { ns: "common" })}
             </Button>
           </AlertDescription>
         </Alert>

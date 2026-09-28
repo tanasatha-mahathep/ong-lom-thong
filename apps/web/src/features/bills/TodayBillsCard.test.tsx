@@ -115,6 +115,6 @@ describe("หน้าแรก — บิลซื้อเข้าวัน�
     const card = await findCard();
 
     expect(await within(card).findByText(t("today.loadError"), {}, FIRST_LOAD)).toBeInTheDocument();
-    expect(within(card).getByRole("button", { name: t("retry") })).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "ลองใหม่" })).toBeInTheDocument();
   });
 });

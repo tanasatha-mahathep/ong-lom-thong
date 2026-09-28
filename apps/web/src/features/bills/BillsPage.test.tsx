@@ -117,7 +117,7 @@ describe("หน้าค้นบิล — ตาราง", { timeout: FLOW_T
     const alert = await screen.findByRole("alert", {}, FIRST_LOAD);
     expect(alert).toHaveTextContent(t("results.error"));
     expect(alert).toHaveTextContent("ไม่มีสิทธิ์ดูบิล");
-    expect(within(alert).getByRole("button", { name: t("retry") })).toBeInTheDocument();
+    expect(within(alert).getByRole("button", { name: "ลองใหม่" })).toBeInTheDocument();
   });
 });
 
