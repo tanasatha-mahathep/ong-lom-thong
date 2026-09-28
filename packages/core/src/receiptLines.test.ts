@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { avgPricePerG, pricePerGram, quoteBuy } from "./buy";
+import { ReceiptDataError } from "./errors";
 import { D, fmtMoney } from "./money";
 import { groupLinesByMetal } from "./receiptLines";
 
@@ -39,10 +40,15 @@ describe("groupLinesByMetal — ใบจริงพิมพ์ 1 บรรท
     expect(groupLinesByMetal([])).toEqual([]);
   });
 
-  it("น้ำหนักรวมเป็นศูนย์หรือตัวเลขเสีย → throw (ไม่พิมพ์ราคาต่อหน่วยมั่ว)", () => {
-    expect(() => groupLinesByMetal([{ metalName: "ทอง", weightG: "0", amount: "100" }])).toThrow();
-    expect(() => groupLinesByMetal([{ metalName: "ทอง", weightG: "abc", amount: "100" }])).toThrow();
-    expect(() => groupLinesByMetal([{ metalName: "ทอง", weightG: "1", amount: "Infinity" }])).toThrow();
+  it("น้ำหนักรวมเป็นศูนย์หรือตัวเลขเสีย → ReceiptDataError (ไม่พิมพ์ราคาต่อหน่วยมั่ว)", () => {
+    for (const bad of [
+      { metalName: "ทอง", weightG: "0", amount: "100" },
+      { metalName: "ทอง", weightG: "abc", amount: "100" },
+      { metalName: "ทอง", weightG: "1", amount: "Infinity" },
+      { metalName: "ทอง", weightG: "", amount: "100" },
+    ]) {
+      expect(() => groupLinesByMetal([bad])).toThrow(ReceiptDataError);
+    }
   });
 });
 
@@ -89,6 +95,6 @@ describe("ราคา/กรัม สูตรเดียว (CLAUDE.md ก�
 
   it("น้ำหนักรวม 0: จอแสดง 0.00 (avgPricePerG) · ใบรับซื้อไม่พิมพ์ราคามั่ว (throw)", () => {
     expect(avgPricePerG("100", "0")).toBe("0.00");
-    expect(() => groupLinesByMetal([{ metalName: "ทอง", weightG: "0", amount: "100" }])).toThrow();
+    expect(() => groupLinesByMetal([{ metalName: "ทอง", weightG: "0", amount: "100" }])).toThrow(ReceiptDataError);
   });
 });
