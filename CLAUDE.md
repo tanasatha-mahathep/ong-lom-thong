@@ -32,3 +32,4 @@
 - แยก commit ตามเรื่อง · ห้าม `--no-verify` · ห้ามแก้ `version` ใน package.json เอง
 - `CHANGELOG.md` semantic-release เขียนเอง — ห้ามแก้มือ · dependency อัปเดตผ่าน Renovate (PR ไป `dev`) ไม่ต้องไล่อัปเองถ้าไม่จำเป็น
 - branch: `dev` → `testing` → `staging` → `main` · **ห้าม push ตรงทุก branch** — feature branch → PR เข้า `dev` → CI ผ่าน → `gh pr merge --rebase --delete-branch` · promote ทีละขั้น: PR promotion (`testing ← dev`) แล้ว `git push origin dev:testing` (fast-forward · ห้ามกด merge ปุ่มใน PR promotion) ห้ามข้ามขั้น · หลัง release CI ดึง `staging`/`testing`/`dev` ตาม `main` ให้เอง
+- **ห้ามเปิด "Automatically delete head branches"** ใน GitHub settings — PR promotion มี head เป็น `dev`/`testing` พอปิดเป็น merged GitHub จะลบ branch นั้นทิ้ง (เกิดแล้ว 28 ก.ย. — กู้จาก SHA เดิม)

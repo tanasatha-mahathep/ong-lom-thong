@@ -26,7 +26,7 @@ pnpm build               # web → apps/web/dist · api → apps/api/dist
 
 Conventional Commits (ภาษาอังกฤษ) บังคับด้วย commitlint + husky (`pre-commit` = lint-staged: eslint · prettier · sort-package-json)
 branch: `dev` (พัฒนา) → `testing` (ทดสอบ) → `staging` (ก่อนขึ้นจริง · Railway staging) → `main` (production + release)
-งานทุกชิ้นเข้า `dev` ผ่าน PR แบบ **rebase** เท่านั้น (feature branch → PR → CI ผ่าน → Rebase and merge) — repo ตั้งให้ merge ได้แบบ rebase อย่างเดียวและลบ branch อัตโนมัติ · branch protection ต้องใช้ GitHub Pro (repo private) จึงยังบังคับ "ห้าม push ตรง" ด้วยระบบไม่ได้
+งานทุกชิ้นเข้า `dev` ผ่าน PR แบบ **rebase** เท่านั้น (feature branch → PR → CI ผ่าน → Rebase and merge) — repo ตั้งให้ merge ได้แบบ rebase อย่างเดียว (ลบ feature branch ด้วย `--delete-branch` ตอน merge · **ห้ามเปิด "Automatically delete head branches"** เพราะ PR promotion มี head เป็น `dev`/`testing` — ปิด PR แล้ว GitHub จะลบ branch ถาวรทิ้ง) · branch protection ต้องใช้ GitHub Pro (repo private) จึงยังบังคับ "ห้าม push ตรง" ด้วยระบบไม่ได้
 promote ทีละขั้น: เปิด PR promotion (เช่น `testing ← dev`) ให้เห็น diff + CI แล้ว fast-forward ด้วย `git push origin dev:testing` — SHA เดิมทุก branch · PR ขึ้นว่า merged เอง · **ห้ามกด Rebase and merge กับ PR promotion** (จะได้ SHA ใหม่ แล้ว branch แยกกัน)
 push เข้า `main` → CI (commitlint · lint · format · typecheck · test · build) → semantic-release ออก tag `vX.Y.Z` + [GitHub Release](https://github.com/tanasatha-mahathep/ong-lom-thong/releases) + อัปเดต [CHANGELOG.md](CHANGELOG.md) → ดึง `staging` `testing` `dev` ตาม `main` ให้อัตโนมัติ
 dependency อัปเดตผ่าน [Renovate](renovate.json) — PR ไปที่ `dev` ทุกวันจันทร์ · major ต้องอนุมัติใน Dependency Dashboard
