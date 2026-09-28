@@ -30,7 +30,7 @@
     "railway:plan": "railway config plan",
     "release": "semantic-release",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "vitest run --coverage --project core",
     "test:watch": "vitest",
     "typecheck": "pnpm -r typecheck && tsc -p .railway"
   },
