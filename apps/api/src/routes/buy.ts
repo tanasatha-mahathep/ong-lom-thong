@@ -4,7 +4,7 @@ import { bodyLimit } from "hono/body-limit";
 import type { z } from "zod";
 import { type AppEnv, apiError, requireAnyBranch, requireRole, requireSession } from "../lib/context";
 import { forUser } from "../lib/scope";
-import { receiptForScreen } from "../services/receiptPdf";
+import { companyFromEnv, receiptForScreen } from "../services/receiptPdf";
 import { buyPdfRoutes } from "./buyPdf";
 import {
   BuyError,
@@ -75,6 +75,7 @@ export const buyRoutes = new Hono<AppEnv>()
         body.data,
         now,
         body.data.time ?? businessTime(now),
+        companyFromEnv(c.var.env),
       );
       // PDF เก็บถาวรสร้างเบื้องหลัง — ตอบทันทีด้วย pdf_status "pending" ไม่รอ Gotenberg (spec §9.2)
       if (!replay) c.var.pdf.enqueue(receipt.id);

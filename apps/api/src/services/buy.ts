@@ -30,6 +30,7 @@ import { type SQL, and, asc, desc, eq, exists, gte, ilike, inArray, lte, or, sql
 import { z } from "zod";
 import { type BranchRef, type Viewer, currentBranch, forUser } from "../lib/scope";
 import { escapeLike, findCustomer } from "./customers";
+import { type CompanyInfo, captureCompanySnapshot } from "./receiptPdf";
 import { type TodayPrice, priceForBranch } from "./goldPrice";
 
 export const BUY_API_MSG = {
@@ -233,7 +234,14 @@ async function findReplay(db: Db, viewer: Viewer, key: string): Promise<SavedBuy
   return { id: row.id, doc_no: row.docNo, pdf_status: row.pdfStatus };
 }
 
-async function insertBuy(db: Db, viewer: Viewer, p: PreparedBuy, body: SaveBody, time: string): Promise<SavedBuy> {
+async function insertBuy(
+  db: Db,
+  viewer: Viewer,
+  p: PreparedBuy,
+  body: SaveBody,
+  time: string,
+  company: CompanyInfo,
+): Promise<SavedBuy> {
   const buyer = p.customer;
   const price = p.price;
   if (!p.ok || !buyer || !price) throw new Error("insertBuy: quote ไม่ผ่าน");
@@ -243,6 +251,8 @@ async function insertBuy(db: Db, viewer: Viewer, p: PreparedBuy, body: SaveBody,
       sql`select next_doc_no(${p.branch.id}::uuid, 'RC', ${p.date}::date) as doc_no`,
     );
     if (!seq) throw new Error("next_doc_no returned nothing");
+    // หัวใบ ณ วันขาย (R15) — PDF ทุกฉบับของบิลนี้ (รวมฉบับยกเลิก) ใช้ชุดนี้ ไม่ใช่ค่าปัจจุบัน
+    const companySnapshot = await captureCompanySnapshot(tx, p.branch.id, company);
     const [receipt] = await tx
       .insert(buyReceipt)
       .values({
@@ -252,6 +262,7 @@ async function insertBuy(db: Db, viewer: Viewer, p: PreparedBuy, body: SaveBody,
         time,
         customerId: buyer.id,
         customerSnapshot: snapshotOf(buyer),
+        companySnapshot,
         goldPriceSnapshot: price.barSell,
         detail: body.detail,
         fullTax: body.full_tax,
@@ -314,6 +325,8 @@ export async function saveBuy(
   body: SaveBody,
   now: Date,
   time: string,
+  /** หัวใบ (COMPANY_*) — แช่แข็งลง company_snapshot ของบิล */
+  company: CompanyInfo,
 ): Promise<{ replay: boolean; receipt: SavedBuy }> {
   const prepared = await prepareBuy(db, viewer, body, now);
   // ตรวจ key ก่อนผล quote — กดซ้ำหลังบันทึกไปแล้ว (เช่นข้ามเที่ยงคืน) ต้องได้บิลเดิม ไม่ใช่ error
@@ -322,7 +335,7 @@ export async function saveBuy(
   const first = prepared.errors[0];
   if (first) throw new BuyError(first.message, first.field, 409, quoteJson(prepared));
   try {
-    return { replay: false, receipt: await insertBuy(db, viewer, prepared, body, time) };
+    return { replay: false, receipt: await insertBuy(db, viewer, prepared, body, time, company) };
   } catch (e) {
     const pg = pgError(e);
     if (pg?.code === "23505" && pg.constraint_name === "buy_receipt_idempotency_key_unique") {

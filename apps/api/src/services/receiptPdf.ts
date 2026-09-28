@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { PAYMENT_METHODS, isPaymentMethod, maskNationalId } from "@ong/core";
-import { type ReceiptData, renderIdCardHtml, renderReceiptHtml } from "@ong/core/receipt";
-import { type Db, type PDF_STATUSES, branch, buyLine, buyReceipt, metal, payment } from "@ong/db";
+import { type ReceiptData, ReceiptDataError, renderIdCardHtml, renderReceiptHtml } from "@ong/core/receipt";
+import { type CompanySnapshot, type Db, type PDF_STATUSES, branch, buyLine, buyReceipt, metal, payment } from "@ong/db";
 import { and, asc, eq, inArray, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Env } from "../env";
@@ -25,10 +25,19 @@ type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 type Queryable = Db | Tx;
 type ReceiptRow = typeof buyReceipt.$inferSelect;
 
+/** สาขาที่หัวใบต้องใช้ (ค่าปัจจุบัน — ใช้ตอนบันทึก snapshot หรือกับบิลเก่าที่ไม่มี snapshot) */
+export interface BranchHeader {
+  code: string;
+  name: string;
+  address: string | null;
+  tel: string | null;
+  taxBranchCode: string | null;
+}
+
 /** ข้อมูลดิบของบิลจาก DB — ป้อน toReceiptData() */
 export interface ReceiptSource {
   receipt: ReceiptRow;
-  branch: { code: string; name: string; taxBranchCode: string | null };
+  branch: BranchHeader;
   lines: { metalName: string; weightG: string; amount: string }[];
   payments: { method: string; bank: string | null; amount: string }[];
 }
@@ -44,12 +53,49 @@ export const companyFromEnv = (env: Env): CompanyInfo => ({
   taxId: env.COMPANY_TAX_ID,
 });
 
+const branchHeader = {
+  code: branch.code,
+  name: branch.name,
+  address: branch.address,
+  tel: branch.tel,
+  taxBranchCode: branch.taxBranchCode,
+};
+
+/**
+ * หัวใบตามกติกาเดียวทั้งระบบ: ที่อยู่/โทรของสาขา (ถ้าตั้งไว้) ไม่งั้นของกิจการ · ชื่อ/โทรสาร/เลขผู้เสียภาษีจาก COMPANY_*
+ * รหัสสาขาสรรพากรตามที่ตั้งไว้ ไม่เดาแทน (null = PDF ไม่ออก — ReceiptDataError)
+ */
+export function companySnapshotOf(company: CompanyInfo, b: BranchHeader): CompanySnapshot {
+  return {
+    name: company.name,
+    address: b.address ?? company.address,
+    tel: b.tel ?? company.tel,
+    fax: company.fax,
+    tax_id: company.taxId,
+    branch_name: b.name,
+    branch_code: b.code,
+    tax_branch_code: b.taxBranchCode,
+  };
+}
+
+/** POST /buy เรียกในทรานแซกชันเดียวกับ insert — หัวใบของบิลแช่แข็ง ณ วันขาย (R15) */
+export async function captureCompanySnapshot(
+  db: Queryable,
+  branchId: string,
+  company: CompanyInfo,
+): Promise<CompanySnapshot> {
+  const [b] = await db.select(branchHeader).from(branch).where(eq(branch.id, branchId)).limit(1);
+  if (!b) throw new Error(`branch ${branchId} not found`);
+  return companySnapshotOf(company, b);
+}
+
+/** หัวใบของบิล — snapshot ตอนบันทึก · บิลที่บันทึกก่อนมี snapshot ใช้ค่าปัจจุบันด้วยกติกาเดียวกัน */
+export const headerOf = (src: ReceiptSource, company: CompanyInfo): CompanySnapshot =>
+  src.receipt.companySnapshot ?? companySnapshotOf(company, src.branch);
+
 export async function loadReceiptSource(db: Queryable, receiptId: string): Promise<ReceiptSource | null> {
   const [row] = await db
-    .select({
-      receipt: buyReceipt,
-      branch: { code: branch.code, name: branch.name, taxBranchCode: branch.taxBranchCode },
-    })
+    .select({ receipt: buyReceipt, branch: branchHeader })
     .from(buyReceipt)
     .innerJoin(branch, eq(branch.id, buyReceipt.branchId))
     .where(eq(buyReceipt.id, receiptId))
@@ -83,10 +129,12 @@ export function toReceiptData(
   const r = src.receipt;
   const snap = r.customerSnapshot;
   const status = opts.status ?? r.status;
+  const h = headerOf(src, company);
   return {
-    company,
-    // ส่งตามที่ตั้งไว้ ไม่เดาแทน — ไม่มีรหัสสาขาสรรพากร = ใบพิมพ์ไม่ได้ (fail-closed ใน @ong/core/receipt)
-    branch: { name: src.branch.name, taxBranchCode: src.branch.taxBranchCode },
+    // null ใน snapshot = ว่างบนจอ · PDF ตรวจหัวใบให้ครบก่อนพิมพ์ (assertCompleteHeader)
+    company: { name: h.name, address: h.address ?? "", tel: h.tel ?? "", fax: h.fax, taxId: h.tax_id ?? "" },
+    // ส่งตามที่ตั้งไว้ ไม่เดาแทน — ไม่มีรหัสสาขาสรรพากร = PDF ออกไม่ได้ (ReceiptDataError ใน @ong/core/receipt)
+    branch: { name: h.branch_name, taxBranchCode: h.tax_branch_code },
     docNo: r.docNo,
     date: r.date,
     time: r.time.slice(0, 5),
@@ -174,9 +222,15 @@ class PermanentPdfError extends Error {
   override name = "PermanentPdfError";
 }
 
-/** ReceiptDataError ของ @ong/core/receipt (ข้อมูลใบไม่ครบ/ขัดกัน) · RangeError จาก key/รหัสสาขา = ข้อมูลผิด */
+/** ReceiptDataError ของ @ong/core/receipt (ข้อมูลใบไม่ครบ/ขัดกัน) · RangeError จาก key = ข้อมูลผิด */
 const isPermanent = (e: unknown) =>
-  e instanceof PermanentPdfError || e instanceof RangeError || (e instanceof Error && e.name === "ReceiptDataError");
+  e instanceof PermanentPdfError || e instanceof ReceiptDataError || e instanceof RangeError;
+
+/** เอกสารภาษีต้องมีหัวใบครบ — snapshot ที่ขาดช่อง = พิมพ์ไม่ได้ (ไม่เติมจากค่าปัจจุบัน) */
+function assertCompleteHeader(h: CompanySnapshot, docNo: string): void {
+  const missing = (["address", "tel", "tax_id"] as const).filter((k) => !h[k]?.trim());
+  if (missing.length > 0) throw new ReceiptDataError(`ใบรับซื้อ ${docNo}: หัวใบไม่ครบ (${missing.join(", ")})`);
+}
 
 const reasonOf = (e: unknown) =>
   e instanceof PdfRenderError
@@ -219,6 +273,7 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
 
   async function render(kind: PdfKind, src: ReceiptSource): Promise<Uint8Array<ArrayBuffer>> {
     const { docNo, date } = src.receipt;
+    const header = headerOf(src, company);
     if (kind === "idcard") {
       const photoKey = src.receipt.customerSnapshot.photo_key;
       const photo = photoKey ? await storage.get(photoKey) : null;
@@ -226,10 +281,11 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
       const ext = PHOTO_EXT[photo.contentType];
       if (!ext) throw new PermanentPdfError(`unsupported photo type ${photo.contentType}`);
       const name = `card.${ext}`;
-      const html = renderIdCardHtml({ docNo, date, companyName: company.name, photoSrc: name }, { fontBaseUrl: "" });
+      const html = renderIdCardHtml({ docNo, date, companyName: header.name, photoSrc: name }, { fontBaseUrl: "" });
       const files = [...fonts, { name, data: photo.body, contentType: photo.contentType }];
       return renderer.htmlToPdf({ html, files, trace: `${docNo}-idcard` });
     }
+    assertCompleteHeader(header, docNo);
     // ฉบับเดิมพิมพ์เป็นบิลปกติเสมอ (แม้ถูกยกเลิกไปแล้ว) · ฉบับยกเลิกมีตรา + เหตุผล
     const data = toReceiptData(src, company, { nationalId: "full", status: kind === "void" ? "void" : "active" });
     const html = renderReceiptHtml(data, { fontBaseUrl: "" });
@@ -256,7 +312,8 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
   }
 
   async function produce(kind: PdfKind, src: ReceiptSource): Promise<Outcome> {
-    const where = { branchCode: src.branch.code, date: src.receipt.date, docNo: src.receipt.docNo };
+    // รหัสสาขาใน key มาจาก snapshot — key ของบิลคงที่ตลอดอายุเอกสาร
+    const where = { branchCode: headerOf(src, company).branch_code, date: src.receipt.date, docNo: src.receipt.docNo };
     try {
       const key = kind === "idcard" ? idcardPdfKey(where) : receiptPdfKey({ ...where, void: kind === "void" });
       const stored = await storage.get(key);

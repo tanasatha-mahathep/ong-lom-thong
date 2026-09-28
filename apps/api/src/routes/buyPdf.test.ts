@@ -57,7 +57,7 @@ async function seed(t: TestApp) {
     { who: "manager2", branch: "00002", role: "manager" as const },
     { who: "acct", branch: "00000", role: "accounting" as const },
     { who: "acct2", branch: "00002", role: "accounting" as const },
-    { who: "admin", branch: "00000", role: "admin" as const },
+    { who: "admin", branch: "00000", role: "admin" as const, viewAll: true },
     { who: "nobranch" },
   ];
   for (const a of accounts) {
@@ -245,7 +245,7 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
     expect(await audits("buy.pdf_retry", bill.id)).toHaveLength(1);
   });
 
-  it("ข้อมูลบิลขัดกันเอง (render ปฏิเสธ) → failed ไม่มีไฟล์ผิดเก็บไว้ · แก้ข้อมูลแล้ว retry ได้", async () => {
+  it("ข้อมูลบิลขัดกันเอง (ReceiptDataError) → invalid ไม่มีไฟล์ผิดเก็บไว้ · loop ไม่แตะ · แก้แล้วสั่ง retry ได้", async () => {
     t.fake.failNext(1); // รอบแรกยังไม่มีไฟล์
     const bill = await save({ customer_id: s.custC });
     await t.tasks.idle();
@@ -255,12 +255,13 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const result = await t.pdf.archive(bill.id);
     log.mockRestore();
-    // Error ธรรมดา = failed · ReceiptDataError ของ @ong/core/receipt = invalid (ไม่ retry เอง)
-    expect(["failed", "invalid"]).toContain(result?.pdf_status);
+    expect(result).toMatchObject({ pdf_status: "invalid", busy: false });
     expect(await t.storage.get(key)).toBeNull();
+    expect(await t.pdf.retryDue({ olderThanMs: 0 })).toBe(0); // ลองซ้ำก็ไม่หาย — ไม่เปลือง Gotenberg
 
     await t.db.update(buyLine).set({ amount: "20030.00" }).where(eq(buyLine.receiptId, bill.id));
-    expect(await t.pdf.archive(bill.id)).toMatchObject({ pdf_status: "ready" });
+    expect(await t.pdf.archive(bill.id)).toMatchObject({ pdf_status: "invalid" }); // งานอัตโนมัติไม่แตะ invalid
+    expect(await t.pdf.archive(bill.id, { includeInvalid: true })).toMatchObject({ pdf_status: "ready" });
   });
 
   it("retry เบื้องหลัง: เก็บใบที่ค้าง pending/failed · ใบที่เพิ่งสร้าง (< 2 นาที) ยังไม่แตะ", async () => {
@@ -497,6 +498,61 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
     await keep(post(`/${bill.id}/pdf/retry`, "manager"));
     expect(texts.length).toBeGreaterThanOrEqual(7);
     for (const text of texts) expect(text).not.toContain(ID_A);
+  });
+
+  it("หัวใบแช่แข็งตอนบันทึก (company_snapshot) — แก้ที่อยู่สาขาภายหลัง ฉบับยกเลิกยังพิมพ์หัวเดิม", async () => {
+    const bill = await save({ customer_id: s.custC });
+    await t.tasks.idle();
+    const [hq] = await t.db.select().from(branch).where(eq(branch.code, "00000"));
+    expect((await row(bill.id)).companySnapshot).toEqual({
+      name: t.env.COMPANY_NAME,
+      address: t.env.COMPANY_ADDRESS, // สาขายังไม่ตั้งที่อยู่ → ของกิจการ
+      tel: t.env.COMPANY_TEL,
+      fax: null,
+      tax_id: t.env.COMPANY_TAX_ID,
+      branch_name: hq?.name,
+      branch_code: "00000",
+      tax_branch_code: "00000",
+    });
+
+    const moved = "999 ถนนใหม่ หลังย้ายร้าน";
+    await t.db.update(branch).set({ address: moved, tel: "076000000" }).where(eq(branch.code, "00000"));
+    try {
+      expect((await post(`/${bill.id}/void`, "manager", { reason: "ทดสอบหัวใบ" })).status).toBe(200);
+      await t.tasks.idle();
+      const voidCall = t.fake.calls.find((c) => c.trace === `${bill.doc_no}-void`);
+      expect(voidCall?.html).toContain(t.env.COMPANY_ADDRESS);
+      expect(voidCall?.html).not.toContain(moved);
+      // บิลใหม่หลังแก้ใช้ที่อยู่/โทรของสาขา
+      const fresh = await save({ customer_id: s.custC });
+      await t.tasks.idle();
+      expect((await row(fresh.id)).companySnapshot).toMatchObject({ address: moved, tel: "076000000" });
+    } finally {
+      await t.db.update(branch).set({ address: null, tel: null }).where(eq(branch.code, "00000"));
+    }
+  });
+
+  it("สาขาที่ยังไม่ตั้งรหัสสาขาสรรพากร → PDF invalid (ReceiptDataError) · loop ไม่ retry", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const bill = await save({ customer_id: s.custC }, "staff2"); // สาขา 00002 ยังไม่มี tax_branch_code
+    await t.tasks.idle();
+    const logged = log.mock.calls.flat().join(" ");
+    log.mockRestore();
+    expect(await row(bill.id)).toMatchObject({ pdfStatus: "invalid", pdfKey: null });
+    expect(logged).toContain(`${bill.doc_no} receipt invalid`);
+    const res = await get(`/${bill.id}/pdf`, "staff2");
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ pdf_status: "invalid" });
+    expect(await t.pdf.retryDue({ olderThanMs: 0 })).toBe(0);
+  });
+
+  it("ยกเลิก/retry ได้เฉพาะบิลของสาขาที่กำลังทำงาน (สาขาอื่นที่มีสิทธิ์อ่าน = 404)", async () => {
+    const bill = await save({ customer_id: s.custC }, "staff2");
+    await t.tasks.idle();
+    // admin เห็นทุกสาขาแต่กำลังทำงานที่ 00000
+    expect((await post(`/${bill.id}/void`, "admin", { reason: "x" })).status).toBe(404);
+    expect((await post(`/${bill.id}/pdf/retry`, "admin")).status).toBe(404);
+    expect((await row(bill.id)).status).toBe("active");
   });
 
   it("ไฟล์ที่เก็บไม่เคยถูกเขียนซ้ำ (ทุก key ถูก PUT ครั้งเดียว)", () => {
