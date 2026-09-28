@@ -252,6 +252,8 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     [{ lines: "gold" }, "lines"],
     [{ payments: undefined }, "payments"],
     [{ date: "2026-02-30" }, "date"],
+    [{ date: "0000-01-01" }, "date"], // เคยเป็น 500 (Postgres ไม่มีปี 0)
+    [{ date: "1999-12-31" }, "date"],
     [{ customer_id: "not-a-uuid" }, "customer_id"],
     [{ lines: Array.from({ length: 51 }, () => ({ metal_id: "x", weight_g: "1", amount: "1" })) }, "lines"],
   ])("payload ผิดรูป %j → 400 ชี้ %s (ตัวเลข JSON ถูกปฏิเสธ — ต้องเป็น string)", async (over, field) => {
@@ -952,6 +954,8 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     ["q=ก", "q"],
     ["page=0", "page"],
     ["date_from=2026-13-01", "date_from"],
+    ["date_from=0000-01-01", "date_from"],
+    ["date_to=1999-12-31", "date_to"],
     ["date_to=yesterday", "date_to"],
   ])("query ผิด %s → 400 ชี้ %s", async (qs, field) => {
     const res = await get(`?${qs}`);

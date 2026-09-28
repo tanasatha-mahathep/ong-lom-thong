@@ -94,6 +94,12 @@ const optionalText = (max: number, label: string) =>
     .nullish()
     .transform((v) => v || null);
 
+/** วันที่ "YYYY-MM-DD" ที่มีจริงในปฏิทิน ตั้งแต่ปี 2000 — ปี 0000 ผ่านรูปแบบแต่ Postgres ปฏิเสธ (เคยเป็น 500) */
+const isoDate = (label: string) =>
+  z.iso
+    .date(`${label}ต้องเป็นรูปแบบ YYYY-MM-DD`)
+    .refine((d) => d >= "2000-01-01", `${label}ต้องตั้งแต่ปี ค.ศ. 2000 (พ.ศ. 2543)`);
+
 const LineBody = z.object({
   // โลหะที่ไม่รู้จักตรวจใน prepareBuy (ตอบเป็น error ของแถว ไม่ใช่ 400)
   metal_id: z.string({ error: "กรุณาเลือกประเภทโลหะ" }).max(64, "metal_id ไม่ถูกต้อง"),
@@ -111,7 +117,7 @@ const PaymentBody = z.object({
 /** payload ของ POST /buy/quote — POST /buy ใช้ตัวนี้ + ช่องของหัวบิล (SaveBody) */
 export const QuoteBody = z.object(
   {
-    date: z.iso.date("วันที่ต้องเป็นรูปแบบ YYYY-MM-DD").optional(),
+    date: isoDate("วันที่").optional(),
     customer_id: z.uuid("customer_id ไม่ถูกต้อง").nullish(),
     lines: z.array(LineBody, { error: "ต้องส่ง lines เป็นรายการ" }).max(50, "รายการในบิลเกิน 50 แถว — แยกเป็นหลายบิล"),
     payments: z
@@ -419,8 +425,8 @@ function billTime(time: string | undefined, p: PreparedBuy, now: Date): string {
 export const LIST_PAGE_SIZE = 50;
 
 export const ListQuery = z.object({
-  date_from: z.iso.date("date_from ต้องเป็นรูปแบบ YYYY-MM-DD").optional(),
-  date_to: z.iso.date("date_to ต้องเป็นรูปแบบ YYYY-MM-DD").optional(),
+  date_from: isoDate("date_from ").optional(),
+  date_to: isoDate("date_to ").optional(),
   /** code ของโลหะ (gold · nak · silver · platinum) — บิลที่มีโลหะนั้นอย่างน้อยหนึ่งแถว */
   metal: z.string().trim().max(32, "metal ไม่ถูกต้อง").refine(noControlChars, CONTROL_CHARS_MSG).optional(),
   q: z
