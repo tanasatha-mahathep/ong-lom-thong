@@ -25,6 +25,9 @@ packages/db/migrations/
 *.spec.tsx
 # API test harness: creates and drops one database per test file (DDL via sql.unsafe, random name)
 apps/api/src/test/
+# Web test helpers (Vitest setup, fake fetch keyed by "METHOD /path"): imported only by *.test.tsx,
+# never by main.tsx, so never bundled
+apps/web/src/test/
 # Playwright end-to-end suites (ring 1): drive the built app from outside, never bundled
 e2e/
 
