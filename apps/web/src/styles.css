@@ -113,10 +113,6 @@
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
-/* ในกล่องที่ตัดขอบ (แถวตารางใน overflow) — เส้นอยู่ด้านในจึงไม่ถูกตัด */
-.focus-inset:focus-visible {
-  outline-offset: -2px;
-}
 /* <main> รับโฟกัสจาก skip link เท่านั้น — ไม่ต้องตีกรอบทั้งหน้า */
 main[tabindex="-1"]:focus-visible {
   outline: none;

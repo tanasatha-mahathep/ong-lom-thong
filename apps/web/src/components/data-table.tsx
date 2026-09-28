@@ -1,6 +1,6 @@
 import { type RowData, type TableOptions, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import type { KeyboardEvent } from "react";
+import type { MouseEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -18,8 +18,11 @@ export interface DataTableProps<TData> {
   onPageChange: (page: number) => void;
   /** โหลดครั้งแรก (ยังไม่มีข้อมูล) */
   isLoading?: boolean;
-  /** กด Enter/Space หรือคลิกที่แถว เช่น เปิดหน้ารายละเอียด — ไม่ส่ง = แถวกดไม่ได้ */
-  onRowActivate?: (row: TData) => void;
+  /**
+   * คลิกที่ไหนก็ได้ในแถว = ทางลัดของเมาส์ (เช่น เปิดหน้ารายละเอียด) · ไม่ใช่ทางหลัก:
+   * คอลัมน์หลัก (เลขที่บิล / ชื่อลูกค้า) **ต้องเป็น `<Link>` จริง** — คีย์บอร์ดและ screen reader ใช้ลิงก์นั้น
+   */
+  onRowClick?: (row: TData) => void;
   getRowId?: TableOptions<TData>["getRowId"];
   emptyMessage?: string;
 }
@@ -35,18 +38,11 @@ declare module "@tanstack/react-table" {
 
 const SKELETON_ROWS = 5;
 
-/** ลูกศรขึ้น/ลงย้ายโฟกัสระหว่างแถวที่กดได้ */
-function moveRowFocus(event: KeyboardEvent<HTMLTableRowElement>) {
-  const target =
-    event.key === "ArrowDown"
-      ? event.currentTarget.nextElementSibling
-      : event.key === "ArrowUp"
-        ? event.currentTarget.previousElementSibling
-        : null;
-  if (target instanceof HTMLElement && target.tabIndex === 0) {
-    event.preventDefault();
-    target.focus();
-  }
+/** คลิกโดนลิงก์/ปุ่ม/ช่องกรอกในแถว หรือกำลังลากเลือกข้อความ — ปล่อยให้ element นั้นทำงานเอง */
+function isOwnClick(event: MouseEvent<HTMLTableRowElement>) {
+  const target = event.target instanceof Element ? event.target : null;
+  if (target?.closest("a[href], button, input, select, textarea, label, [role='button'], [role='link']")) return true;
+  return !!window.getSelection()?.toString();
 }
 
 /** ตารางรายการทั่วไป (TanStack Table) — หน้ารายการทุกหน้าใช้ตัวนี้ · ไม่มีลากสลับแถว */
@@ -58,7 +54,7 @@ export function DataTable<TData>({
   hasMore,
   onPageChange,
   isLoading = false,
-  onRowActivate,
+  onRowClick,
   getRowId,
   emptyMessage = "ไม่พบข้อมูล",
 }: DataTableProps<TData>) {
@@ -113,18 +109,10 @@ export function DataTable<TData>({
               rows.map((row) => (
                 <TableRow
                   key={row.id}
-                  {...(onRowActivate && {
-                    tabIndex: 0,
-                    className: "focus-inset cursor-pointer",
-                    onClick: () => onRowActivate(row.original),
-                    onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>) => {
-                      if (event.target !== event.currentTarget) return;
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        onRowActivate(row.original);
-                      } else {
-                        moveRowFocus(event);
-                      }
+                  {...(onRowClick && {
+                    className: "cursor-pointer",
+                    onClick: (event: MouseEvent<HTMLTableRowElement>) => {
+                      if (!isOwnClick(event)) onRowClick(row.original);
                     },
                   })}
                 >
