@@ -22,6 +22,7 @@ const PW = "correct-horse-battery";
 const ID_A = "1103700123458";
 const ID_B = "3100500987657";
 const ID_C = "5109900112237";
+const ID_D = "3101200456789";
 
 // 10:00 น. วันที่ 5 ต.ค. 2569 เวลาไทย → งวดเลขที่ 6910
 const NOW = new Date("2026-10-05T03:00:00Z");
@@ -112,6 +113,7 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
   let custA = "";
   let custB = "";
   let custC = "";
+  let custD = "";
   let keySeq = 0;
 
   beforeAll(async () => {
@@ -409,6 +411,36 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
   it("บัตรคิด ณ วันที่ของบิล: บัตรหมดอายุ 1 ต.ค. ใช้กับบิลย้อนหลัง 30 ก.ย. ได้", async () => {
     const q = (await (await quote(bill({ customer_id: custB, date: "2026-09-30" }))).json()) as QuoteRes;
     expect(q).toMatchObject({ ok: true, date: "2026-09-30", gold_price_snapshot: "67000.00" });
+  });
+
+  it("Siam ID พิมพ์วันหมดอายุเป็นชื่อเดือนไทย ('31 ธันวาคม 2574') → เพิ่มลูกค้าแล้วเปิดบิลได้ (สถานะบัตร ok)", async () => {
+    const form = new FormData();
+    form.append("national_id", ID_D);
+    form.append("name_th", "นายสยาม ไอดี");
+    form.append("card_expire_text", "31 ธันวาคม 2574");
+    const created = await t.request("/api/customers", { cookie: cookies.staff, body: form });
+    expect(created.status).toBe(201);
+    custD = ((await created.json()) as { id: string }).id;
+    const detail = await t.request(`/api/customers/${custD}`, { cookie: cookies.staff });
+    expect(await detail.json()).toMatchObject({ card_status: "ok", card_expire_date: "2031-12-31" });
+
+    const q = (await (await quote(bill({ customer_id: custD }))).json()) as QuoteRes;
+    expect(q).toMatchObject({ ok: true, errors: [], total_amount: "20030.00" });
+  });
+
+  // ลูกค้าระบบเดิมย้ายมาพร้อมข้อความตามที่พิมพ์ไว้ — สถานะบัตรคิดจากข้อความ ณ วันที่ของบิล (5 ต.ค. 2569)
+  it.each([
+    ["1 ม.ค. 2570", null],
+    ["5 Oct. 2026", null], // หมดอายุวันนี้ยังใช้ได้
+    ["LIFELONG", null],
+    ["99999999", null], // บัตรตลอดชีพ ค่าดิบจากชิป
+    ["4 ต.ค. 2569", "บัตรประชาชนหมดอายุแล้ว"],
+    ["1 มกรา 2570", "รูปแบบวันที่บัตรหมดอายุไม่ถูกต้อง"],
+  ])("วันหมดอายุ %j → quote ผ่าน / บล็อกด้วย %s (R2)", async (cardExpireText, message) => {
+    await t.db.update(customer).set({ cardExpireText }).where(eq(customer.id, custD));
+    const q = (await (await quote(bill({ customer_id: custD }))).json()) as QuoteRes;
+    expect(q.errors).toEqual(message ? [{ field: "customer_id", message }] : []);
+    expect(q.ok).toBe(message === null);
   });
 
   // ---------- บันทึก ----------
