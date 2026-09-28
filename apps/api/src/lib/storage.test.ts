@@ -9,6 +9,7 @@ import {
   type Storage,
   createMemoryStorage,
   createS3Storage,
+  probeConditionalWrites,
   putNew,
 } from "./storage";
 
@@ -201,6 +202,38 @@ describe("createS3Storage — bucket ที่ไม่รู้จัก If-Non
       await putNew(storage, "receipts/a/2026/10/RC2.pdf", bytes("%PDF-2"), "application/pdf", OWNER);
       const puts = s3.seen.filter((r) => r.method === "PUT").map((r) => r.headers["if-none-match"] ?? "plain");
       expect(puts).toEqual(["*", "plain", "plain"]);
+    } finally {
+      await s3.close();
+    }
+  });
+});
+
+describe("probeConditionalWrites — bucket บังคับ If-None-Match จริงไหม", () => {
+  it("หน่วยความจำ / bucket ที่ตอบ 412 ครั้งที่สอง → honoured", async () => {
+    expect(await probeConditionalWrites(createMemoryStorage())).toBe("honoured");
+    const seenKeys = new Set<string>();
+    const s3 = await fakeS3((req) => {
+      if (req.method !== "PUT") return 404;
+      if (req.headers["if-none-match"] === "*" && seenKeys.has(req.path)) return 412;
+      seenKeys.add(req.path);
+      return 200;
+    });
+    try {
+      const storage = createS3Storage(s3Env(s3.endpoint), { log: quiet });
+      expect(await probeConditionalWrites(storage)).toBe("honoured");
+      const puts = s3.seen.filter((r) => r.method === "PUT");
+      expect(puts.map((r) => r.headers["if-none-match"])).toEqual(["*", "*"]);
+      expect(new Set(puts.map((r) => r.path)).size).toBe(1); // key เดียวกันทั้งสองครั้ง
+      expect(puts[0]?.path).toMatch(/^\/ong\/probes\/conditional-write-/);
+    } finally {
+      await s3.close();
+    }
+  });
+
+  it("bucket ที่เงียบใส่ header (ตอบ 200 ทั้งสองครั้ง) → ignored", async () => {
+    const s3 = await fakeS3(() => 200);
+    try {
+      expect(await probeConditionalWrites(createS3Storage(s3Env(s3.endpoint), { log: quiet }))).toBe("ignored");
     } finally {
       await s3.close();
     }

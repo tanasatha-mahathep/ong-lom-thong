@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   GetObjectCommand,
   HeadObjectCommand,
@@ -205,6 +206,24 @@ export async function putNew(
   const sha256 = sha256Hex(body);
   await storage.putImmutable(key, body, contentType, { ...metadata, sha256 });
   return { sha256 };
+}
+
+/**
+ * ตรวจครั้งเดียวตอนเริ่มว่า bucket บังคับ `If-None-Match: *` จริงไหม — PUT key ใหม่ใต้ probes/ สองครั้ง
+ * ครั้งที่สองต้องถูกปฏิเสธ (412) · "ignored" = ไฟล์เก็บถาวรพึ่ง HEAD + lease ของงาน PDF เท่านั้น
+ * ผลลง log ไว้ยืนยันกับ bucket จริง (Tigris บน staging/production) · ไฟล์ probe เล็กมากและไม่ถูกลบ (ไม่มีโค้ดลบ)
+ */
+export async function probeConditionalWrites(storage: Storage): Promise<"honoured" | "ignored"> {
+  const key = `probes/conditional-write-${randomUUID()}.txt`;
+  const body = new TextEncoder().encode(`conditional write probe ${new Date().toISOString()}\n`);
+  await storage.putImmutable(key, body, "text/plain", { kind: "probe" });
+  try {
+    await storage.putImmutable(key, body, "text/plain", { kind: "probe" });
+    return "ignored";
+  } catch (e) {
+    if (e instanceof ObjectExistsError) return "honoured";
+    throw e;
+  }
 }
 
 /**
