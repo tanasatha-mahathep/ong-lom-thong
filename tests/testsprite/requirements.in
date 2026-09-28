@@ -1,0 +1,4 @@
+# ตัวรันในเครื่อง/CI ของเราเอง (TestSprite cloud มี requests ของมันเอง)
+# lock: requirements.txt (pip-compile --generate-hashes) — ติดตั้งด้วย --require-hashes เท่านั้น
+pytest
+requests
