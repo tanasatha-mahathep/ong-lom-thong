@@ -1,5 +1,5 @@
 import { D, fmtMoney, fmtWeight, maskNationalId } from "@ong/core";
-import { type Db, branch, buyLine, buyReceipt, metal, user } from "@ong/db";
+import { type Db, branch, buyLine, buyReceipt, metal, stockMovement, user } from "@ong/db";
 import { and, asc, eq, exists, gte, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { csvText, toCsv } from "../lib/csv";
@@ -38,6 +38,14 @@ export const PurchaseQuery = z.object({
   format: Format,
 });
 export type PurchaseQuery = z.infer<typeof PurchaseQuery>;
+
+export const StockQuery = z.object({
+  /** ไม่ส่ง = วันนี้ (ตามเวลาไทย) · นับความเคลื่อนไหวถึงวันนี้รวมวันนั้น */
+  as_of: isoDate("as_of").optional(),
+  branch_id: BranchId,
+  format: Format,
+});
+export type StockQuery = z.infer<typeof StockQuery>;
 
 // ---------- รูปคำตอบ (เงิน/น้ำหนักเป็น string ทั้งหมด) ----------
 
@@ -295,4 +303,83 @@ export function purchaseCsv(r: PurchaseReport): string {
     ...r.by_branch.flatMap((b) => summary("รวม", csvText(branchLabel(b.branch)), b)),
     ...summary("รวมทั้งสิ้น", "ทุกสาขา", r.total),
   ]);
+}
+
+// ---------- สต็อกคงเหลือ (stock_show) ----------
+
+export interface StockMetal {
+  metal_code: string;
+  name_th: string;
+  /** กรัมคงเหลือ 3 ตำแหน่ง */
+  grams: string;
+}
+
+export interface StockReport {
+  as_of: string;
+  /** ทุกสาขาในขอบเขต · ทุกโลหะตามลำดับของร้าน (ไม่มีความเคลื่อนไหว = 0.000) */
+  by_branch: { branch: BranchRef; by_metal: StockMetal[] }[];
+  /** รวมทุกสาขาในขอบเขต ต่อโลหะ — ไม่รวมกรัมข้ามโลหะ (ระบบเดิมเว้นช่อง "รวมทั้งสิ้น" ว่าง) */
+  total: { by_metal: StockMetal[] };
+}
+
+/**
+ * สต็อกคงเหลือ ณ วันที่ — Σ stock_movement.grams ที่ date ≤ as_of ต่อสาขาต่อโลหะ และรวมทุกสาขาต่อโลหะ
+ * รับซื้อ/ยอดยกมาเป็นบวก · ยกเลิกบิล = แถวติดลบ (ลงวันที่ของบิล) — รวมทุกแถวตามวันที่ของแถวเอง จึงหักกันเองโดยไม่ต้องดูสถานะบิล
+ * SUM ของ numeric ใน Postgres คำสั่งเดียว (grouping sets) — ยอดต่อสาขากับรวมทุกสาขามาจาก snapshot เดียวกัน
+ */
+export async function stockReport(db: Db, scope: BranchRef[], asOf: string): Promise<StockReport> {
+  const metals = await allMetals(db);
+  const sums =
+    scope.length === 0
+      ? []
+      : await db
+          .select({
+            branchId: sql<string | null>`${stockMovement.branchId}`,
+            metalId: stockMovement.metalId,
+            allBranches: sql<number>`grouping(${stockMovement.branchId})`,
+            grams: sql<string>`sum(${stockMovement.grams})::text`,
+          })
+          .from(stockMovement)
+          .where(
+            and(
+              inArray(
+                stockMovement.branchId,
+                scope.map((b) => b.id),
+              ),
+              lte(stockMovement.date, asOf),
+            ),
+          )
+          .groupBy(
+            sql`grouping sets ((${stockMovement.branchId}, ${stockMovement.metalId}), (${stockMovement.metalId}))`,
+          );
+  const grams = new Map(sums.map((s) => [`${s.allBranches ? "*" : s.branchId}|${s.metalId}`, s.grams]));
+  const byMetal = (branchId: string | null): StockMetal[] =>
+    metals.map((m) => ({
+      metal_code: m.code,
+      name_th: m.nameTh,
+      grams: fmtWeight(D(grams.get(`${branchId ?? "*"}|${m.id}`) ?? "0")),
+    }));
+  return {
+    as_of: asOf,
+    by_branch: scope.map((b) => ({ branch: b, by_metal: byMetal(b.id) })),
+    total: { by_metal: byMetal(null) },
+  };
+}
+
+/**
+ * สต็อกเป็น CSV แบบตาราง (ตาม stock_show: ชื่อสินค้า · คงเหลือ) — หนึ่งแถวต่อโลหะ · หนึ่งคอลัมน์ต่อสาขา
+ * · คอลัมน์ท้าย "รวมทั้งสิ้น" = ทุกสาขา · หน่วยกรัมอยู่ที่หัวคอลัมน์ ช่องเป็นตัวเลขล้วน
+ */
+export function stockCsv(r: StockReport): string {
+  const header = [
+    "ชื่อสินค้า",
+    ...r.by_branch.map((b) => csvText(`คงเหลือ ${branchLabel(b.branch)} (กรัม)`)),
+    "รวมทั้งสิ้น (กรัม)",
+  ];
+  const rows = r.total.by_metal.map((m, i) => [
+    csvText(m.name_th),
+    ...r.by_branch.map((b) => b.by_metal[i]?.grams ?? "0.000"),
+    m.grams,
+  ]);
+  return toCsv([header, ...rows]);
 }

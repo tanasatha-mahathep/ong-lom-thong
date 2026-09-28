@@ -2,7 +2,16 @@ import { businessDate } from "@ong/core";
 import { type Context, Hono } from "hono";
 import type { z } from "zod";
 import { type AppEnv, apiError, requireRole, requireSession } from "../lib/context";
-import { PurchaseQuery, purchaseCsv, purchaseReport, reportBranches, scopeTo } from "../services/reports";
+import {
+  PurchaseQuery,
+  StockQuery,
+  purchaseCsv,
+  purchaseReport,
+  reportBranches,
+  scopeTo,
+  stockCsv,
+  stockReport,
+} from "../services/reports";
 
 /** 400 ชี้ช่องแรกที่ผิด */
 const invalid = (e: z.ZodError) => {
@@ -49,6 +58,22 @@ export const reportRoutes = new Hono<AppEnv>()
     const report = await purchaseReport(c.var.db, scope, { from, to, metal: query.data.metal ?? null });
     if (query.data.format === "csv") {
       return csvFile(c, purchaseCsv(report), `purchase_${from}_${to}${branchSuffix(query.data.branch_id, scope)}.csv`);
+    }
+    c.header("Cache-Control", "no-store");
+    return c.json(report);
+  })
+  // สต็อกคงเหลือ ณ วันที่ (stock_show) — กรัมต่อโลหะ ต่อสาขา + รวมทุกสาขา
+  .get("/stock", async (c) => {
+    const readable = await reportBranches(c.var.db, c.var.viewer);
+    if (readable.length === 0) return c.json(apiError("forbidden"), 403);
+    const query = StockQuery.safeParse(filledOnly(c.req.query()));
+    if (!query.success) return c.json(invalid(query.error), 400);
+    const asOf = query.data.as_of ?? businessDate(c.var.now());
+
+    const scope = scopeTo(readable, query.data.branch_id);
+    const report = await stockReport(c.var.db, scope, asOf);
+    if (query.data.format === "csv") {
+      return csvFile(c, stockCsv(report), `stock_${asOf}${branchSuffix(query.data.branch_id, scope)}.csv`);
     }
     c.header("Cache-Control", "no-store");
     return c.json(report);

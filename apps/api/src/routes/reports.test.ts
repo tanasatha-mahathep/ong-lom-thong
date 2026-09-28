@@ -1,6 +1,6 @@
 import { D, ZERO, fmtMoney, fmtWeight, pricePerGram } from "@ong/core";
 import { branch, buyLine, buyReceipt, customer, metal, payment, stockMovement } from "@ong/db";
-import { and, eq, gte, lte } from "drizzle-orm";
+import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PURCHASE_CSV_HEADER } from "../services/reports";
 import { type TestApp, databaseAvailable, startTestApp } from "../test/harness";
@@ -45,6 +45,16 @@ interface Row {
   total_amount: string;
   created_by: { id: string; name: string };
 }
+interface StockMetal {
+  metal_code: string;
+  name_th: string;
+  grams: string;
+}
+interface StockRes {
+  as_of: string;
+  by_branch: { branch: { id: string; code: string; name: string }; by_metal: StockMetal[] }[];
+  total: { by_metal: StockMetal[] };
+}
 interface PurchaseRes {
   date_from: string;
   date_to: string;
@@ -62,8 +72,8 @@ interface BillSpec {
   cust: "A" | "B" | "C";
   lines: Line[];
   by: string;
-  /** ยกเลิกในวันนี้ — สถานะ void + แถวสต็อกติดลบลงวันที่ยกเลิก (แบบเดียวกับ buyVoid) */
-  voidOn?: string;
+  /** ยกเลิกแล้ว — สถานะ void + แถวสต็อกติดลบลงวันที่ของบิล (แบบ void ของ PR #54) */
+  voided?: boolean;
   /** ชื่อใน snapshot ต่างจากทะเบียนลูกค้า (ลูกค้าถูกแก้ชื่อทีหลัง) */
   snapshotName?: string;
 }
@@ -118,7 +128,7 @@ describe.skipIf(!available)("รายงาน (M3.6 · finance_report3 · stoc
           totalAmount: fmtMoney(amount),
           createdBy: userIds[s.by] ?? "",
           idempotencyKey: `report-fixture-${String(++keySeq).padStart(6, "0")}`,
-          ...(s.voidOn
+          ...(s.voided
             ? { status: "void" as const, voidedBy: userIds.mgr0, voidedAt: NOW, voidReason: "ทดสอบยกเลิก" }
             : {}),
         })
@@ -137,11 +147,10 @@ describe.skipIf(!available)("รายงาน (M3.6 · finance_report3 · stoc
       await tx.insert(payment).values({ receiptId: r.id, method: "cash", amount: fmtMoney(amount) });
       const moves = s.lines.map(([m, w]) => ({ branchId, metalId: metals[m] ?? "", sourceReceiptId: r.id, grams: w }));
       await tx.insert(stockMovement).values(moves.map((mv) => ({ ...mv, date: s.date })));
-      if (s.voidOn) {
-        const voidOn = s.voidOn;
+      if (s.voided) {
         await tx
           .insert(stockMovement)
-          .values(moves.map((mv) => ({ ...mv, date: voidOn, grams: fmtWeight(D(mv.grams).negated()) })));
+          .values(moves.map((mv) => ({ ...mv, date: s.date, grams: fmtWeight(D(mv.grams).negated()) })));
       }
       return r.id;
     });
@@ -202,7 +211,7 @@ describe.skipIf(!available)("รายงาน (M3.6 · finance_report3 · stoc
       cust: "A",
       lines: [["silver", "50.500", "800.50"]],
       by: "staff0",
-      voidOn: "2026-10-04",
+      voided: true,
     });
     bills.b4 = await addBill({
       code: "00000",
@@ -550,6 +559,174 @@ describe.skipIf(!available)("รายงาน (M3.6 · finance_report3 · stoc
       expect(res.headers.get("content-disposition")).toBe(
         'attachment; filename="purchase_2026-10-01_2026-10-05_00001.csv"',
       );
+    });
+  });
+
+  describe("สต็อกคงเหลือ /stock", () => {
+    const stock = async (qs: string, who = "acct") => {
+      const res = await get(`/stock${qs ? `?${qs}` : ""}`, who);
+      expect(res.status).toBe(200);
+      return (await res.json()) as StockRes;
+    };
+    const g = (code: string, grams: string) => ({
+      metal_code: code,
+      name_th: { gold: "ทอง", nak: "นาก", silver: "เงิน", platinum: "แพลตตินั่ม" }[code] ?? "",
+      grams,
+    });
+    /** กรัมต่อโลหะของสาขาเดียว เรียง ทอง · นาก · เงิน · แพลตตินั่ม */
+    const gramsOf = (r: StockRes, code: string) =>
+      r.by_branch.find((b) => b.branch.code === code)?.by_metal.map((m) => m.grams);
+
+    it("ต้อง login · staff = 403 · manager ที่ไม่มีสาขา = 403 (fail-closed)", async () => {
+      expect((await t.request("/api/reports/stock")).status).toBe(401);
+      expect((await get("/stock", "staff0")).status).toBe(403);
+      expect((await get("/stock?format=csv", "staff0")).status).toBe(403);
+      expect((await get("/stock", "nobranch")).status).toBe(403);
+      for (const who of ["mgr0", "acct", "admin"]) expect((await get("/stock", who)).status).toBe(200);
+    });
+
+    it("รูปคำตอบ: ณ วันนี้ (ค่าเริ่มต้น) · ทุกโลหะต่อสาขา + รวม · ยอดยกมานับด้วย", async () => {
+      const res = await get("/stock", "mgr1");
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      const byMetal = [g("gold", "0.500"), g("nak", "3.250"), g("silver", "0.000"), g("platinum", "2.000")];
+      expect(await res.json()).toEqual({
+        as_of: "2026-10-05",
+        by_branch: [{ branch: ref("00001"), by_metal: byMetal }],
+        total: { by_metal: byMetal },
+      });
+    });
+
+    it("ต่อสาขา = Σ ความเคลื่อนไหวใน DB · รวม = Σ ต่อสาขา · ยกเลิกบิลหักด้วยแถวติดลบ", async () => {
+      const r = await stock("");
+      expect(r.by_branch.map((b) => [b.branch.code, b.by_metal.map((m) => m.grams)])).toEqual([
+        ["00000", ["16.860", "0.000", "100.000", "4.990"]],
+        ["00001", ["0.500", "3.250", "0.000", "2.000"]],
+        ["00002", ["7.777", "0.000", "18169.697", "0.000"]],
+      ]);
+      expect(r.total.by_metal).toEqual([
+        g("gold", "25.137"),
+        g("nak", "3.250"),
+        g("silver", "18269.697"),
+        g("platinum", "6.990"),
+      ]);
+      const db = await t.db
+        .select({
+          branchId: stockMovement.branchId,
+          metalId: stockMovement.metalId,
+          grams: sql<string>`sum(${stockMovement.grams})::text`,
+        })
+        .from(stockMovement)
+        .where(lte(stockMovement.date, "2026-10-05"))
+        .groupBy(stockMovement.branchId, stockMovement.metalId);
+      for (const b of r.by_branch) {
+        for (const m of b.by_metal) {
+          const row = db.find((x) => x.branchId === b.branch.id && x.metalId === metals[m.metal_code]);
+          expect(m.grams).toBe(fmtWeight(D(row?.grams ?? "0")));
+        }
+      }
+      r.total.by_metal.forEach((m, i) => {
+        expect(fmtWeight(sumOf(r.by_branch.map((b) => b.by_metal[i]?.grams ?? "0")))).toBe(m.grams);
+      });
+    });
+
+    it("ณ วันที่: รวมความเคลื่อนไหวของวันนั้น · หลังวันนั้นไม่นับ · บิลยกเลิกหักกันหมด (แถวติดลบวันที่เดียวกับบิล)", async () => {
+      // บิลเงิน 50.500 ของ 00000 (3 ต.ค.) ถูกยกเลิก: +50.500 และ −50.500 ลงวันที่ 3 ต.ค. ทั้งคู่
+      const moves = await t.db
+        .select()
+        .from(stockMovement)
+        .where(eq(stockMovement.sourceReceiptId, bills.b3 ?? ""));
+      expect(moves.map((m) => [m.date, m.grams]).sort()).toEqual([
+        ["2026-10-03", "-50.500"],
+        ["2026-10-03", "50.500"],
+      ]);
+      const oct2 = await stock("as_of=2026-10-02");
+      const oct3 = await stock("as_of=2026-10-03");
+      // ทอง 00000 = 30 ก.ย. 1.000 + 1 ต.ค. 5.860 + 2 ต.ค. 10.000
+      expect(gramsOf(oct2, "00000")).toEqual(["16.860", "0.000", "100.000", "4.990"]);
+      expect(gramsOf(oct3, "00000")).toEqual(["16.860", "0.000", "100.000", "4.990"]);
+      expect(gramsOf(oct3, "00001")).toEqual(["0.000", "3.250", "0.000", "0.000"]);
+      expect(gramsOf(oct3, "00002")).toEqual(["0.000", "0.000", "18169.697", "0.000"]);
+      // 4 ต.ค. รวมบิลของวันนั้น (as_of รวมวันท้าย) · 00001 ยังไม่มีบิลวันที่ 5
+      const oct4 = await stock("as_of=2026-10-04");
+      expect(gramsOf(oct4, "00002")).toEqual(["7.777", "0.000", "18169.697", "0.000"]);
+      expect(gramsOf(oct4, "00001")).toEqual(["0.000", "3.250", "0.000", "0.000"]);
+      // 30 ก.ย. รวมบิลวันที่ 30 · 29 ก.ย. ไม่รวม · ก่อนยอดยกมา = 0 ทั้งหมด
+      expect(gramsOf(await stock("as_of=2026-09-30"), "00000")).toEqual(["1.000", "0.000", "0.000", "4.990"]);
+      expect(gramsOf(await stock("as_of=2026-09-29"), "00000")).toEqual(["0.000", "0.000", "0.000", "4.990"]);
+      const before = await stock("as_of=2026-09-14");
+      expect(before.as_of).toBe("2026-09-14");
+      for (const m of before.total.by_metal) expect(m.grams).toBe("0.000");
+    });
+
+    it("scoping: manager เห็นเฉพาะสาขาตัวเอง · branch_id ของสาขาอื่น = ว่าง ไม่ใช่ทุกสาขา", async () => {
+      expect((await stock("", "mgr0")).by_branch.map((b) => b.branch.code)).toEqual(["00000"]);
+      for (const qs of [`branch_id=${t.branches["00000"]}`, "branch_id=not-a-uuid", `branch_id=${NO_BRANCH}`]) {
+        const other = await stock(qs, "mgr1");
+        expect(other.by_branch).toEqual([]);
+        for (const m of other.total.by_metal) expect(m.grams).toBe("0.000");
+      }
+      const one = await stock(`branch_id=${t.branches["00002"]}`);
+      expect(one.by_branch.map((b) => b.branch.code)).toEqual(["00002"]);
+      expect(one.total.by_metal.map((m) => m.grams)).toEqual(["7.777", "0.000", "18169.697", "0.000"]);
+      // ยอดของสาขาอื่นไม่ปนมากับรวม
+      const sums = await t.db
+        .select({ grams: sql<string>`sum(${stockMovement.grams})::text` })
+        .from(stockMovement)
+        .where(inArray(stockMovement.branchId, [t.branches["00001"] ?? ""]));
+      const own = await stock("", "mgr1");
+      expect(fmtWeight(sumOf(own.total.by_metal.map((m) => m.grams)))).toBe(fmtWeight(D(sums[0]?.grams ?? "0")));
+    });
+
+    it("สาขาที่ปิดแล้ว: manager ของสาขานั้น = 403 · ไม่อยู่ในรายงานของผู้อื่น (ยังใช้ forUser)", async () => {
+      await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
+      try {
+        expect((await get("/stock", "mgr2")).status).toBe(403);
+        const r = await stock("");
+        expect(r.by_branch.map((b) => b.branch.code)).toEqual(["00000", "00001"]);
+        expect(r.total.by_metal.map((m) => m.grams)).toEqual(["17.360", "3.250", "100.000", "6.990"]);
+      } finally {
+        await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
+      }
+    });
+
+    it.each([
+      ["as_of=2026-02-30", "as_of"],
+      ["as_of=1999-12-31", "as_of"],
+      ["as_of=05/10/2569", "as_of"],
+      ["format=pdf", "format"],
+    ])("query ผิด %s → 400 ชี้ %s", async (qs, field) => {
+      const res = await get(`/stock?${qs}`, "acct");
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ field });
+    });
+
+    it("CSV: UTF-8 + BOM · แถวละโลหะ · คอลัมน์ละสาขา + รวมทั้งสิ้น · ตัวเลขชุดเดียวกับ JSON", async () => {
+      const res = await get("/stock?format=csv", "acct");
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("text/csv; charset=utf-8");
+      expect(res.headers.get("content-disposition")).toBe('attachment; filename="stock_2026-10-05.csv"');
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      const { bytes, text } = await csvOf(res);
+      expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+      expect(text.slice(1).split("\r\n")).toEqual([
+        `ชื่อสินค้า,คงเหลือ 00000 ${HQ} (กรัม),คงเหลือ 00001 สาขา 2 (กรัม),คงเหลือ 00002 สาขา 3 (กรัม),รวมทั้งสิ้น (กรัม)`,
+        "ทอง,16.860,0.500,7.777,25.137",
+        "นาก,0.000,3.250,0.000,3.250",
+        "เงิน,100.000,0.000,18169.697,18269.697",
+        "แพลตตินั่ม,4.990,2.000,0.000,6.990",
+        "",
+      ]);
+
+      const one = await get(`/stock?format=csv&as_of=2026-10-03&branch_id=${t.branches["00001"]}`, "mgr1");
+      expect(one.headers.get("content-disposition")).toBe('attachment; filename="stock_2026-10-03_00001.csv"');
+      expect((await csvOf(one)).text.slice(1).split("\r\n")).toEqual([
+        "ชื่อสินค้า,คงเหลือ 00001 สาขา 2 (กรัม),รวมทั้งสิ้น (กรัม)",
+        "ทอง,0.000,0.000",
+        "นาก,3.250,3.250",
+        "เงิน,0.000,0.000",
+        "แพลตตินั่ม,0.000,0.000",
+        "",
+      ]);
     });
   });
 });
