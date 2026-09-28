@@ -101,8 +101,8 @@ describe("/buy", { timeout: FLOW_TIMEOUT }, () => {
   it("lands on the weight field after a card read, with nothing typed into other fields", async () => {
     const { user } = setup();
     await insertCard(user, CUSTOMER_OK.national_id);
-    // Tab ที่ Siam ID ส่งต่อท้ายถูกกลืน (จังหวะ 800 ms ทดสอบละเอียดใน use-siam-id-capture.test.tsx)
-    await user.keyboard("{Tab}");
+    // ปุ่มที่ Siam ID ส่งตามมาระหว่าง burst ถูกกลืน — ทดสอบด้วยนาฬิกาปลอมใน use-siam-id-capture.test.tsx
+    // (เทสต์ทั้งแอปพิมพ์ช้าบนเครื่องที่งานเยอะ จังหวะ 800 ms จึงเชื่อไม่ได้)
     await waitFor(() => expect(weight()).toHaveFocus());
     expect(weight()).toHaveValue("");
     expect(screen.getByLabelText(t("customer.searchLabel"))).toHaveValue("");
