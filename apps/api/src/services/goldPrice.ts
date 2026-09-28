@@ -18,6 +18,12 @@ export type GoldSettingRow = { [K in keyof GoldPriceSetting]: string };
 
 type GoldPriceRow = typeof goldPrice.$inferSelect;
 
+/**
+ * เพดานราคาทองแท่งขายออก — ราคาจริง ~70,000 บาทต่อบาททอง จึงเผื่อไว้ 10 เท่า
+ * กันเลขที่หลุดช่อง (เช่นเลขบัตร 13 หลักจาก Siam ID) ไม่ให้ล้น numeric(14,2) เป็น 500 · วันแรกไม่มีราคาก่อนหน้าให้ด่านพิมพ์ผิดจับ
+ */
+export const MAX_BAR_SELL = "999999.99";
+
 export async function loadGoldSetting(db: Db): Promise<GoldSettingRow> {
   const [s] = await db.select().from(goldPriceSetting).where(eq(goldPriceSetting.id, 1)).limit(1);
   if (!s) throw new Error("gold_price_setting ยังไม่ได้ seed");
@@ -56,6 +62,7 @@ export async function quoteGoldPrice(
 ): Promise<GoldQuote> {
   const sell = parseDecimal(barSellInput);
   if (!sell || sell.lte(0)) throw new GoldPriceInputError("ราคาทองแท่งขายออกต้องเป็นตัวเลขมากกว่า 0");
+  if (sell.gt(MAX_BAR_SELL)) throw new GoldPriceInputError("ราคาทองสูงผิดปกติ — ตรวจตัวเลขอีกครั้ง");
   if (sell.decimalPlaces() > 2) throw new GoldPriceInputError("ราคาทศนิยมไม่เกิน 2 ตำแหน่ง");
   const setting = await loadGoldSetting(db);
   const q = deriveGoldPrice(sell, setting);

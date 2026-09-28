@@ -76,10 +76,28 @@ describe.skipIf(!available)("ราคาทองวันนี้ (R7 · R8 �
     [{ bar_sell: "0" }, "ราคาทองแท่งขายออกต้องเป็นตัวเลขมากกว่า 0"],
     [{ bar_sell: "67850.001" }, "ราคาทศนิยมไม่เกิน 2 ตำแหน่ง"],
     [{ bar_sell: "150" }, "ราคาต่ำกว่าส่วนต่างรับซื้อ"],
+    [{ bar_sell: "1000000" }, "ราคาทองสูงผิดปกติ — ตรวจตัวเลขอีกครั้ง"],
+    [{ bar_sell: "1,000,000,000,000" }, "ราคาทองสูงผิดปกติ — ตรวจตัวเลขอีกครั้ง"],
   ])("quote ปฏิเสธ %j", async (body, error) => {
     const res = await quote(body);
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error, field: "bar_sell" });
+  });
+
+  it("ราคาสูงผิดปกติ = 400 แม้ยืนยันแล้ว — วันแรกที่ไม่มีราคาก่อนหน้าให้ด่านพิมพ์ผิดเทียบก็กัน (ไม่ล้น numeric เป็น 500)", async () => {
+    // เลขบัตร 13 หลัก (สมมติ) ที่ Siam ID พิมพ์หลุดเข้าช่องราคา · ล้านล้านบาท
+    for (const bar_sell of ["1103700123458", "1,000,000,000,000", "1000000.00"]) {
+      const res = await put("manager", { bar_sell, confirm_typo: true });
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "ราคาทองสูงผิดปกติ — ตรวจตัวเลขอีกครั้ง", field: "bar_sell" });
+    }
+    expect(await t.db.select().from(goldPrice)).toEqual([]);
+    // เพดานพอดี 999,999.99 ยังคำนวณได้ (quote เท่านั้น ไม่บันทึก)
+    expect(await (await quote({ bar_sell: "999999.99" })).json()).toEqual({
+      bar_sell: "999999.99",
+      bar_buy: "999799.99",
+      jewelry_buy: "949810",
+    });
   });
 
   it("staff ตั้งราคาไม่ได้ (403) · manager ตั้งได้", async () => {

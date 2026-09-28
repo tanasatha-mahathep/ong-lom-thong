@@ -138,6 +138,8 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
     [{}, "ต้องส่ง bar_sell เป็นข้อความตัวเลข"],
     [{ bar_sell: "abc" }, "ราคาทองแท่งขายออกต้องเป็นตัวเลขมากกว่า 0"],
     [{ bar_sell: "70100.001" }, "ราคาทศนิยมไม่เกิน 2 ตำแหน่ง"],
+    [{ bar_sell: "1103700123458", confirm_typo: true }, "ราคาทองสูงผิดปกติ — ตรวจตัวเลขอีกครั้ง"],
+    [{ bar_sell: "1,000,000", confirm_typo: true }, "ราคาทองสูงผิดปกติ — ตรวจตัวเลขอีกครั้ง"],
   ])("ข้อมูลผิด %j → 400 ชี้ bar_sell", async (body, error) => {
     const res = await put("mgr1", b1, body);
     expect(res.status).toBe(400);
