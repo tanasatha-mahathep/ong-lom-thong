@@ -6,6 +6,7 @@ import { type AppEnv, apiError } from "./lib/context";
 import { sameOriginOnly } from "./lib/origin";
 import { goldPriceRoutes } from "./routes/goldPrice";
 import { me } from "./routes/me";
+import { metalRoutes } from "./routes/metals";
 
 export interface AppDeps {
   db: Db;
@@ -36,6 +37,7 @@ export function createApp({ db, auth, env, now = () => new Date() }: AppDeps) {
   api.route("/me", me);
 
   api.route("/gold-price", goldPriceRoutes);
+  api.route("/metals", metalRoutes);
 
   api.notFound((c) => c.json(apiError("not found"), 404));
   app.route("/api", api);
