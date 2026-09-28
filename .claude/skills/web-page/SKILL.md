@@ -21,7 +21,7 @@ description: สร้างหรือแก้หน้าใน apps/web (Vi
 - ผู้ใช้ปัจจุบัน: `useMe()` (role · branch · branches) — ห้ามอ่าน me จาก route context (ไม่อัปเดตหลังสลับสาขา)
 - 401 จาก query/mutation ใดก็ได้ → ตัวดักกลางใน `router.tsx` พาไป `/login?redirect=…` เอง · ยกเว้นตั้ง `meta: { handlesUnauthorized: true }`
 - error ใต้ช่อง: `ApiError.field` → `<FieldError id=…>` + `aria-describedby` ที่ input · ข้อความรวม: `errorMessage(e)`
-- สลับสาขาแล้ว invalidate ทุก query — query key ไม่ต้องใส่ branch id
+- สลับสาขาแล้ว **reset** ทุก query ยกเว้น `me` (ข้อมูลสาขาเดิมหายทันที ไม่ค้างใต้หัวสาขาใหม่) — query key ไม่ต้องใส่ branch id แต่หน้าต้องรับสถานะ "ยังไม่มีข้อมูล" (skeleton) ได้เสมอ
 
 ## shadcn/ui
 

@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
 import { errorMessage } from "@/lib/api";
-import { type Me, ROLE_LABEL, canSwitchBranch } from "@/lib/queries";
+import { type Me, ROLE_LABEL, canSwitchBranch, meQueryOptions } from "@/lib/queries";
 import { signOut, switchBranch } from "@/lib/session";
 
 /** เมนูผู้ใช้ท้าย sidebar — สลับสาขา (มีสิทธิ์มากกว่า 1 สาขา) · ออกจากระบบ */
@@ -29,8 +29,11 @@ export function NavUser({ me }: { me: Me }) {
   const switchMutation = useMutation({
     mutationFn: switchBranch,
     onSuccess: async (branch) => {
-      // ข้อมูลทุกหน้าผูกกับสาขา — โหลดใหม่ทั้งหมด
-      await queryClient.invalidateQueries();
+      // ข้อมูลทุกหน้าผูกกับสาขา — reset (ไม่ใช่ invalidate) ให้ข้อมูลของสาขาเดิมหายทันที
+      // ไม่ค้างโชว์ใต้หัวสาขาใหม่ระหว่างโหลด · me อัปเดตเองก่อน แล้วค่อยถามเซิร์ฟเวอร์ยืนยัน
+      queryClient.setQueryData(meQueryOptions.queryKey, (old) => (old ? { ...old, branch } : old));
+      await queryClient.resetQueries({ predicate: (query) => query.queryKey[0] !== meQueryOptions.queryKey[0] });
+      void queryClient.invalidateQueries({ queryKey: meQueryOptions.queryKey });
       toast.success(`สลับสาขาแล้ว — ${branch.name}`);
     },
     onError: (error) => toast.error(`สลับสาขาไม่สำเร็จ — ${errorMessage(error)}`),
