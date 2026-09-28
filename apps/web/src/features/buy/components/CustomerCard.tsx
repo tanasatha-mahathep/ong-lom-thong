@@ -134,9 +134,9 @@ function CustomerSummary({ c }: { c: BuyController }) {
         <SummaryItem label={t("customer.nationalId")}>
           <span className="tabular-nums">{customer.national_id_masked}</span>
         </SummaryItem>
-        <SummaryItem label={t("customer.address")}>{customer.address || t("payments.noBank")}</SummaryItem>
+        <SummaryItem label={t("customer.address")}>{customer.address || t("customer.notProvided")}</SummaryItem>
         <SummaryItem label={t("customer.mobile")}>
-          <span className="tabular-nums">{customer.mobile || t("payments.noBank")}</span>
+          <span className="tabular-nums">{customer.mobile || t("customer.notProvided")}</span>
         </SummaryItem>
         <SummaryItem label={t("customer.card")}>
           <Badge variant={status === "ok" ? "secondary" : "destructive"}>{t(`customer.cardBadge.${status}`)}</Badge>

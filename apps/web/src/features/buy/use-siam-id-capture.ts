@@ -1,3 +1,4 @@
+import { isValidNationalId } from "@ong/core";
 import { type ChangeEvent, type KeyboardEvent, useEffect, useRef } from "react";
 
 /**
@@ -93,7 +94,11 @@ export function useSiamIdCapture({
         const text = event.target.value;
         onValueChange(text);
         const digits = text.replace(/\D/g, "");
-        if (digits.length === 13) start(digits);
+        if (digits.length !== 13) return;
+        // หลักตรวจสอบไม่ผ่าน = พิมพ์เองพลาด ไม่ใช่ Siam ID จริง — แจ้งผล (onNationalId) แต่ไม่กลืนปุ่ม
+        // จะได้ Backspace แก้เลขต่อได้ทันที ไม่ต้องรอ 800 ms เปล่า ๆ
+        if (isValidNationalId(digits)) start(digits);
+        else void onNationalId(digits);
       },
       onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => {
         if (!capturing()) return;
