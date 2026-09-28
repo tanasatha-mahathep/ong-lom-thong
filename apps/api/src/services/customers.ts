@@ -83,6 +83,8 @@ export function toListItem(row: CustomerRow, today: string) {
     national_id_masked: maskNationalId(row.nationalId),
     name_th: row.nameTh,
     mobile: row.mobile,
+    // หน้า /buy แสดงที่อยู่ของลูกค้าที่เลือกจาก dropdown (spec §3.1 ข้อ 2)
+    address: row.address,
     card_status: cardStatus(row.cardExpireText, today),
   };
 }
