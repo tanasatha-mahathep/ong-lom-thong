@@ -1,0 +1,16 @@
+{
+  "name": "@ong/testsprite",
+  "version": "0.0.0",
+  "private": true,
+  "description": "TestSprite (cloud · advisory) — backend probes อ่านอย่างเดียวที่รันได้ทั้ง pytest ของเราและ TestSprite",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tanasatha-mahathep/ong-lom-thong.git",
+    "directory": "tests/testsprite"
+  },
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "probe": "bash scripts/probe.sh"
+  }
+}
