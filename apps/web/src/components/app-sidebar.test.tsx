@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { BRANCH_2, BRANCH_HQ, GOLD_PRICE, fakeApi, json, makeMe, renderApp } from "@/test/app";
 import { navFor } from "@/lib/nav";
 import type { Me, Role } from "@/lib/queries";
@@ -179,5 +179,36 @@ describe("sidebar ของแอป", () => {
     expect(api.callsTo("POST", "/api/me/branch").map((c) => c.body)).toEqual([{ branch_id: BRANCH_2.id }]);
     // invalidate ทุก query → ถามผู้ใช้และราคาทองใหม่
     expect(api.callsTo("GET", "/api/me").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("เมนูบนมือถือ (sheet)", () => {
+  it("เปิดแล้วโฟกัสเมนูแรก · เลือกหน้าแล้วปิดเองและคืนโฟกัสให้ปุ่มเมนู", async () => {
+    // จอแคบกว่า md
+    vi.stubGlobal("matchMedia", (media: string) => ({
+      matches: true,
+      media,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    }));
+    const { router } = renderShell("accounting");
+    const user = userEvent.setup();
+    const trigger = await screen.findByRole("button", { name: "แสดง/ซ่อนเมนู" });
+    await user.click(trigger);
+
+    const sheet = await screen.findByRole("dialog", { name: "เมนู" });
+    await waitFor(() => expect(within(sheet).getByRole("link", { name: "หน้าแรก" })).toHaveFocus());
+
+    within(sheet).getByRole("link", { name: "ลูกค้า" }).focus();
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "ลูกค้า" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "เมนู" })).not.toBeInTheDocument());
+    expect(router.state.location.pathname).toBe("/customers");
+    await waitFor(() => expect(screen.getByRole("button", { name: "แสดง/ซ่อนเมนู" })).toHaveFocus());
   });
 });
