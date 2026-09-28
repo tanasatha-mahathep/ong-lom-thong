@@ -449,3 +449,21 @@ describe("typoWarning — ค่าขยะต้องไม่ทำให้
     expect(guardOutcome(run)).not.toBe("ผ่าน");
   });
 });
+
+describe("deriveGoldPrice — ค่าตั้งจาก DB ที่ผิด ต้องหยุด", () => {
+  it.each([
+    [{ diff: "NaN", jewelryDiscount: "0.95" }],
+    [{ diff: "Infinity", jewelryDiscount: "0.95" }],
+    [{ diff: "-1", jewelryDiscount: "0.95" }],
+    [{ diff: "200", jewelryDiscount: "NaN" }],
+    [{ diff: "200", jewelryDiscount: "0" }],
+    [{ diff: "200", jewelryDiscount: "1.5" }],
+  ])("%j", (bad) => {
+    expect(() => deriveGoldPrice("67850", { ...DEFAULT_GOLD_SETTING, ...bad })).toThrow(RangeError);
+  });
+
+  it("ค่าปกติยังได้ 67,850 → 67,650 → 64,268", () => {
+    const q = deriveGoldPrice("67850", DEFAULT_GOLD_SETTING);
+    expect([q.barBuy.toFixed(2), q.jewelryBuy.toFixed(0)]).toEqual(["67650.00", "64268"]);
+  });
+});

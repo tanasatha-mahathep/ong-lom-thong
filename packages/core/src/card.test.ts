@@ -617,3 +617,13 @@ describe("cardStatus — คำว่าตลอดชีพที่สะก�
     expect(cardStatus(text, TODAY)).toBe(status);
   });
 });
+
+describe("บัตรตลอดชีพ — ทั้งช่องต้องเป็นคำนั้นเท่านั้น", () => {
+  it.each(["ตลอดชีพ", " LIFELONG ", "life long", "Lifetime"])("%j = ok", (text) => {
+    expect(cardStatus(text, "2026-09-29")).toBe("ok");
+  });
+
+  it.each(["บัตรตลอดชีพ", "ตลอดชีพ?", "not lifelong", "lifelong 2570"])("%j = invalid", (text) => {
+    expect(cardStatus(text, "2026-09-29")).toBe("invalid");
+  });
+});

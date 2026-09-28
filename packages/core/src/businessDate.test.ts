@@ -217,11 +217,14 @@ describe("input ผิด → RangeError ไม่คืนวันที่ม
     expect(() => businessDate(now)).toThrow(RangeError);
   });
 
-  it.each<[string, Date]>([
-    ["8.64e15 ms — เพดานบนพอดี +275760-09-13T00:00:00.000Z", new Date(8.64e15)],
-    ["−8.64e15 ms — พื้นพอดี −271821-04-20T00:00:00.000Z", new Date(-8.64e15)],
-  ])("now = %s → ปีไม่ใช่ 4 หลัก ส่งต่อเข้า docPeriod() แล้วต้อง RangeError ไม่ได้งวดมั่ว", (_label, now) => {
-    expect(() => docPeriod(businessDate(now))).toThrow(RangeError);
+  // ขอบของ Date ที่ยังเป็นเวลาจริง แต่ปีเกิน 4 หลัก — businessDate ปฏิเสธเองตั้งแต่ dev PR #68 (เดิมคืนค่าให้ docPeriod ปฏิเสธ)
+  it("now = 8.64e15 ms (เพดานบนพอดี +275760-09-13T00:00:00Z → 07:00 ไทยวันเดียวกัน) → Error ข้อความตรงตัว", () => {
+    const run = () => businessDate(new Date(8.64e15));
+    expect(run).toThrow(new Error('businessDate: unexpected Intl output "275760-09-13"'));
+  });
+
+  it("now = −8.64e15 ms (พื้นพอดี −271821-04-20T00:00:00Z) → Error — ปีก่อน ค.ศ. เกิน 4 หลัก (ICU กำหนดวิธีเขียนศักราช)", () => {
+    expect(() => businessDate(new Date(-8.64e15))).toThrow(/^businessDate: unexpected Intl output "-?\d{5,}-04-20"$/);
   });
 
   it.each<[string, string]>([
@@ -258,19 +261,17 @@ describe("fault injection — Intl.DateTimeFormat คืนชิ้นส่ว
     expect(spy).toHaveBeenCalledWith(NOW);
   });
 
-  // ชิ้นส่วนที่หายได้ "" แทน (?? "") → สตริงผิดรูปที่ docPeriod() ปฏิเสธ — Intl ที่พังออกงวดเลขที่เอกสารผิดเงียบ ๆ ไม่ได้
+  // ชิ้นส่วนที่หายได้ "" แทน (?? "") แล้ว businessDate โยนเองพร้อมค่าที่ผิดรูป (dev PR #68) — เดิมคืน "-09-28" ออกไป
+  // ซึ่ง cardStatus เทียบ string กับวันหมดอายุแล้วปล่อยบัตรหมดอายุผ่านได้ (fail-open) · ข้อความต้องไม่มีคำว่า undefined
   it.each<[string, string, Intl.DateTimeFormatPart[]]>([
     ["ไม่มี year", "-09-28", [MONTH, DASH, DAY]],
     ["ไม่มี month", "2026--28", [YEAR, DASH, DAY]],
     ["ไม่มี day", "2026-09-", [YEAR, DASH, MONTH]],
     ["ไม่มีสักชิ้น", "--", []],
-  ])("%s → %j · ไม่มีคำว่า undefined · docPeriod() โยน RangeError", (_label, expected, parts) => {
+  ])("%s → Error พร้อมค่า %j ไม่คืนวันที่ผิดรูป", (_label, malformed, parts) => {
     const spy = injectParts(parts);
-    const result = businessDate(NOW);
+    expect(() => businessDate(NOW)).toThrow(new Error(`businessDate: unexpected Intl output "${malformed}"`));
     expect(spy).toHaveBeenCalledWith(NOW);
-    expect(result).toBe(expected);
-    expect(result).not.toContain("undefined");
-    expect(() => docPeriod(result)).toThrow(RangeError);
 
     // คืน Intl ของจริงแล้วต้องได้ค่าปกติทันที — ไม่มีผลเสียค้างอยู่ใน cache
     vi.restoreAllMocks();
@@ -515,22 +516,47 @@ describe("businessTime — fault injection: Intl.DateTimeFormat คืนชิ�
     expect(spy).toHaveBeenCalledWith(NOW);
   });
 
-  // ชิ้นส่วนที่หายได้ "" แทน (?? "") ไม่ใช่ "undefined" · ปลายทางคือคอลัมน์ buy_receipt.time (Postgres time):
-  // ":05" และ ":" Postgres ปฏิเสธ (บันทึกบิลล้มทั้งทรานแซกชัน) แต่ "10:" ถูกเก็บเป็น 10:00:00 เงียบ ๆ — fail-open
-  // ที่ยังเปิดอยู่ ถ้าแก้ให้โยน RangeError แถว "ไม่มี minute" ต้องเปลี่ยนตาม
+  // ชิ้นส่วนที่หายได้ "" แทน (?? "") แล้ว businessTime โยนเอง (dev PR #68) — เดิมคืน "10:" ซึ่งคอลัมน์ buy_receipt.time
+  // (Postgres time) เก็บเป็น 10:00:00 เงียบ ๆ (fail-open) · ข้อความมีค่าที่ผิดรูปและไม่มีคำว่า undefined
   it.each<[string, string, Intl.DateTimeFormatPart[]]>([
     ["ไม่มี hour", ":05", [COLON, MINUTE]],
     ["ไม่มี minute", "10:", [HOUR, COLON]],
     ["ไม่มีทั้งคู่", ":", []],
-  ])("%s → %j · ไม่มีคำว่า undefined", (_label, expected, parts) => {
+  ])("%s → Error พร้อมค่า %j ไม่คืนเวลาผิดรูป", (_label, malformed, parts) => {
     const spy = injectParts(parts);
-    const result = businessTime(NOW);
+    expect(() => businessTime(NOW)).toThrow(new Error(`businessTime: unexpected Intl output "${malformed}"`));
     expect(spy).toHaveBeenCalledWith(NOW);
-    expect(result).toBe(expected);
-    expect(result).not.toContain("undefined");
 
     // คืน Intl ของจริงแล้วต้องได้ค่าปกติทันที — ไม่มีผลเสียค้างอยู่ใน cache
     vi.restoreAllMocks();
     expect(businessTime(NOW)).toBe("10:05");
+  });
+});
+
+describe("Intl ที่คืนส่วนไม่ครบ — หยุด ไม่คืนค่าผิดรูปเงียบ ๆ", () => {
+  const partsWithout = (missing: string) =>
+    vi.spyOn(Intl, "DateTimeFormat").mockImplementation(function () {
+      return {
+        formatToParts: () =>
+          [
+            { type: "year", value: "2026" },
+            { type: "month", value: "09" },
+            { type: "day", value: "28" },
+            { type: "hour", value: "10" },
+            { type: "minute", value: "05" },
+          ].filter((p) => p.type !== missing),
+      } as unknown as Intl.DateTimeFormat;
+    });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each(["year", "month", "day"])("businessDate ไม่มี %s = throw", (missing) => {
+    partsWithout(missing);
+    expect(() => businessDate(new Date())).toThrow(/businessDate/);
+  });
+
+  it.each(["hour", "minute"])("businessTime ไม่มี %s = throw", (missing) => {
+    partsWithout(missing);
+    expect(() => businessTime(new Date())).toThrow(/businessTime/);
   });
 });
