@@ -1,7 +1,7 @@
 import { type APIRequestContext, test as base, expect } from "@playwright/test";
 import { type Account, type AccountKey, readAccounts } from "./accounts";
 import { newClient, signIn } from "./http";
-import { target } from "./target";
+import { writeRefusal } from "./target";
 
 interface ApiFixtures {
   /** refuses to run against anything but a disposable environment — the api project writes data */
@@ -17,12 +17,8 @@ export const test = base.extend<ApiFixtures>({
   writeGuard: [
     // eslint-disable-next-line no-empty-pattern -- Playwright fixtures must destructure their first argument
     async ({}, use) => {
-      if (!target.allowWrites) {
-        throw new Error(
-          `the api project creates users, customers and prices — refusing to write to ${target.baseURL}. ` +
-            "Run it against the local stack, or set E2E_ALLOW_WRITES=1 for a disposable environment.",
-        );
-      }
+      // the setup project refuses first; this catches --no-deps runs
+      if (writeRefusal) throw new Error(writeRefusal);
       await use();
     },
     { auto: true },

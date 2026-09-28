@@ -23,6 +23,12 @@ export const target = {
   gotenbergURL: (process.env.E2E_GOTENBERG_URL ?? LOCAL_GOTENBERG_URL).replace(/\/+$/, ""),
 } as const;
 
+/** why the api project will not run against this target (null = it may write here) */
+export const writeRefusal = target.allowWrites
+  ? null
+  : `the api project creates users, customers and prices — refusing to write to ${target.baseURL}. ` +
+    "Run it against the local stack, or set E2E_ALLOW_WRITES=1 for a disposable environment.";
+
 /** same directory as stack/stack.sh — outside the repo, so nothing here reaches git or the docker build */
 export const stateDir = process.env.E2E_STATE_DIR ?? path.join(process.env.TMPDIR ?? "/tmp", "ong-e2e");
 export const accountsFile = process.env.E2E_ACCOUNTS_FILE ?? path.join(stateDir, "accounts.json");

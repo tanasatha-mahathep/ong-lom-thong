@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { test as setup } from "@playwright/test";
 import { ACCOUNT_KEYS, ACCOUNT_SPECS, type Account, type AccountKey, writeAccounts } from "../../lib/accounts";
 import { runId } from "../../lib/synthetic";
-import { stackScript, target } from "../../lib/target";
+import { stackScript, target, writeRefusal } from "../../lib/target";
 
 /**
  * Accounts exist only through the admin script shipped in the image (sign-up is disabled) — so this runs
@@ -30,6 +30,8 @@ function createUser(account: Account): Promise<void> {
 }
 
 setup("create this run's accounts on the local stack", async () => {
+  // one clear failure instead of every api test failing: dependants of a failed setup do not run
+  if (writeRefusal) throw new Error(writeRefusal);
   setup.skip(!target.isLocalStack, "not the local stack — accounts come from E2E_ACCOUNTS_FILE");
   setup.setTimeout(120_000);
 
