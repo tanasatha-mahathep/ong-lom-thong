@@ -70,6 +70,17 @@ curl https://<domain>/healthz
 
 ดู region ของ Postgres ใน dashboard ด้วย — มีรายงานว่าบางครั้งไม่ตามค่า region ที่ตั้ง
 
+## บัญชีพนักงาน
+
+ไม่มีสมัครเอง (ปิด sign-up) — สร้างผ่านสคริปต์ใน image ของ `Office` · รหัสผ่านส่งทาง stdin (ไม่ค้างใน history) · ไม่ส่ง = สุ่มแล้วพิมพ์ครั้งเดียว
+
+```bash
+railway ssh --service Office -- sh -c 'node dist/create-user.js --email staff1@ong.co.th --name "ชื่อ" --role staff --branch 00000'
+# role: staff · manager · accounting · admin · --allow 00001,00002 = สาขาเพิ่ม · --view-all = เห็นทุกสาขา
+```
+
+`railway ssh` ต้องลงทะเบียน SSH key ก่อน (`railway ssh keys add`)
+
 ## หมุนค่าลับ
 
 export `RAILWAY_SET_*` ค่าใหม่แล้ว `pnpm railway:apply` — ไม่ export = `preserve()` คงค่าเดิม
