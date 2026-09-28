@@ -13,7 +13,11 @@ interface Bill {
 
 const column = createColumnHelper<Bill>();
 const columns = [
-  column.accessor("doc_no", { header: "เลขที่" }),
+  // คอลัมน์หลักเป็นลิงก์จริง (หน้าจริงใช้ <Link> ของ TanStack Router)
+  column.accessor("doc_no", {
+    header: "เลขที่",
+    cell: (info) => <a href={`/buy/${info.row.id}`}>{info.getValue()}</a>,
+  }),
   column.accessor("total_amount", {
     header: "ยอดรวม",
     cell: (info) => formatMoney(info.getValue()),
@@ -55,24 +59,38 @@ describe("DataTable", () => {
     expect(total).toHaveClass("text-right", "tabular-nums");
   });
 
-  it("แถวกดได้ด้วยคีย์บอร์ด: Tab เข้าแถว · ↓ แถวถัดไป · Enter เปิด", async () => {
-    const onRowActivate = vi.fn();
-    renderTable({ onRowActivate });
+  it("คีย์บอร์ดใช้ลิงก์ในคอลัมน์หลัก — แถวไม่รับโฟกัส", async () => {
+    const onRowClick = vi.fn();
+    renderTable({ onRowClick });
     const user = userEvent.setup();
-    const [first, second] = screen.getAllByRole("row").slice(1);
+    const rows = screen.getAllByRole("row").slice(1);
 
+    for (const row of rows) expect(row).not.toHaveAttribute("tabindex");
     await user.tab();
-    expect(first).toHaveFocus();
-    await user.keyboard("{ArrowDown}");
-    expect(second).toHaveFocus();
-    await user.keyboard("{Enter}");
-    expect(onRowActivate).toHaveBeenCalledWith(bills[1]);
+    expect(screen.getByRole("link", { name: "RC6909-0001" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("link", { name: "RC6909-0002" })).toHaveFocus();
+    expect(onRowClick).not.toHaveBeenCalled();
   });
 
-  it("ไม่ส่ง onRowActivate = แถวไม่รับโฟกัส", async () => {
+  it("คลิกที่แถวเป็นทางลัดของเมาส์ · คลิกลิงก์ในแถวไม่เรียกซ้ำ", async () => {
+    const onRowClick = vi.fn();
+    renderTable({ onRowClick });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("cell", { name: "99,999,999,999,999.99" }));
+    expect(onRowClick).toHaveBeenCalledExactlyOnceWith(bills[1]);
+
+    const link = screen.getByRole("link", { name: "RC6909-0001" });
+    link.addEventListener("click", (event) => event.preventDefault());
+    await user.click(link);
+    expect(onRowClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("ไม่ส่ง onRowClick = แถวคลิกไม่ได้", async () => {
     renderTable();
-    await userEvent.setup().tab();
-    expect(document.body).toHaveFocus();
+    await userEvent.setup().click(screen.getByRole("cell", { name: "20,030.00" }));
+    expect(screen.getAllByRole("row")[1]).not.toHaveClass("cursor-pointer");
   });
 
   it("แบ่งหน้าจากเซิร์ฟเวอร์ด้วย page + has_more (ไม่มียอดรวมจำนวนแถว)", async () => {

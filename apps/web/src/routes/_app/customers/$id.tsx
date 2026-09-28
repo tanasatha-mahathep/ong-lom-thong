@@ -30,7 +30,7 @@ const SearchSchema = z.object({
 
 export const Route = createFileRoute("/_app/customers/$id")({
   validateSearch: SearchSchema,
-  staticData: { title: "ข้อมูลลูกค้า", crumbs: [{ title: "ลูกค้า", to: "/customers" }] },
+  staticData: { title: "customer", crumbs: [{ title: "customers", to: "/customers" }] },
   component: CustomerPage,
 });
 

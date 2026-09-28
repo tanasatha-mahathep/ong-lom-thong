@@ -1,5 +1,6 @@
 import { Link, useMatchRoute } from "@tanstack/react-router";
 import { CirclePlus } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -13,10 +14,11 @@ import type { Role } from "@/lib/queries";
 
 /** เมนูหลักตาม role (spec §10) — ปุ่ม "ซื้อเข้า" อยู่ตำแหน่ง Quick Create ของ dashboard-01 */
 export function NavMain({ role }: { role: Role }) {
+  const { t } = useTranslation("shell");
   const matchRoute = useMatchRoute();
 
   return (
-    <nav aria-label="เมนูหลัก" className="flex flex-col gap-2">
+    <nav aria-label={t("mainNav")} className="flex flex-col gap-2">
       {canCreateBill(role) && (
         <SidebarGroup>
           <SidebarGroupContent>
@@ -28,7 +30,7 @@ export function NavMain({ role }: { role: Role }) {
                 >
                   <Link to="/buy">
                     <CirclePlus aria-hidden="true" />
-                    <span>ซื้อเข้า</span>
+                    <span>{t("quickBuy")}</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
@@ -38,7 +40,7 @@ export function NavMain({ role }: { role: Role }) {
       )}
       {navFor(role).map((group) => (
         <SidebarGroup key={group.title ?? "main"}>
-          {group.title && <SidebarGroupLabel>{group.title}</SidebarGroupLabel>}
+          {group.title && <SidebarGroupLabel>{t(`groups.${group.title}`)}</SidebarGroupLabel>}
           <SidebarGroupContent>
             <SidebarMenu>
               {group.items.map((item) => (
@@ -50,7 +52,7 @@ export function NavMain({ role }: { role: Role }) {
                   >
                     <Link to={item.to} activeOptions={{ exact: item.to === "/" }}>
                       <item.icon aria-hidden="true" />
-                      <span>{item.title}</span>
+                      <span>{t(`nav.${item.title}`)}</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
