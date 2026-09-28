@@ -1,10 +1,13 @@
+// zod แบบไม่ใช้ eval เหมือนในแอป (main.tsx import เป็นบรรทัดแรก)
+import "@/lib/zod-config";
 import "@testing-library/jest-dom/vitest";
 import { cleanup, configure } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, vi } from "vitest";
 
-// เทสต์ทั้งแอปรอ router + query หลายชั้น — เครื่อง CI ที่รันเทสต์ api ขนานกันช้ากว่า 1 วินาทีเริ่มต้นได้
-configure({ asyncUtilTimeout: 3000 });
+// เทสต์ทั้งแอปรอ router + query หลายชั้น — เครื่องที่รัน make check ของหลายเอเจนต์พร้อมกัน (load 70+)
+// ใช้เวลาเกิน 3 วินาทีได้ · เทสต์ที่พังจริงยังพังเหมือนเดิม แค่รอนานขึ้นก่อนรายงาน
+configure({ asyncUtilTimeout: 10_000 });
 
 // ไม่ได้เปิด globals ของ vitest — Testing Library จึงไม่ cleanup ให้เอง
 afterEach(() => {
