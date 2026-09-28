@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { isValidNationalId, maskNationalId } from "@ong/core";
 import { describe, expect, it } from "vitest";
 import { leakedInternals, moneyShapeViolations } from "./assertions";
-import { nationalIdsIn } from "./pii";
+import { expectNoNationalId, nationalIdsIn } from "./pii";
 import { fillParams, hasParams } from "./routes";
 import { cardFormat, syntheticNationalId, syntheticSameMask, withCheckDigit } from "./synthetic";
 
@@ -59,6 +59,13 @@ describe("ตัวช่วยเทสต์: ตรวจเลขบัต�
     ["เลข 14 หลัก", `${id}0`],
   ])("ไม่จับผิด: %s", (_label, text) => {
     expect(nationalIdsIn(JSON.stringify({ value: text }))).toEqual([]);
+  });
+
+  it("allow ยกเว้นได้เฉพาะเลขที่ระบุ (เช่น เลขผู้เสียภาษีของร้าน) — เลขอื่นยังถูกจับ", () => {
+    const shopTaxId = "1234567890121";
+    const text = JSON.stringify({ company: { tax_id: shopTaxId }, customer: { national_id: id } });
+    expect(() => expectNoNationalId(text, "ร้าน + ลูกค้า", [], [shopTaxId])).toThrow();
+    expect(() => expectNoNationalId(JSON.stringify({ tax_id: shopTaxId }), "ร้าน", [], [shopTaxId])).not.toThrow();
   });
 
   it("uuid สุ่ม 5,000 ตัวไม่ถูกจับผิดเลย (hex ติดกันไม่เกิน 12 · กลุ่มไม่ตรงรูปหน้าบัตร)", () => {

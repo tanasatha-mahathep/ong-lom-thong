@@ -1557,7 +1557,8 @@ describe.skipIf(!available)("ซื้อเข้า — สัญญาที�
     const detail = await t.request(`/api/buy/${id}`, { cookie });
     expect(detail.status).toBe(200);
     const detailText = await detail.text();
-    expectNoNationalId(detailText, "GET /api/buy/:id", knownIds);
+    // เลขผู้เสียภาษีของร้าน (นิติบุคคล) มากับบิลใน snapshot ของกิจการ — ไม่ใช่เลขบัตรของบุคคล (PR #68)
+    expectNoNationalId(detailText, "GET /api/buy/:id", knownIds, [t.env.COMPANY_TAX_ID]);
     expectMoneyAsStrings(JSON.parse(detailText), "GET /api/buy/:id");
   });
 

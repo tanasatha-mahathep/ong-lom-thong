@@ -16,9 +16,16 @@ export function nationalIdsIn(text: string): string[] {
 /**
  * ข้อความต้องไม่มีเลขบัตรเต็ม — ทั้งเลขใดก็ตามที่เข้ารูป 13 หลัก และเลขที่เทสต์รู้ว่าสร้างไว้ (`known`)
  * ซึ่งตรวจแบบ substring ทุกรูปแบบ (กันกรณีเลขถูกต่อท้ายตัวเลขอื่นจนหลุด regex)
+ * `allow` = เลข 13 หลักที่ไม่ใช่เลขของบุคคล เช่น เลขผู้เสียภาษีของร้าน (นิติบุคคล) ที่ต้องพิมพ์บนใบรับซื้อ — ระบุทีละเลข
  */
-export function expectNoNationalId(text: string, where: string, known: readonly string[] = []): void {
-  expect(nationalIdsIn(text), `${where}: พบเลขบัตรเต็มใน response`).toEqual([]);
+export function expectNoNationalId(
+  text: string,
+  where: string,
+  known: readonly string[] = [],
+  allow: readonly string[] = [],
+): void {
+  const found = nationalIdsIn(text).filter((id) => !allow.includes(id.replace(/[\s-]/g, "")));
+  expect(found, `${where}: พบเลขบัตรเต็มใน response`).toEqual([]);
   for (const id of known) {
     for (const form of [id, cardFormat(id, " "), cardFormat(id, "-")]) {
       expect(text.includes(form), `${where}: พบเลขบัตร ${form}`).toBe(false);
