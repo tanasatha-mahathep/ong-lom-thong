@@ -22,6 +22,8 @@ export default defineConfig(
     "tests/e2e/test-results/",
     "tests/e2e/playwright-report/",
     "tests/e2e/blob-report/",
+    // Python venv ของ tests/testsprite มีไฟล์ .js ของ urllib3
+    "**/.venv/",
   ]),
   js.configs.recommended,
   tseslint.configs.recommendedTypeChecked,

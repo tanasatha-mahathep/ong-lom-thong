@@ -10,3 +10,6 @@ coverage
 *.log
 .DS_Store
 .github
+# เทสต์ไม่อยู่ใน image — แก้เทสต์แล้วไม่ทำให้ COPY . . ต้อง build web/api ใหม่ · venv ของ Python ด้วย
+tests
+**/.venv

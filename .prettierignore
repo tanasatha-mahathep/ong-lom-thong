@@ -11,6 +11,9 @@ packages/db/migrations/
 tests/e2e/test-results/
 tests/e2e/playwright-report/
 tests/e2e/blob-report/
+# Python venv + ผลรันของ tests/testsprite (prettier ไม่อ่าน .gitignore ที่ซ้อนชั้น)
+**/.venv/
+tests/testsprite/reports/
 
 # semantic-release เขียนเอง — รูปแบบตาม conventional-changelog
 CHANGELOG.md

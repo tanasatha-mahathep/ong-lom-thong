@@ -19,3 +19,6 @@ coverage/
 !.railway/railway.ts
 !.railway/README.md
 !.railway/tsconfig.json
+
+# TestSprite MCP (ตั้งระดับผู้ใช้เท่านั้น) — PRD · code summary · ผลรัน ห้าม commit
+testsprite_tests/
