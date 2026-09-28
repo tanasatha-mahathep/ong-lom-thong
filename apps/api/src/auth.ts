@@ -8,7 +8,7 @@ import type { Env } from "./env";
 const SESSION_SECONDS = 60 * 60 * 12;
 
 /**
- * IP ของ client สำหรับ rate limit (sign-in 5 ครั้ง/นาที ต่อ IP) และ session.ipAddress — เชื่อ X-Real-IP อย่างเดียว
+ * IP ของ client สำหรับ rate limit (sign-in ต่อ IP) และ session.ipAddress — เชื่อ X-Real-IP อย่างเดียว
  * Railway edge เขียน X-Real-IP เป็น IP จริงของ client ค่าเดียว ทับค่าที่ client ส่งมาเสมอ (ทดสอบกับ edge sin1 แล้ว)
  * ไม่ใช้ X-Forwarded-For: Railway ส่ง "<client>, <IP ของ edge>" 2 ค่า → better-auth ไม่เชื่อค่าหลายตัว = ทั้งร้านรวมถังเดียว
  * และ IP ของ edge เปลี่ยนตาม POP (trustedProxies ต้องไล่ตาม) · Forwarded / CF-Connecting-IP / True-Client-IP
@@ -17,6 +17,9 @@ const SESSION_SECONDS = 60 * 60 * 12;
  * ถ้าย้ายไปหลัง proxy อื่น (เช่น nginx) ต้องตั้ง X-Real-IP = IP ของ client ทับค่าเดิมทุก request
  */
 export const CLIENT_IP_HEADERS = ["x-real-ip"];
+
+/** sign-in ต่อนาที ต่อ IP ของ client — ครั้งที่เกิน = 429 จนครบหน้าต่าง 60 วินาที */
+export const SIGN_IN_PER_MINUTE = 20;
 
 export function createAuth(db: Db, env: Env) {
   return betterAuth({
@@ -67,7 +70,8 @@ export function createAuth(db: Db, env: Env) {
       enabled: env.NODE_ENV !== "test",
       window: 60,
       max: 100,
-      customRules: { "/sign-in/email": { window: 60, max: 5 } },
+      // พนักงานร้านเดียวกันออกเน็ตด้วย IP เดียว (NAT) — 20 ครั้ง/นาที ต่อ IP ให้ login พร้อมกันทั้งร้านได้ (ตัดสิน 29 ก.ย.)
+      customRules: { "/sign-in/email": { window: 60, max: SIGN_IN_PER_MINUTE } },
     },
     advanced: {
       useSecureCookies: env.NODE_ENV === "production",
