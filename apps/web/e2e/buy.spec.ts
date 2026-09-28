@@ -19,13 +19,17 @@ async function signIn(request: APIRequestContext, baseURL: string, who: { email:
 }
 
 async function expectAccessible(page: Page) {
+  // .ong-watermark: แถบ "STAGING" มุมจอ aria-hidden และขึ้นเฉพาะ staging ไม่ใช่ UI จริงที่ต้องตรวจ a11y
   const { violations } = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+    .exclude(".ong-watermark")
     .analyze();
   expect(violations.map((v) => ({ rule: v.id, nodes: v.nodes.map((n) => n.target.join(" ")) }))).toEqual([]);
 }
 
 test("ซื้อเข้าด้วยคีย์บอร์ดจนได้ใบรับซื้อ และพิมพ์อัตโนมัติหนึ่งครั้ง", async ({ page, playwright, baseURL }) => {
+  // ครบวงจร: sign-in + สร้างลูกค้า + 2 รายการ + เต็มจำนวน + save + poll ใบรับซื้อ + 3 รอบ axe — ช้ากว่า timeout เริ่มต้น 30s บน staging
+  test.setTimeout(90_000);
   test.skip(!staff.email || !staff.password, "ตั้ง E2E_EMAIL และ E2E_PASSWORD (บัญชีพนักงาน) ก่อนรัน");
   const origin = baseURL ?? "";
 
