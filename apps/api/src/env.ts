@@ -1,6 +1,12 @@
+import { isValidNationalId } from "@ong/core";
 import { z } from "zod";
 
 const PLACEHOLDER = /change-me|local-dev-only/i;
+/** รหัสผ่าน Gotenberg ใน .env.example / docker-compose.yml — ใช้ได้แค่เครื่อง dev */
+const EXAMPLE_GOTENBERG_PASSWORD = "ongongong";
+
+/** ข้อความที่ต้องมี (ตัดช่องว่างหัวท้าย) */
+const text = () => z.string().trim().min(1);
 
 const EnvSchema = z
   .object({
@@ -20,11 +26,36 @@ const EnvSchema = z
       .enum(["true", "false"])
       .default("false")
       .transform((v) => v === "true"),
+    // Gotenberg (Chromium → PDF) — local = docker compose · Railway = private network + basic auth
+    GOTENBERG_URL: z.url({ protocol: /^https?$/, error: "ต้องเป็น URL http(s)" }),
+    GOTENBERG_USERNAME: z.string().min(1),
+    GOTENBERG_PASSWORD: z.string().min(1),
+    // หัวใบรับซื้อ — ข้อมูลกิจการที่พิมพ์บนใบทุกใบ (ไม่ใช่ค่าลับ) · ค่าจริงจากหน้า "ข้อมูลบริษัท" ของระบบเดิม
+    // ใบที่เก็บถาวรแก้ย้อนหลังไม่ได้ (R15) — ค่าผิดรูปแบบ = ไม่ start ดีกว่าพิมพ์ผิดลงเอกสารภาษี
+    COMPANY_NAME: text(),
+    COMPANY_ADDRESS: text(),
+    COMPANY_TEL: text(),
+    // ไม่มีโทรสาร = เว้นว่าง/ไม่ตั้ง (ใบพิมพ์ "-" แบบระบบเดิม)
+    COMPANY_FAX: z
+      .string()
+      .trim()
+      .optional()
+      .transform((v) => v || undefined),
+    // เลขประจำตัวผู้เสียภาษี 13 หลัก — หลักตรวจสอบสูตรเดียวกับเลขบัตรประชาชน
+    COMPANY_TAX_ID: z
+      .string()
+      .trim()
+      .regex(/^\d{13}$/, "ต้องเป็นตัวเลข 13 หลัก ไม่มีขีด/ช่องว่าง")
+      .refine(isValidNationalId, "หลักตรวจสอบไม่ถูกต้อง — พิมพ์ผิด?"),
   })
   .superRefine((env, ctx) => {
     // production ห้ามใช้ค่าตัวอย่างจาก .env.example
-    if (env.NODE_ENV === "production" && PLACEHOLDER.test(env.BETTER_AUTH_SECRET)) {
+    if (env.NODE_ENV !== "production") return;
+    if (PLACEHOLDER.test(env.BETTER_AUTH_SECRET)) {
       ctx.addIssue({ code: "custom", path: ["BETTER_AUTH_SECRET"], message: "ยังเป็นค่าตัวอย่าง — ตั้งค่าลับจริง" });
+    }
+    if (PLACEHOLDER.test(env.GOTENBERG_PASSWORD) || env.GOTENBERG_PASSWORD === EXAMPLE_GOTENBERG_PASSWORD) {
+      ctx.addIssue({ code: "custom", path: ["GOTENBERG_PASSWORD"], message: "ยังเป็นค่าตัวอย่าง — ตั้งค่าลับจริง" });
     }
   });
 

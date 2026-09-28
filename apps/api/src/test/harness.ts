@@ -59,6 +59,14 @@ export async function startTestApp(options: { now?: () => Date } = {}) {
     S3_BUCKET: "test",
     S3_ACCESS_KEY: "test",
     S3_SECRET_KEY: "test",
+    // ยังไม่มี route ไหนแปลง PDF — ค่าพวกนี้แค่ให้ผ่าน schema (ข้อมูลกิจการสมมติ · เลขผู้เสียภาษี checksum ถูก)
+    GOTENBERG_URL: "http://gotenberg.invalid",
+    GOTENBERG_USERNAME: "test",
+    GOTENBERG_PASSWORD: "test",
+    COMPANY_NAME: "ร้านทดสอบ",
+    COMPANY_ADDRESS: "1 ถนนทดสอบ ตำบลในเมือง อำเภอเมือง จังหวัดขอนแก่น 40000",
+    COMPANY_TEL: "0800000000",
+    COMPANY_TAX_ID: "1234567890121",
   });
   const auth = createAuth(db, env);
   const storage = createMemoryStorage();
