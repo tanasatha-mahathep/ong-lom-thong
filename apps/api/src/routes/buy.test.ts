@@ -709,9 +709,13 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
   });
 
   let backdatedId = "";
+  const backKey = "test-key-backdated-0001";
 
   it("บิลย้อนหลังข้ามเดือน → เลขงวดของวันบิล RC6909-0001 · ราคาของวันนั้น · สต็อกลงวันบิล · audit", async () => {
-    const res = await save(bill({ customer_id: custB, date: "2026-09-30", time: "16:30", ...REASON }), "mgr");
+    const res = await save(
+      bill({ customer_id: custB, date: "2026-09-30", time: "16:30", ...REASON, idempotency_key: backKey }),
+      "mgr",
+    );
     expect(res.status).toBe(201);
     const saved = (await res.json()) as SavedRes;
     expect(saved.doc_no).toBe("RC6909-0001");
@@ -798,33 +802,98 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     expect(counter?.lastNo).toBe(16);
   });
 
-  it("idempotency ผูกกับเนื้อบิล: key เดิมแต่ยอด/น้ำหนัก/ลูกค้าต่าง = 409 · เนื้อเดิม = บิลเดิม", async () => {
+  it("idempotency ผูกกับเนื้อบิลทั้งใบ: key เดิมแต่เนื้อต่างทุกมิติ = 409 พร้อมบิลที่บันทึกแล้ว", async () => {
     const key = newKey();
     const first = await saveWithKey(key);
     expect(first.status).toBe(201);
     const saved = (await first.json()) as SavedRes;
-    const other = [
-      bill({ lines: [line("gold", "5.860", "20031")], payments: [{ method: "cash", amount: "20031" }] }),
-      bill({ lines: [line("gold", "5.861", "20030")] }),
-      bill({ customer_id: custB }),
-      bill({ customer_id: null }),
+    const other: [string, Record<string, unknown>][] = [
+      ["ยอดต่าง", bill({ lines: [line("gold", "5.860", "20031")], payments: [{ method: "cash", amount: "20031" }] })],
+      ["น้ำหนักต่าง", bill({ lines: [line("gold", "5.861", "20030")] })],
+      ["ลูกค้าต่าง", bill({ customer_id: custB })],
+      ["ไม่มีลูกค้า", bill({ customer_id: null })],
+      ["โลหะต่าง น้ำหนัก/ราคาเท่าเดิม", bill({ lines: [line("silver", "5.860", "20030")] })],
+      ["แบ่งแถวต่าง ยอดรวมเท่าเดิม", bill({ lines: [line("gold", "2.930", "10015"), line("gold", "2.930", "10015")] })],
+      [
+        "แบ่งชำระต่าง ยอดรวมเท่าเดิม",
+        bill({
+          payments: [
+            { method: "cash", amount: "10030" },
+            { method: "transfer", bank: "KBANK", amount: "10000" },
+          ],
+        }),
+      ],
+      ["รายละเอียดต่าง", bill({ detail: "สร้อยขาด 1 เส้น" })],
+      ["ใบกำกับเต็มรูปต่าง", bill({ full_tax: true })],
+      ["ส่งวันที่ต่าง", bill({ date: "2026-10-04", time: "10:00", ...REASON })],
     ];
-    for (const body of other) {
+    for (const [name, body] of other) {
       const res = await t.request("/api/buy", { cookie: cookies.staff, body: { ...body, idempotency_key: key } });
-      expect(res.status).toBe(409);
+      expect({ name, status: res.status }).toEqual({ name, status: 409 });
       expect(await res.json()).toEqual({
-        error: "idempotency_key นี้ใช้กับบิลอื่นแล้ว — สร้าง key ใหม่ต่อบิล",
+        error: "idempotency_key นี้ใช้กับบิลอื่นแล้ว",
         field: "idempotency_key",
+        existing: { id: saved.id, doc_no: saved.doc_no },
       });
     }
-    // เนื้อเดิม (ลูกค้า · ยอด · น้ำหนัก) แม้เขียนตัวเลขคนละรูป = บิลเดิม
-    const same = await t.request("/api/buy", {
-      cookie: cookies.staff,
-      body: { ...bill({ lines: [line("gold", "5.86", "20,030")] }), idempotency_key: key },
-    });
-    expect(same.status).toBe(200);
-    expect(await same.json()).toEqual(saved);
     expect(await t.db.select().from(buyReceipt).where(eq(buyReceipt.idempotencyKey, key))).toHaveLength(1);
+  });
+
+  it("idempotency: เนื้อเดิมทุกอย่าง = บิลเดิม (200) แม้เขียนตัวเลขคนละรูป · ส่งวันที่วันนี้ · เวลาบิลวันนี้ไม่เทียบ", async () => {
+    const key = newKey();
+    const saved = (await (await saveWithKey(key)).json()) as SavedRes;
+    const exact = await t.request("/api/buy", {
+      cookie: cookies.staff,
+      body: {
+        ...bill({ lines: [line("gold", "5.86", "20,030.00")], date: TODAY, time: "09:59" }),
+        idempotency_key: key,
+      },
+    });
+    expect(exact.status).toBe(200);
+    expect(await exact.json()).toEqual(saved);
+
+    // ชำระหลายแถว: เทียบแบบไม่สนลำดับ
+    const key2 = newKey();
+    const split = [
+      { method: "cash", amount: "10030" },
+      { method: "transfer", bank: "KBANK", amount: "10000" },
+    ];
+    const created = await t.request("/api/buy", {
+      cookie: cookies.staff,
+      body: { ...bill({ payments: split }), idempotency_key: key2 },
+    });
+    expect(created.status).toBe(201);
+    const reordered = await t.request("/api/buy", {
+      cookie: cookies.staff,
+      body: { ...bill({ payments: [split[1], { method: "cash", amount: "10,030.00" }] }), idempotency_key: key2 },
+    });
+    expect(reordered.status).toBe(200);
+    expect(await reordered.json()).toEqual(await created.json());
+  });
+
+  it("idempotency บิลย้อนหลัง: เทียบวันที่และเวลา · ส่งบิลวันนี้ซ้ำเป็นบิลย้อนหลัง = 409", async () => {
+    const backdated = bill({ customer_id: custB, date: "2026-09-30", time: "16:30", ...REASON });
+    const replay = async (over: Record<string, unknown>) =>
+      t.request("/api/buy", { cookie: cookies.mgr, body: { ...backdated, ...over, idempotency_key: backKey } });
+    const exact = await replay({});
+    expect(exact.status).toBe(200);
+    expect(((await exact.json()) as SavedRes).id).toBe(backdatedId);
+    for (const over of [{ time: "16:31" }, { time: undefined }, { date: "2026-09-29" }]) {
+      const res = await replay(over);
+      expect({ over, status: res.status }).toEqual({ over, status: 409 });
+      expect(await res.json()).toMatchObject({ existing: { id: backdatedId, doc_no: "RC6909-0001" } });
+    }
+
+    const key = newKey();
+    const today = await t.request("/api/buy", { cookie: cookies.mgr, body: { ...bill(), idempotency_key: key } });
+    expect(today.status).toBe(201);
+    const saved = (await today.json()) as SavedRes;
+    const asBackdated = await t.request("/api/buy", {
+      cookie: cookies.mgr,
+      body: { ...bill({ date: "2026-09-30", time: "16:30", ...REASON }), idempotency_key: key },
+    });
+    expect(asBackdated.status).toBe(409);
+    expect(await asBackdated.json()).toMatchObject({ existing: { id: saved.id, doc_no: saved.doc_no } });
   });
 
   it("idempotency: session ที่เสียสาขาปัจจุบันไปแล้วยังได้บิลเดิม · บิลใหม่ยังต้องเลือกสาขา", async () => {

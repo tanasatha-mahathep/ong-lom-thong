@@ -46,7 +46,7 @@ export const BUY_API_MSG = {
   futureTime: "เวลาต้องไม่เกินเวลาปัจจุบัน",
   unknownMetal: "ไม่พบประเภทโลหะ",
   keyTaken: "idempotency_key นี้ถูกใช้แล้ว",
-  keyReused: "idempotency_key นี้ใช้กับบิลอื่นแล้ว — สร้าง key ใหม่ต่อบิล",
+  keyReused: "idempotency_key นี้ใช้กับบิลอื่นแล้ว",
   docNoTaken: "เลขที่เอกสารชนกับบิลที่มีอยู่แล้ว — แจ้งผู้ดูแลระบบตรวจตัวนับเลขที่ (doc_sequence)",
   noGoldPriceOn: (isoDate: string) => `ยังไม่ได้ตั้งราคาทองของวันที่ ${beDate(isoDate)}`,
 } as const;
@@ -275,10 +275,10 @@ const pgError = (e: unknown): { code?: string; constraint_name?: string } | null
 };
 
 /**
- * key เดิม + ผู้ใช้คนเดิม + เนื้อบิลเดิม = คำตอบเดิม (กดซ้ำ/เน็ตหลุด) · key ของคนอื่น หรือเนื้อบิลต่าง = 409
- * เนื้อบิล = ลูกค้า · ยอดเงิน · น้ำหนักรวม — ยอดคิดด้วย quoteBuy ตัวเดียวกับตอนบันทึก (ไม่ขึ้นกับนาฬิกา/สาขา/ราคาทอง)
+ * key เดิม + ผู้ใช้คนเดิม + เนื้อบิลเดิมทั้งใบ = คำตอบเดิม (กดซ้ำ/เน็ตหลุด)
+ * key ของคนอื่น = 409 (ไม่บอกว่าเป็นบิลไหน) · เนื้อบิลต่าง = 409 พร้อม existing {id, doc_no} ให้จอเปิดบิลที่บันทึกแล้ว
  */
-async function findReplay(db: Db, viewer: Viewer, body: SaveBody): Promise<SavedBuy | null> {
+async function findReplay(db: Db, viewer: Viewer, body: SaveBody, now: Date): Promise<SavedBuy | null> {
   const [row] = await db
     .select({
       id: buyReceipt.id,
@@ -286,21 +286,77 @@ async function findReplay(db: Db, viewer: Viewer, body: SaveBody): Promise<Saved
       pdfStatus: buyReceipt.pdfStatus,
       by: buyReceipt.createdBy,
       customerId: buyReceipt.customerId,
-      totalWeight: buyReceipt.totalWeight,
-      totalAmount: buyReceipt.totalAmount,
+      date: buyReceipt.date,
+      time: buyReceipt.time,
+      detail: buyReceipt.detail,
+      fullTax: buyReceipt.fullTax,
     })
     .from(buyReceipt)
     .where(eq(buyReceipt.idempotencyKey, body.idempotency_key))
     .limit(1);
   if (!row) return null;
   if (row.by !== viewer.userId) throw new BuyError(BUY_API_MSG.keyTaken, "idempotency_key", 409);
-  const again = quoteBuy({ lines: quoteLines(body), payments: [], customer: null, goldPriceSet: true });
-  const same =
-    row.customerId === body.customer_id?.toLowerCase() &&
-    D(row.totalAmount).eq(again.totalAmount) &&
-    D(row.totalWeight).eq(again.totalWeight);
-  if (!same) throw new BuyError(BUY_API_MSG.keyReused, "idempotency_key", 409);
+  const [lines, payments] = await Promise.all([
+    db
+      .select({ metalId: buyLine.metalId, weightG: buyLine.weightG, amount: buyLine.amount })
+      .from(buyLine)
+      .where(eq(buyLine.receiptId, row.id))
+      .orderBy(asc(buyLine.lineNo)),
+    db
+      .select({ method: payment.method, bank: payment.bank, amount: payment.amount })
+      .from(payment)
+      .where(eq(payment.receiptId, row.id)),
+  ]);
+  if (!sameBill(body, businessDate(now), row, lines, payments)) {
+    throw new BuyError(BUY_API_MSG.keyReused, "idempotency_key", 409, { existing: { id: row.id, doc_no: row.docNo } });
+  }
   return { id: row.id, doc_no: row.docNo, pdf_status: row.pdfStatus };
+}
+
+/** เวลาใน DB "10:00:00" → "10:00" */
+const hhmm = (t: string) => t.slice(0, 5);
+const lineKey = (metalId: string, weight: string, amount: string) =>
+  `${metalId.toLowerCase()}|${fmtWeight(D(weight))}|${fmtMoney(D(amount))}`;
+const paymentKey = (method: string, bank: string | null, amount: string) =>
+  `${method}|${bank ?? ""}|${fmtMoney(D(amount))}`;
+const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+/**
+ * เนื้อบิลเดียวกันหรือไม่ — ลูกค้า · แถวตามลำดับ (โลหะ · น้ำหนัก 3 ตำแหน่ง · ราคา 2 ตำแหน่ง)
+ * · ชำระแบบไม่สนลำดับ (วิธี · ธนาคาร · จำนวน) · รายละเอียด · ใบกำกับเต็มรูป · วันที่ (ถ้าส่งมา)
+ * · เวลา เฉพาะบิลย้อนหลัง (บิลวันนี้จอเติมเวลาใหม่ได้) — ตัวเลขทำเป็นรูปมาตรฐานด้วย quoteBuy ตัวเดียวกับตอนบันทึก
+ */
+function sameBill(
+  body: SaveBody,
+  today: string,
+  row: { customerId: string; date: string; time: string; detail: string | null; fullTax: boolean },
+  lines: { metalId: string; weightG: string; amount: string }[],
+  payments: { method: string; bank: string | null; amount: string }[],
+): boolean {
+  const q = quoteBuy({
+    lines: quoteLines(body),
+    payments: body.payments.map((p) => ({ method: p.method, bank: p.bank, amount: p.amount })),
+    customer: null,
+    goldPriceSet: true,
+  });
+  // แถวที่ผิดรูป/ซ้ำถูกข้ามใน quoteBuy — จำนวนไม่เท่ากับที่ส่งมา = ไม่ใช่บิลเดิม
+  if (q.lines.length !== body.lines.length || q.payments.length !== body.payments.length) return false;
+  const backdated = body.date !== undefined && body.date < today;
+  return (
+    row.customerId === body.customer_id?.toLowerCase() &&
+    sameList(
+      q.lines.map((l) => lineKey(l.metalId, l.weightG, l.amount)),
+      lines.map((l) => lineKey(l.metalId, l.weightG, l.amount)),
+    ) &&
+    sameList(
+      q.payments.map((p) => paymentKey(p.method, p.bank, p.amount)).sort(),
+      payments.map((p) => paymentKey(p.method, p.bank, p.amount)).sort(),
+    ) &&
+    (body.detail ?? null) === row.detail &&
+    body.full_tax === row.fullTax &&
+    (body.date === undefined || body.date === row.date) &&
+    (!backdated || body.time === hhmm(row.time))
+  );
 }
 
 async function insertBuy(db: Db, viewer: Viewer, p: PreparedBuy, body: SaveBody, time: string): Promise<SavedBuy> {
@@ -388,7 +444,7 @@ export async function saveBuy(
   now: Date,
 ): Promise<{ replay: boolean; receipt: SavedBuy }> {
   // ตรวจ key ก่อนทุกอย่าง — กดซ้ำหลังบันทึกไปแล้ว (ข้ามเที่ยงคืน · session เสียสาขาปัจจุบัน) ต้องได้บิลเดิม
-  const existing = await findReplay(db, viewer, body);
+  const existing = await findReplay(db, viewer, body, now);
   if (existing) return { replay: true, receipt: existing };
   const prepared = await prepareBuy(db, viewer, body, now);
   const first = prepared.errors[0];
@@ -400,7 +456,7 @@ export async function saveBuy(
     const pg = pgError(e);
     if (pg?.code === "23505" && pg.constraint_name === "buy_receipt_idempotency_key_unique") {
       // ส่งพร้อมกันด้วย key เดียวกัน — ตัวที่ commit ก่อนชนะ ตัวที่เหลือได้บิลนั้น
-      const winner = await findReplay(db, viewer, body);
+      const winner = await findReplay(db, viewer, body, now);
       if (winner) return { replay: true, receipt: winner };
     }
     if (pg?.code === "23505" && pg.constraint_name === "buy_receipt_branch_doc_no") {
@@ -452,8 +508,6 @@ export const ListQuery = z.object({
     .default(1),
 });
 export type ListQuery = z.infer<typeof ListQuery>;
-
-const hhmm = (t: string) => t.slice(0, 5);
 
 /** ยอดรวมของทุกหน้าตามตัวกรอง — string ทั้งหมด (จำนวนบิล · กรัม 3 ตำแหน่ง · บาท 2 ตำแหน่ง) */
 export interface ListTotals {
