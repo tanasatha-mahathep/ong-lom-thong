@@ -10,6 +10,8 @@ export interface AppEnv {
     auth: Auth;
     env: Env;
     viewer: Viewer;
+    /** นาฬิกา — ฉีดเข้ามาได้เพื่อให้เทสต์กำหนดวันเวลาเอง */
+    now: () => Date;
   };
 }
 
