@@ -1,4 +1,4 @@
-import { businessDate, isValidNationalId } from "@ong/core";
+import { isValidNationalId } from "@ong/core";
 import { useForm, useStore } from "@tanstack/react-form";
 import { CircleAlert, CircleCheck, Eraser, LoaderCircle, TriangleAlert } from "lucide-react";
 import {
@@ -17,6 +17,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/c
 import { Input } from "@/components/ui/input";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Textarea } from "@/components/ui/textarea";
+import { useBusinessDate } from "@/hooks/use-business-date";
 import { cn } from "@/lib/utils";
 import { expiryPreview } from "./card";
 import { type ServerError, mapServerError } from "./errors";
@@ -102,7 +103,7 @@ export function CustomerForm({
 }: CustomerFormProps) {
   const { t } = useTranslation("customers");
   const [initialValues] = useState(defaultValues);
-  const [today] = useState(() => businessDate());
+  const today = useBusinessDate();
   const [serverError, setServerError] = useState<ServerError | null>(null);
   const [photoIssue, setPhotoIssue] = useState<CustomersKey | null>(null);
   /** ค่าช่อง "วันที่บัตรหมดอายุ" ตอนออกจากช่องครั้งล่าสุด — ข้อความสถานะบัตรคิดจากค่านี้ (ไม่เปลี่ยนระหว่างพิมพ์) */
