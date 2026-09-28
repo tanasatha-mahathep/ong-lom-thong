@@ -108,8 +108,9 @@ test.describe("buy-in — quote, save, read back, scoped (R1–R5 · R7 · R9 ·
     });
 
     const key = idempotencyKey();
+    const saveBody = { ...body, idempotency_key: key, detail: "ทดสอบ e2e" };
     const saved = await test.step("save → 201 with this month's RC number, PDF queued", async () => {
-      const res = await staff.post("/api/buy", { data: { ...body, idempotency_key: key, detail: "ทดสอบ e2e" } });
+      const res = await staff.post("/api/buy", { data: saveBody });
       expect(res.status(), await res.text()).toBe(201);
       const bill = (await res.json()) as Saved;
       expect(bill.doc_no).toMatch(/^RC\d{4}-\d{4}$/);
@@ -117,10 +118,17 @@ test.describe("buy-in — quote, save, read back, scoped (R1–R5 · R7 · R9 ·
       return bill;
     });
 
-    await test.step("pressing save again (same key) returns the same bill, not a second one", async () => {
-      const res = await staff.post("/api/buy", { data: { ...body, idempotency_key: key } });
+    await test.step("pressing save again (same key, same bill) returns that bill, not a second one", async () => {
+      const res = await staff.post("/api/buy", { data: saveBody });
       expect(res.status()).toBe(200);
       expect(await res.json()).toEqual(saved);
+    });
+
+    await test.step("the same key with a different bill is a 409 that points at the saved one", async () => {
+      const changed = { ...saveBody, detail: "ทดสอบ e2e แก้แล้ว" };
+      const res = await staff.post("/api/buy", { data: changed });
+      const error = await expectFieldError(res, 409, "idempotency_key", ["existing"]);
+      expect((error as { existing?: unknown }).existing).toEqual({ id: saved.id, doc_no: saved.doc_no });
     });
 
     await test.step("the bill reads back exactly as quoted — masked seller, no-store", async () => {
