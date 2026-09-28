@@ -7,7 +7,12 @@ export const CARD_STATUS_MESSAGE: Record<Exclude<CardStatus, "ok">, string> = {
 };
 
 /** บัตรไม่มีวันหมดอายุ (ผู้สูงอายุ) — หน้าบัตรพิมพ์ "ตลอดชีพ" / "LIFELONG" */
-const LIFETIME = /ตลอดชีพ|life[\s-]*(?:time|long)/i;
+/**
+ * ทั้งช่องต้องเป็นคำว่า "ตลอดชีพ" / "lifelong" / "lifetime" เท่านั้น (หน้าบัตรพิมพ์คู่กันได้ "ตลอดชีพ / LIFELONG")
+ * ข้อความอื่นที่แค่มีคำนี้ปนอยู่ = อ่านไม่ได้
+ */
+const LIFETIME_WORD = String.raw`(?:ตลอดชีพ|life[\s-]*(?:time|long))`;
+const LIFETIME = new RegExp(`^${LIFETIME_WORD}(?:\\s*[/,]?\\s*${LIFETIME_WORD})*$`, "i");
 /** วันหมดอายุของบัตรตลอดชีพที่อ่านจากชิป (ชิปเก็บ YYYYMMDD) */
 const LIFETIME_CHIP = "99999999";
 /** อักขระล่องหนที่ติดมากับการ copy/paste ข้อความไทย (zero-width space ฯลฯ) */

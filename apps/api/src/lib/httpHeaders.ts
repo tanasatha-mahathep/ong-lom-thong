@@ -7,7 +7,8 @@ import { secureHeaders } from "hono/secure-headers";
  * ฟอนต์ Sarabun อยู่ /fonts · blob: = พรีวิวรูปบัตร · data: = รูปเล็กใน CSS
  * frame-ancestors 'none' + X-Frame-Options DENY ทุก response รวม PDF (เปิดแท็บใหม่ ไม่ฝังใน iframe)
  * — Chrome 154 เปิด PDF ที่มี CSP ชุดนี้ได้ปกติ (ทดสอบแล้ว) · Firefox ไม่ใช้ CSP ของหน้ากับ pdf.js ตั้งแต่ v77
- * HSTS ไม่มี preload/includeSubDomains (Railway เสิร์ฟ HTTPS · browser ไม่สน HSTS ที่มากับ http://localhost)
+ * HSTS includeSubDomains ไม่มี preload (Railway เสิร์ฟ HTTPS · browser ไม่สน HSTS ที่มากับ http://localhost)
+ * base-uri 'none' (SPA ไม่ใช้ <base>) · Permissions-Policy ปิดกล้อง/ไมค์/ตำแหน่ง/ชำระเงิน — รูปบัตรมาทางวาง/อัปโหลดไฟล์
  * ตั้งหลัง route ทำงาน — แตะเฉพาะ header ชุดนี้ ไม่แตะ Cache-Control / Content-Disposition ของ route
  */
 export const securityHeaders = secureHeaders({
@@ -18,13 +19,14 @@ export const securityHeaders = secureHeaders({
     fontSrc: ["'self'"],
     connectSrc: ["'self'"],
     objectSrc: ["'none'"],
-    baseUri: ["'self'"],
+    baseUri: ["'none'"],
     frameAncestors: ["'none'"],
     formAction: ["'self'"],
   },
   xFrameOptions: "DENY",
   referrerPolicy: "strict-origin-when-cross-origin",
-  strictTransportSecurity: "max-age=31536000",
+  strictTransportSecurity: "max-age=31536000; includeSubDomains",
+  permissionsPolicy: { camera: [], microphone: [], geolocation: [], payment: [] },
   crossOriginOpenerPolicy: "same-origin",
 });
 

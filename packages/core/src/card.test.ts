@@ -189,3 +189,13 @@ describe("cardStatus — ระบบเดิม status 0/1/2/3 บล็อก
     expect(cardStatus(text, TODAY)).toBe("invalid");
   });
 });
+
+describe("บัตรตลอดชีพ — ทั้งช่องต้องเป็นคำนั้นเท่านั้น", () => {
+  it.each(["ตลอดชีพ", " LIFELONG ", "life long", "Lifetime"])("%j = ok", (text) => {
+    expect(cardStatus(text, "2026-09-29")).toBe("ok");
+  });
+
+  it.each(["บัตรตลอดชีพ", "ตลอดชีพ?", "not lifelong", "lifelong 2570"])("%j = invalid", (text) => {
+    expect(cardStatus(text, "2026-09-29")).toBe("invalid");
+  });
+});
