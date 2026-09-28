@@ -92,7 +92,10 @@ export const buyPdfRoutes = new Hono<AppEnv>()
       idcard_status: bill.idcardStatus,
       void_pdf_status: bill.voidPdfStatus,
     };
-    if (missingFiles(bill).length === 0) return c.json({ ...apiError("ไฟล์ครบแล้ว ไม่ต้องสร้างใหม่"), ...before }, 409);
+    // retry ที่คนสั่งรวมไฟล์ invalid ด้วย (หลังแก้ข้อมูลแล้ว) — loop อัตโนมัติไม่แตะ
+    if (missingFiles(bill, { includeInvalid: true }).length === 0) {
+      return c.json({ ...apiError("ไฟล์ครบแล้ว ไม่ต้องสร้างใหม่"), ...before }, 409);
+    }
     await c.var.db.insert(auditLog).values({
       userId: c.var.viewer.userId,
       action: "buy.pdf_retry",
@@ -100,7 +103,7 @@ export const buyPdfRoutes = new Hono<AppEnv>()
       rowId: bill.id,
       diff: { doc_no: bill.docNo, before },
     });
-    const result = await c.var.pdf.archive(bill.id);
+    const result = await c.var.pdf.archive(bill.id, { includeInvalid: true });
     if (!result) return c.json(NOT_FOUND, 404);
     const { busy: _busy, ...statuses } = result;
     return c.json(statuses);

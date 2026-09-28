@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { PAYMENT_METHODS, isPaymentMethod, maskNationalId } from "@ong/core";
 import { type ReceiptData, renderIdCardHtml, renderReceiptHtml } from "@ong/core/receipt";
-import { type Db, branch, buyLine, buyReceipt, metal, payment } from "@ong/db";
+import { type Db, type PDF_STATUSES, branch, buyLine, buyReceipt, metal, payment } from "@ong/db";
 import { and, asc, eq, inArray, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Env } from "../env";
@@ -10,7 +10,7 @@ import type { BackgroundTasks } from "../lib/background";
 import { type PdfAsset, PdfRenderError, type PdfRenderer } from "../lib/gotenberg";
 import { PDF_CONTENT_TYPE, idcardPdfKey, receiptPdfKey, sha256Hex } from "../lib/pdfArchive";
 import type { BranchRef } from "../lib/scope";
-import { ObjectExistsError, type Storage, putNew } from "../lib/storage";
+import { ObjectExistsError, type Storage, type StoredObject, putNew } from "../lib/storage";
 
 /**
  * PDF เก็บถาวรของบิลซื้อเข้า (spec §9.2 · R15 · CLAUDE.md กฎ 5)
@@ -85,8 +85,8 @@ export function toReceiptData(
   const status = opts.status ?? r.status;
   return {
     company,
-    // seed ยังไม่ตั้ง tax_branch_code — ใช้รหัสสาขา (5 หลัก) แทน ไม่งั้นป้าย "(สำนักงานใหญ่)" หาย
-    branch: { name: src.branch.name, taxBranchCode: src.branch.taxBranchCode ?? src.branch.code },
+    // ส่งตามที่ตั้งไว้ ไม่เดาแทน — ไม่มีรหัสสาขาสรรพากร = ใบพิมพ์ไม่ได้ (fail-closed ใน @ong/core/receipt)
+    branch: { name: src.branch.name, taxBranchCode: src.branch.taxBranchCode },
     docNo: r.docNo,
     date: r.date,
     time: r.time.slice(0, 5),
@@ -132,7 +132,7 @@ export async function loadPdfFonts(dir: string): Promise<PdfAsset[]> {
 // ---------- สร้าง/เก็บไฟล์ ----------
 
 export type PdfKind = "receipt" | "idcard" | "void";
-type FileStatus = "none" | "pending" | "ready" | "failed";
+type FileStatus = "none" | (typeof PDF_STATUSES)[number];
 
 export interface PdfStatuses {
   pdf_status: FileStatus;
@@ -146,20 +146,37 @@ const statusesOf = (r: Pick<ReceiptRow, "pdfStatus" | "idcardStatus" | "voidPdfS
   void_pdf_status: r.voidPdfStatus,
 });
 
-const retryable = (s: FileStatus) => s === "pending" || s === "failed";
+const autoRetry = (s: FileStatus) => s === "pending" || s === "failed";
+const manualRetry = (s: FileStatus) => autoRetry(s) || s === "invalid";
 
-/** ไฟล์ที่ยังขาดของบิลนี้ — ready แล้วไม่แตะอีก (immutable) */
-export function missingFiles(r: Pick<ReceiptRow, "pdfStatus" | "idcardStatus" | "voidPdfStatus" | "status">) {
+/**
+ * ไฟล์ที่ยังขาดของบิลนี้ — ready แล้วไม่แตะอีก (immutable)
+ * invalid (ข้อมูลพิมพ์ไม่ได้) ทำซ้ำเองไม่หาย — ลองใหม่เฉพาะเมื่อคนสั่ง retry หลังแก้ข้อมูล (includeInvalid)
+ */
+export function missingFiles(
+  r: Pick<ReceiptRow, "pdfStatus" | "idcardStatus" | "voidPdfStatus" | "status">,
+  { includeInvalid = false } = {},
+) {
+  const wanted = includeInvalid ? manualRetry : autoRetry;
   const kinds: PdfKind[] = [];
-  if (r.pdfStatus !== "ready") kinds.push("receipt");
-  if (retryable(r.idcardStatus)) kinds.push("idcard");
-  if (r.status === "void" && retryable(r.voidPdfStatus)) kinds.push("void");
+  if (wanted(r.pdfStatus)) kinds.push("receipt");
+  if (wanted(r.idcardStatus)) kinds.push("idcard");
+  if (r.status === "void" && wanted(r.voidPdfStatus)) kinds.push("void");
   return kinds;
 }
 
 const PHOTO_EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
 
-type Outcome = { ok: true; key: string; sha256: string } | { ok: false; reason: string };
+type Outcome = { ok: true; key: string; sha256: string } | { ok: false; reason: string; permanent: boolean };
+
+/** ล้มแบบลองใหม่ก็ไม่หาย (ข้อมูลบิล/ไฟล์ผิด) — สถานะ invalid ไม่เข้า retry อัตโนมัติ */
+class PermanentPdfError extends Error {
+  override name = "PermanentPdfError";
+}
+
+/** ReceiptDataError ของ @ong/core/receipt (ข้อมูลใบไม่ครบ/ขัดกัน) · RangeError จาก key/รหัสสาขา = ข้อมูลผิด */
+const isPermanent = (e: unknown) =>
+  e instanceof PermanentPdfError || e instanceof RangeError || (e instanceof Error && e.name === "ReceiptDataError");
 
 const reasonOf = (e: unknown) =>
   e instanceof PdfRenderError
@@ -187,8 +204,11 @@ export interface ArchiveResult extends PdfStatuses {
 export interface ReceiptPdfService {
   /** หลังบันทึก/ยกเลิกบิล — เริ่มเบื้องหลัง request ไม่รอ */
   enqueue(receiptId: string): void;
-  /** สร้างไฟล์ที่ยังขาดของบิล (ผู้เขียนคนเดียวต่อบิล) · wait=false: มีคนทำอยู่ = busy ไม่รอ · ไม่มีบิล = null */
-  archive(receiptId: string, opts?: { wait?: boolean }): Promise<ArchiveResult | null>;
+  /**
+   * สร้างไฟล์ที่ยังขาดของบิล (ผู้เขียนคนเดียวต่อบิล) · ไม่มีบิล = null
+   * wait=false: มีคนทำอยู่ = busy ไม่รอ · includeInvalid: ลองไฟล์ที่ invalid ด้วย (retry ที่คนสั่ง)
+   */
+  archive(receiptId: string, opts?: { wait?: boolean; includeInvalid?: boolean }): Promise<ArchiveResult | null>;
   /** บิลที่ค้าง pending/failed นานกว่า olderThanMs — ทีละใบ ข้ามใบที่มีคนทำอยู่ · คืนจำนวนที่ทำ */
   retryDue(opts?: { olderThanMs?: number; limit?: number }): Promise<number>;
 }
@@ -202,9 +222,9 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
     if (kind === "idcard") {
       const photoKey = src.receipt.customerSnapshot.photo_key;
       const photo = photoKey ? await storage.get(photoKey) : null;
-      if (!photo) throw new Error("customer ID card photo not found in storage");
+      if (!photo) throw new PermanentPdfError("customer ID card photo not found in storage");
       const ext = PHOTO_EXT[photo.contentType];
-      if (!ext) throw new Error(`unsupported photo type ${photo.contentType}`);
+      if (!ext) throw new PermanentPdfError(`unsupported photo type ${photo.contentType}`);
       const name = `card.${ext}`;
       const html = renderIdCardHtml({ docNo, date, companyName: company.name, photoSrc: name }, { fontBaseUrl: "" });
       const files = [...fonts, { name, data: photo.body, contentType: photo.contentType }];
@@ -216,12 +236,23 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
     return renderer.htmlToPdf({ html, files: fonts, trace: kind === "void" ? `${docNo}-void` : docNo });
   }
 
-  /** ไฟล์ที่มีอยู่แล้วใน bucket = ของรอบก่อน (อัปโหลดแล้วแต่อัปเดต DB ไม่ทัน) — รับมาใช้ ไม่ render ทับ */
-  function adopt(key: string, body: Uint8Array): Outcome {
-    if (Buffer.from(body.subarray(0, 5)).toString("latin1") !== "%PDF-") {
-      return { ok: false, reason: `object at ${key} is not a PDF — needs manual check (never overwritten)` };
+  /**
+   * ไฟล์ที่มีอยู่แล้วใน bucket = ของรอบก่อน (อัปโหลดแล้วแต่อัปเดต DB ไม่ทัน) — รับมาใช้ ไม่ render ทับ
+   * เฉพาะเมื่อเป็นของบิลนี้ (metadata receipt-id) — DB ถูก restore แต่ bucket ยังอยู่ เลขที่เอกสารอาจซ้ำกับไฟล์ของบิลเก่า
+   */
+  function adopt(key: string, object: StoredObject, src: ReceiptSource): Outcome {
+    const owner = object.metadata["receipt-id"];
+    if (owner !== src.receipt.id) {
+      log.error(
+        `[pdf] !!! ${key} belongs to another bill (receipt-id ${owner ?? "missing"}, this bill ${src.receipt.id}) — ` +
+          "not adopted, not overwritten · check doc numbering / a database restore",
+      );
+      return { ok: false, permanent: true, reason: "archive key belongs to another bill" };
     }
-    return { ok: true, key, sha256: sha256Hex(body) };
+    if (Buffer.from(object.body.subarray(0, 5)).toString("latin1") !== "%PDF-") {
+      return { ok: false, permanent: true, reason: `object at ${key} is not a PDF — needs manual check` };
+    }
+    return { ok: true, key, sha256: sha256Hex(object.body) };
   }
 
   async function produce(kind: PdfKind, src: ReceiptSource): Promise<Outcome> {
@@ -229,21 +260,24 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
     try {
       const key = kind === "idcard" ? idcardPdfKey(where) : receiptPdfKey({ ...where, void: kind === "void" });
       const stored = await storage.get(key);
-      if (stored) return adopt(key, stored.body);
+      if (stored) return adopt(key, stored, src);
       const pdf = await render(kind, src);
       try {
-        await putNew(storage, key, pdf, PDF_CONTENT_TYPE);
+        await putNew(storage, key, pdf, PDF_CONTENT_TYPE, { "receipt-id": src.receipt.id, kind });
       } catch (e) {
         if (!(e instanceof ObjectExistsError)) throw e;
         const winner = await storage.get(key);
         if (!winner) throw e;
-        return adopt(key, winner.body);
+        return adopt(key, winner, src);
       }
       return { ok: true, key, sha256: sha256Hex(pdf) };
     } catch (e) {
       const reason = reasonOf(e);
-      log.error(`[pdf] ${src.receipt.docNo} ${kind} failed: ${reason}`);
-      return { ok: false, reason };
+      const permanent = isPermanent(e);
+      log.error(
+        `[pdf] ${src.receipt.docNo} ${kind} ${permanent ? "invalid (fix data, then retry)" : "failed"}: ${reason}`,
+      );
+      return { ok: false, reason, permanent };
     }
   }
 
@@ -251,19 +285,22 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
     if (kind === "receipt") {
       return out.ok
         ? { pdfKey: out.key, pdfSha256: out.sha256, pdfStatus: "ready", pdfGeneratedAt: at }
-        : { pdfStatus: "failed" };
+        : { pdfStatus: out.permanent ? "invalid" : "failed" };
     }
     if (kind === "idcard") {
       return out.ok
         ? { idcardPdfKey: out.key, idcardSha256: out.sha256, idcardStatus: "ready" }
-        : { idcardStatus: "failed" };
+        : { idcardStatus: out.permanent ? "invalid" : "failed" };
     }
     return out.ok
       ? { voidPdfKey: out.key, voidPdfSha256: out.sha256, voidPdfStatus: "ready", voidPdfGeneratedAt: at }
-      : { voidPdfStatus: "failed" };
+      : { voidPdfStatus: out.permanent ? "invalid" : "failed" };
   }
 
-  async function archive(receiptId: string, { wait = true } = {}): Promise<ArchiveResult | null> {
+  async function archive(
+    receiptId: string,
+    { wait = true, includeInvalid = false } = {},
+  ): Promise<ArchiveResult | null> {
     if (!z.uuid().safeParse(receiptId).success) return null;
     return db.transaction(async (tx) => {
       // ผู้เขียนคนเดียวต่อบิล — ล็อกหลุดเองเมื่อทรานแซกชันจบ (commit/rollback/connection หลุด)
@@ -284,7 +321,7 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
       if (!src) return null;
       const set: Partial<typeof buyReceipt.$inferInsert> = {};
       // render ให้ครบก่อน แล้วอัปเดตครั้งเดียวท้ายสุด — ล็อกแถวสั้นที่สุด (การยกเลิกบิลไม่ต้องรอ Gotenberg)
-      for (const kind of missingFiles(src.receipt))
+      for (const kind of missingFiles(src.receipt, { includeInvalid }))
         Object.assign(set, columnsFor(kind, await produce(kind, src), now()));
       if (Object.keys(set).length > 0) await tx.update(buyReceipt).set(set).where(eq(buyReceipt.id, receiptId));
       return { ...statusesOf({ ...src.receipt, ...set }), busy: false };
