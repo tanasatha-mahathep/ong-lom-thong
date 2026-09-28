@@ -196,6 +196,25 @@ describe.skipIf(!available)("ลูกค้า (Siam ID · R12 · R13) — /api
     expect(await res.json()).toEqual({ error: "มีลูกค้าเลขบัตรนี้อยู่แล้ว", field: "national_id", existing_id: idA });
   });
 
+  it.each([
+    [{ national_id: ID_B, name_th: "นาย\u0000ทดสอบ" }, "name_th"],
+    [{ national_id: ID_B, address: "1 ถ.ทดสอบ\u0007" }, "address"],
+    [{ national_id: ID_B, mobile: "081\u001b234" }, "mobile"],
+  ])("อักขระควบคุม %j → 400 ชี้ %s ไม่บันทึก", async (fields, field) => {
+    const res = await post(form(fields));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "มีอักขระที่ใช้ไม่ได้ (อักขระควบคุม)", field });
+    expect(await t.db.select().from(customer).where(eq(customer.nationalId, ID_B))).toHaveLength(0);
+  });
+
+  it("ที่อยู่หลายบรรทัดใช้ได้ (ผ่านการตรวจ ไปติดเลขบัตรซ้ำแทน) · ค้นด้วยอักขระควบคุม = 400", async () => {
+    const res = await post(form({ address: "1 ถ.ทดสอบ\r\nต.ในเมือง\tจ.ขอนแก่น" }));
+    expect(res.status).toBe(409);
+    const q = await get("?q=%00%00");
+    expect(q.status).toBe(400);
+    expect(await q.json()).toMatchObject({ field: "q" });
+  });
+
   it("รูปตรวจจาก byte จริง — ไฟล์อื่นที่ตั้งชื่อ .jpg ถูกปฏิเสธ และไม่ลง bucket", async () => {
     const before = t.storage.keys().length;
     const fake = new File([new TextEncoder().encode("<svg onload=alert(1)>")], "x.jpg", { type: "image/jpeg" });

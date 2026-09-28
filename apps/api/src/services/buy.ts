@@ -29,6 +29,7 @@ import {
 import { type SQL, and, asc, desc, eq, exists, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { type BranchRef, type Viewer, currentBranch, forUser } from "../lib/scope";
+import { CONTROL_CHARS_MSG, noControlChars } from "../lib/text";
 import { escapeLike, findCustomer } from "./customers";
 import { type TodayPrice, priceForBranch } from "./goldPrice";
 
@@ -69,6 +70,7 @@ const optionalText = (max: number, label: string) =>
     .string({ error: `${label}ต้องเป็นข้อความ` })
     .trim()
     .max(max, `${label}ยาวเกิน ${max} ตัวอักษร`)
+    .refine(noControlChars, CONTROL_CHARS_MSG)
     .nullish()
     .transform((v) => v || null);
 
@@ -366,11 +368,12 @@ export const ListQuery = z.object({
   date_from: z.iso.date("date_from ต้องเป็นรูปแบบ YYYY-MM-DD").optional(),
   date_to: z.iso.date("date_to ต้องเป็นรูปแบบ YYYY-MM-DD").optional(),
   /** code ของโลหะ (gold · nak · silver · platinum) — บิลที่มีโลหะนั้นอย่างน้อยหนึ่งแถว */
-  metal: z.string().trim().max(32, "metal ไม่ถูกต้อง").optional(),
+  metal: z.string().trim().max(32, "metal ไม่ถูกต้อง").refine(noControlChars, CONTROL_CHARS_MSG).optional(),
   q: z
     .string()
     .trim()
     .max(100, "คำค้นยาวเกิน 100 ตัวอักษร")
+    .refine(noControlChars, CONTROL_CHARS_MSG)
     .refine((q) => q.length === 0 || q.length >= 2, "ค้นอย่างน้อย 2 ตัวอักษร")
     .default(""),
   branch_id: z.string().max(64, "branch_id ไม่ถูกต้อง").optional(),

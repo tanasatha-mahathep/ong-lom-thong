@@ -275,6 +275,22 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     expect(await res.json()).toMatchObject({ field });
   });
 
+  it.each([
+    [{ detail: "สร้อย\u0000ขาด" }, "detail"],
+    [{ detail: "bell\u0007" }, "detail"],
+    [{ payments: [{ method: "transfer", bank: "KBANK\u0001", amount: "20030" }] }, "payments.0.bank"],
+  ])("อักขระควบคุมในข้อความ %j → 400 ชี้ %s", async (over, field) => {
+    const res = await save(bill(over));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "มีอักขระที่ใช้ไม่ได้ (อักขระควบคุม)", field });
+  });
+
+  it("tab · ขึ้นบรรทัดใหม่ ในรายละเอียดใช้ได้ (ผ่านการตรวจ ไปติดที่ quote แทน)", async () => {
+    const res = await save(bill({ customer_id: null, detail: "สร้อย\tขาด\r\nแหวนเงิน\n" }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ field: "customer_id" });
+  });
+
   it("body ไม่ใช่ JSON / ไม่ใช่ object = 400", async () => {
     const raw = await t.app.request("/api/buy/quote", {
       method: "POST",
@@ -876,6 +892,9 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
   });
 
   it.each([
+    ["q=%00%00", "q"],
+    ["q=ab%1B", "q"],
+    ["metal=gold%00", "metal"],
     ["q=ก", "q"],
     ["page=0", "page"],
     ["date_from=2026-13-01", "date_from"],

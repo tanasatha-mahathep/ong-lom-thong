@@ -4,6 +4,7 @@ import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { type AppEnv, apiError, requireAnyBranch, requireSession } from "../lib/context";
 import { MAX_PHOTO_BYTES } from "../lib/image";
+import { CONTROL_CHARS_MSG, noControlChars } from "../lib/text";
 import {
   CustomerInputError,
   createCustomer,
@@ -20,6 +21,7 @@ const ListQuery = z.object({
     .string()
     .trim()
     .max(100)
+    .refine(noControlChars, CONTROL_CHARS_MSG)
     .refine((q) => q.length === 0 || q.length >= 2, "ค้นอย่างน้อย 2 ตัวอักษร")
     .default(""),
   page: z.coerce.number().int().min(1).max(10_000).default(1),
