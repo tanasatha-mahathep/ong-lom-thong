@@ -3,7 +3,7 @@ import type { APIRequestContext } from "@playwright/test";
 import { expect, test } from "../../lib/fixtures";
 import { FOREIGN_ORIGIN, expectApiError, expectFieldError } from "../../lib/http";
 import { A4_PT, fontProblems, inspect } from "../../lib/pdf";
-import { syntheticNationalId, thaiName } from "../../lib/synthetic";
+import { PNG_1X1, syntheticNationalId, thaiName } from "../../lib/synthetic";
 
 interface Metal {
   id: string;
@@ -28,6 +28,8 @@ interface Bill {
   avg_price_per_g: string;
   status: string;
   pdf_status: string;
+  /** the receipt as the screen shows it — same data as the PDF, seller ID masked */
+  receipt?: { company: { taxId: string }; customer: { nationalId: string } };
 }
 interface BillList {
   items: { id: string; doc_no: string; customer: { national_id_masked: string }; total_amount: string }[];
@@ -42,11 +44,11 @@ const docNoPattern = (isoDate: string) => {
   return new RegExp(`^RC${String((Number(y) + 543) % 100).padStart(2, "0")}${m}-\\d{4}$`);
 };
 const idempotencyKey = () => `e2e-${randomBytes(12).toString("hex")}`;
-/** a full 13-digit run = an unmasked national ID (R13) */
-const FULL_ID = /\d{13}/;
+/** a 13-digit run — an unmasked national ID, unless it is the shop's own tax ID (R13) */
+const FULL_ID = /\d{13}/g;
 
 /** the counter's bill: the real-receipt gold line (5.860 g for 20,030) plus silver, paid in cash */
-async function counterBill(staff: APIRequestContext, manager: APIRequestContext) {
+async function counterBill(staff: APIRequestContext, manager: APIRequestContext, options: { photo?: boolean } = {}) {
   // R7: today's price must exist before a bill opens — the same 67,850 the gold-price journey sets
   expect((await manager.put("/api/gold-price/today", { data: { bar_sell: "67850" } })).status()).toBe(200);
 
@@ -55,9 +57,9 @@ async function counterBill(staff: APIRequestContext, manager: APIRequestContext)
 
   const nationalId = syntheticNationalId();
   const seller = thaiName("ผู้ขาย");
-  const created = await staff.post("/api/customers", {
-    multipart: { national_id: nationalId, name_th: seller, card_expire_text: "31/12/2574" },
-  });
+  const fields = { national_id: nationalId, name_th: seller, card_expire_text: "31/12/2574" };
+  const photo = { name: "card.png", mimeType: "image/png", buffer: PNG_1X1 };
+  const created = await staff.post("/api/customers", { multipart: options.photo ? { ...fields, photo } : fields });
   expect(created.status()).toBe(201);
   const customerId = ((await created.json()) as { id: string }).id;
 
@@ -108,8 +110,9 @@ test.describe("buy-in — quote, save, read back, scoped (R1–R5 · R7 · R9 ·
     });
 
     const key = idempotencyKey();
+    const saveBody = { ...body, idempotency_key: key, detail: "ทดสอบ e2e" };
     const saved = await test.step("save → 201 with this month's RC number, PDF queued", async () => {
-      const res = await staff.post("/api/buy", { data: { ...body, idempotency_key: key, detail: "ทดสอบ e2e" } });
+      const res = await staff.post("/api/buy", { data: saveBody });
       expect(res.status(), await res.text()).toBe(201);
       const bill = (await res.json()) as Saved;
       expect(bill.doc_no).toMatch(/^RC\d{4}-\d{4}$/);
@@ -117,10 +120,17 @@ test.describe("buy-in — quote, save, read back, scoped (R1–R5 · R7 · R9 ·
       return bill;
     });
 
-    await test.step("pressing save again (same key) returns the same bill, not a second one", async () => {
-      const res = await staff.post("/api/buy", { data: { ...body, idempotency_key: key } });
+    await test.step("pressing save again (same key, same bill) returns that bill, not a second one", async () => {
+      const res = await staff.post("/api/buy", { data: saveBody });
       expect(res.status()).toBe(200);
       expect(await res.json()).toEqual(saved);
+    });
+
+    await test.step("the same key with a different bill is a 409 that points at the saved one", async () => {
+      const changed = { ...saveBody, detail: "ทดสอบ e2e แก้แล้ว" };
+      const res = await staff.post("/api/buy", { data: changed });
+      const error = await expectFieldError(res, 409, "idempotency_key", ["existing"]);
+      expect((error as { existing?: unknown }).existing).toEqual({ id: saved.id, doc_no: saved.doc_no });
     });
 
     await test.step("the bill reads back exactly as quoted — masked seller, no-store", async () => {
@@ -128,8 +138,13 @@ test.describe("buy-in — quote, save, read back, scoped (R1–R5 · R7 · R9 ·
       expect(res.status()).toBe(200);
       expect(res.headers()["cache-control"]).toBe("no-store");
       const text = await res.text();
-      expect(text).not.toMatch(FULL_ID);
       const bill = JSON.parse(text) as Bill;
+      // R13: the seller's ID never leaves the api in full — the only 13-digit run allowed is the shop's own tax ID,
+      // which the receipt preview (bill.receipt) prints on every receipt
+      expect(text).not.toContain(nationalId);
+      const shopTaxId = bill.receipt?.company.taxId;
+      expect((text.match(FULL_ID) ?? []).filter((run) => run !== shopTaxId)).toEqual([]);
+      expect(bill.receipt?.customer.nationalId, "the receipt preview masks the seller too").toBe(masked);
       // the business day of the save (a run across midnight, Thai time, may see either) sets the RC period
       expect([today, thaiDate()]).toContain(bill.date);
       expect(bill.doc_no).toMatch(docNoPattern(bill.date));
@@ -214,99 +229,164 @@ test.describe("buy-in — quote, save, read back, scoped (R1–R5 · R7 · R9 ·
   });
 });
 
-/**
- * R15 · CLAUDE.md rule 5 — every bill gets an archived A4 PDF in the private bucket; reprints are the same file,
- * cancelling adds a new file and never deletes the old one. Written against spec §5 (GET /buy/{id}/pdf ·
- * POST /buy/{id}/void) and parked with test.fixme: the api does not render receipts yet — saveBuy leaves
- * pdf_status "pending" and neither route exists. Enabling them is part of the change that wires the pipeline.
- */
-const PENDING_PIPELINE = {
-  tag: "@pending",
-  annotation: {
-    type: "pending",
-    description:
-      "receipt pipeline not wired yet: POST /api/buy leaves pdf_status 'pending'; no GET /api/buy/:id/pdf, " +
-      "no POST /api/buy/:id/void (spec §5 · §9.2)",
-  },
+/** file states the api reports while it renders in the background (spec §9.2) */
+type FileField = "pdf_status" | "idcard_status" | "void_pdf_status";
+
+/** poll the bill until a background-rendered file leaves "pending"; returns where it settled */
+async function settled(client: APIRequestContext, id: string, field: FileField): Promise<string> {
+  let status = "";
+  await expect
+    .poll(
+      async () => {
+        const bill = (await (await client.get(`/api/buy/${id}`)).json()) as Record<string, unknown>;
+        status = String(bill[field]);
+        return status;
+      },
+      { message: `${field} of bill ${id}`, timeout: 90_000, intervals: [500, 1_000, 2_000] },
+    )
+    .not.toBe("pending");
+  return status;
+}
+
+/** "21530.00" → "21,530.00": how the receipt prints the api's strings (thousands grouping, nothing else) */
+const printed = (value: string) => {
+  const [whole = "", fraction] = value.split(".");
+  return `${whole.replace(/\B(?=(\d{3})+$)/g, ",")}${fraction === undefined ? "" : `.${fraction}`}`;
 };
 
-test.describe("receipt PDF — archived, private, immutable (R15 · rule 5 · spec §9.2)", () => {
-  test.fixme(
-    "the bill's PDF lands in the bucket and downloads through the api only",
-    PENDING_PIPELINE,
-    async ({ signedIn, anonymous }) => {
-      const [staff, manager, other] = await Promise.all([
-        signedIn("staff"),
-        signedIn("manager"),
-        signedIn("otherBranch"),
-      ]);
-      const { body, seller } = await counterBill(staff, manager);
-      const saved = await staff.post("/api/buy", { data: { ...body, idempotency_key: idempotencyKey() } });
-      expect(saved.status()).toBe(201);
-      const { id, doc_no } = (await saved.json()) as Saved;
+/** GET a stored file: private (no-store · nosniff · inline) and a well-formed A4 PDF embedding only Sarabun */
+async function downloadPdf(client: APIRequestContext, path: string, filename: string) {
+  const res = await client.get(path);
+  expect(res.status(), `${path} → ${(await res.body()).toString("utf8", 0, 200)}`).toBe(200);
+  expect(res.headers()).toMatchObject({
+    "content-type": "application/pdf",
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "content-disposition": `inline; filename="${filename}"`,
+  });
+  const bytes = await res.body();
+  const pdf = await inspect(bytes);
+  expect(pdf.header).toMatch(/^%PDF-/);
+  expect(pdf.eofTail).not.toBeNull();
+  for (const box of pdf.mediaBoxes) {
+    expect(Math.abs(box.width - A4_PT.width), "A4 width (ISO 216)").toBeLessThanOrEqual(0.5);
+    expect(Math.abs(box.height - A4_PT.height), "A4 height (ISO 216)").toBeLessThanOrEqual(0.5);
+  }
+  expect(fontProblems(pdf.fonts), "Sarabun only, embedded").toEqual([]);
+  return { bytes, pdf, text: pdf.text.join("\n") };
+}
 
-      // spec §9.2: pending → ready once Gotenberg rendered it and the file is in the bucket
-      await expect
-        .poll(async () => ((await (await staff.get(`/api/buy/${id}`)).json()) as Bill).pdf_status, { timeout: 60_000 })
-        .toBe("ready");
+/** what a non-production receipt must carry (.railway/railway.ts · stack RECEIPT_WATERMARK) */
+const WATERMARK = "ตัวอย่าง — ระบบทดสอบ ไม่ใช่ใบรับซื้อจริง";
 
-      const res = await staff.get(`/api/buy/${id}/pdf`);
-      expect(res.status()).toBe(200);
-      expect(res.headers()).toMatchObject({
-        "content-type": "application/pdf",
-        "cache-control": "no-store",
-        "x-content-type-options": "nosniff",
-      });
-      const bytes = await res.body();
-      const pdf = await inspect(bytes);
-      expect(pdf.header).toMatch(/^%PDF-/);
-      expect(pdf.mediaBoxes).toHaveLength(1);
-      expect(Math.abs((pdf.mediaBoxes[0]?.width ?? 0) - A4_PT.width)).toBeLessThanOrEqual(0.5);
-      expect(Math.abs((pdf.mediaBoxes[0]?.height ?? 0) - A4_PT.height)).toBeLessThanOrEqual(0.5);
-      expect(fontProblems(pdf.fonts)).toEqual([]);
-      // the printed numbers are the api's money strings, formatted for print — and the seller in Thai
-      const text = pdf.text.join("\n");
-      for (const printed of [doc_no, seller, "5.860", "100.000", "20,030.00", "1,500.00", "21,530.00"]) {
-        expect(text, printed).toContain(printed);
-      }
-      expect(text).toContain("สองหมื่นหนึ่งพันห้าร้อยสามสิบบาทถ้วน");
+test.describe("receipt PDF — archived, private, immutable (R15 · rule 5 · R13 · spec §9.2)", () => {
+  test("a saved bill gets its A4 receipt and ID card copy in the bucket, served only through the api", async ({
+    signedIn,
+    anonymous,
+  }) => {
+    test.setTimeout(180_000); // two background renders through Gotenberg
+    const [staff, manager, accounting, other] = await Promise.all([
+      signedIn("staff"),
+      signedIn("manager"),
+      signedIn("accounting"),
+      signedIn("otherBranch"),
+    ]);
+    const { body, seller, nationalId } = await counterBill(staff, manager, { photo: true });
+    const saved = await staff.post("/api/buy", {
+      data: { ...body, idempotency_key: idempotencyKey(), detail: "ทดสอบ e2e ใบรับซื้อ" },
+    });
+    expect(saved.status()).toBe(201);
+    const { id, doc_no, pdf_status } = (await saved.json()) as Saved;
+    expect(pdf_status).toBe("pending"); // the sale does not wait for Gotenberg
 
-      // a reprint is the stored file, byte for byte — never a new render
-      expect(Buffer.compare(await (await staff.get(`/api/buy/${id}/pdf`)).body(), bytes)).toBe(0);
-      // private: no session = 401, another branch = 404, and no route deletes it
-      expect((await (await anonymous()).get(`/api/buy/${id}/pdf`)).status()).toBe(401);
-      expect((await other.get(`/api/buy/${id}/pdf`)).status()).toBe(404);
-      expect((await staff.delete(`/api/buy/${id}/pdf`)).status()).toBeGreaterThanOrEqual(400);
-    },
-  );
+    expect(await settled(staff, id, "pdf_status")).toBe("ready");
+    expect(await settled(staff, id, "idcard_status")).toBe("ready");
+    const detailText = await (await staff.get(`/api/buy/${id}`)).text();
+    const bill = JSON.parse(detailText) as Bill;
+    // no public URL, no bucket key, no full national ID in what the browser gets (R13)
+    expect(detailText).not.toMatch(/https?:\/\/|receipts\/|idcards\/|X-Amz-/);
+    expect(detailText).not.toContain(nationalId);
 
-  test.fixme("cancelling adds a stamped PDF and keeps the original", PENDING_PIPELINE, async ({ signedIn }) => {
+    const receipt = await test.step("the receipt: A4, Thai, the api's numbers as printed", async () => {
+      const file = await downloadPdf(staff, `/api/buy/${id}/pdf`, `${doc_no}.pdf`);
+      expect(file.pdf.pageCount).toBe(1);
+      const expected = [
+        "ใบรับซื้อของเก่า/ใบสำคัญจ่าย",
+        doc_no,
+        `ชื่อผู้ขาย : ${seller}`,
+        nationalId, // the archived tax document is the one place with the full ID (R13)
+        "รายละเอียด (ถ้ามี): ทดสอบ e2e ใบรับซื้อ",
+        "สองหมื่นหนึ่งพันห้าร้อยสามสิบบาทถ้วน", // 21,530.00 in words
+        WATERMARK,
+        ...bill.lines.flatMap((l) => [printed(l.weight_g), printed(l.price_per_g), printed(l.amount)]),
+        ...bill.payments.map((p) => printed(p.amount)),
+      ];
+      for (const text of expected) expect(file.text, text).toContain(text);
+      expect(file.text).not.toContain("ยกเลิก");
+      return file;
+    });
+
+    await test.step("a reprint is the stored file, byte for byte", async () => {
+      const again = await staff.get(`/api/buy/${id}/pdf`);
+      expect(Buffer.compare(await again.body(), receipt.bytes)).toBe(0);
+    });
+
+    await test.step("private: no session 401 · another branch 404 · no route deletes it", async () => {
+      await expectApiError(await (await anonymous()).get(`/api/buy/${id}/pdf`), 401);
+      await expectApiError(await other.get(`/api/buy/${id}/pdf`), 404);
+      await expectApiError(await staff.delete(`/api/buy/${id}/pdf`), 404);
+    });
+
+    await test.step("the ID card copy is a separate file only accounting and admin open (rule 5)", async () => {
+      await expectApiError(await staff.get(`/api/buy/${id}/idcard`), 403);
+      const copy = await downloadPdf(accounting, `/api/buy/${id}/idcard`, `${doc_no}_idcard.pdf`);
+      expect(Buffer.compare(copy.bytes, receipt.bytes)).not.toBe(0);
+      expect(copy.text).toContain(doc_no);
+      expect(copy.text).toContain(WATERMARK);
+    });
+  });
+
+  test("cancelling adds a stamped PDF and keeps the original byte for byte", async ({ signedIn }) => {
+    test.setTimeout(180_000);
     const [staff, manager] = await Promise.all([signedIn("staff"), signedIn("manager")]);
     const { body } = await counterBill(staff, manager);
     const saved = (await (
       await staff.post("/api/buy", { data: { ...body, idempotency_key: idempotencyKey() } })
     ).json()) as Saved;
-    await expect
-      .poll(async () => ((await (await staff.get(`/api/buy/${saved.id}`)).json()) as Bill).pdf_status, {
-        timeout: 60_000,
-      })
-      .toBe("ready");
-    const original = await (await staff.get(`/api/buy/${saved.id}/pdf`)).body();
+    expect(await settled(staff, saved.id, "pdf_status")).toBe("ready");
+    const original = await downloadPdf(staff, `/api/buy/${saved.id}/pdf`, `${saved.doc_no}.pdf`);
 
-    // spec §10: cancelling is a manager's call
-    await expectApiError(await staff.post(`/api/buy/${saved.id}/void`, { data: { reason: "ทดสอบ e2e" } }), 403);
-    const voided = await manager.post(`/api/buy/${saved.id}/void`, { data: { reason: "ทดสอบ e2e" } });
-    expect(voided.status()).toBe(200);
-    await expect
-      .poll(async () => ((await (await staff.get(`/api/buy/${saved.id}`)).json()) as Bill).status, { timeout: 60_000 })
-      .toBe("void");
+    const reason = "ทดสอบ e2e ยกเลิกบิล";
+    await test.step("only a manager or admin cancels, with a reason", async () => {
+      await expectApiError(await staff.post(`/api/buy/${saved.id}/void`, { data: { reason } }), 403);
+      await expectFieldError(await manager.post(`/api/buy/${saved.id}/void`, { data: {} }), 400, "reason");
+      const voided = await manager.post(`/api/buy/${saved.id}/void`, { data: { reason } });
+      expect(voided.status(), await voided.text()).toBe(200);
+      expect(await voided.json()).toMatchObject({ id: saved.id, status: "void", void_reason: reason });
+      await expectFieldError(await manager.post(`/api/buy/${saved.id}/void`, { data: { reason } }), 409, "status");
+    });
 
-    // the void copy is a new file (…_void.pdf) with the stamp and the reason; the original stays in the bucket —
-    // no delete exists and putNew refuses to overwrite (apps/api storage tests); spec §5 names no route for it
-    const stamped = await (await staff.get(`/api/buy/${saved.id}/pdf`)).body();
-    expect(Buffer.compare(stamped, original)).not.toBe(0);
-    const text = (await inspect(stamped)).text.join("\n");
-    expect(text).toContain("ยกเลิก");
-    expect(text).toContain("ทดสอบ e2e");
+    expect(await settled(staff, saved.id, "void_pdf_status")).toBe("ready");
+
+    await test.step("the bill now opens as a new, stamped file", async () => {
+      const stamped = await downloadPdf(staff, `/api/buy/${saved.id}/pdf`, `${saved.doc_no}_void.pdf`);
+      expect(Buffer.compare(stamped.bytes, original.bytes)).not.toBe(0);
+      for (const text of ["ยกเลิก", `ใบรับซื้อฉบับนี้ถูกยกเลิก · เหตุผล: ${reason}`, saved.doc_no]) {
+        expect(stamped.text, text).toContain(text);
+      }
+      const explicit = await staff.get(`/api/buy/${saved.id}/pdf?version=void`);
+      expect(Buffer.compare(await explicit.body(), stamped.bytes)).toBe(0);
+    });
+
+    await test.step("the original is still there, unchanged — never deleted or overwritten", async () => {
+      const kept = await downloadPdf(staff, `/api/buy/${saved.id}/pdf?version=original`, `${saved.doc_no}.pdf`);
+      expect(Buffer.compare(kept.bytes, original.bytes)).toBe(0);
+    });
+
+    await test.step("the list keeps the bill but its totals leave it out", async () => {
+      const found = (await (await staff.get(`/api/buy?q=${encodeURIComponent(saved.doc_no)}`)).json()) as BillList;
+      expect(found.items.map((i) => i.id)).toEqual([saved.id]);
+      expect(found.totals).toEqual({ count: "0", total_weight: "0.000", total_amount: "0.00" });
+    });
   });
 });

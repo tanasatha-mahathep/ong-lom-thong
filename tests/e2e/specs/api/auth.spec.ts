@@ -1,6 +1,6 @@
 import { type AccountKey } from "../../lib/accounts";
 import { expect, test } from "../../lib/fixtures";
-import { FOREIGN_ORIGIN, expectApiError, signIn } from "../../lib/http";
+import { FOREIGN_ORIGIN, clientAddress, expectApiError, signIn } from "../../lib/http";
 import { target } from "../../lib/target";
 
 interface Me {
@@ -13,6 +13,8 @@ interface Me {
 
 // better-auth prefixes the cookie with __Secure- when NODE_ENV=production (useSecureCookies)
 const SESSION_COOKIE = "__Secure-better-auth.session_token";
+/** sign-ins allowed per client IP per 60 s — apps/api/src/auth.ts SIGN_IN_PER_MINUTE (decided 29 Sep: one shop NAT) */
+const SIGN_IN_PER_MINUTE = 20;
 
 test.describe("sign-in, session and sign-out — spec §10 · OWASP ASVS V3", () => {
   for (const key of ["staff", "manager", "accounting", "admin"] satisfies AccountKey[]) {
@@ -69,18 +71,45 @@ test.describe("sign-in, session and sign-out — spec §10 · OWASP ASVS V3", ()
     await expectApiError(replay, 401);
   });
 
-  test("sign-in is throttled per client after 5 attempts a minute (ASVS V2.2.1)", async ({ anonymous, accounts }) => {
-    const attacker = await anonymous();
-    for (let attempt = 1; attempt <= 5; attempt++) {
-      const res = await signIn(attacker, { email: accounts.staff.email, password: `guess-${attempt}-0000` });
+  test("sign-in is throttled per client IP: the 21st attempt in a minute is 429 (ASVS V2.2.1)", async ({
+    anonymous,
+    accounts,
+  }) => {
+    const attacker = await anonymous(); // one client IP (X-Real-IP) for every attempt
+    for (let attempt = 1; attempt <= SIGN_IN_PER_MINUTE; attempt++) {
+      // a fresh X-Forwarded-For on every guess buys nothing: the limit is keyed on X-Real-IP only
+      const res = await attacker.post("/api/auth/sign-in/email", {
+        headers: { "x-forwarded-for": clientAddress() },
+        data: { email: accounts.staff.email, password: `guess-${attempt}-0000` },
+      });
       expect(res.status(), `attempt ${attempt}`).toBe(401);
     }
     const blocked = await signIn(attacker, accounts.staff);
-    expect(blocked.status(), "even the right password is refused once throttled").toBe(429);
+    expect(blocked.status(), `attempt ${SIGN_IN_PER_MINUTE + 1}, even with the right password`).toBe(429);
+    expect(blocked.headers()["set-cookie"]).toBeUndefined();
+    // better-auth says when to come back: the rest of the 60-second window
+    const retryAfter = Number(blocked.headers()["x-retry-after"]);
+    expect(retryAfter).toBeGreaterThan(0);
+    expect(retryAfter).toBeLessThanOrEqual(60);
 
-    // the limit is per client: the real user at the counter can still sign in
+    // the limit is per client: the real user at the counter (another IP) can still sign in
     const counter = await anonymous();
     expect((await signIn(counter, accounts.staff)).status()).toBe(200);
+  });
+
+  test("user and branch administration is for admins only (spec §10)", async ({ signedIn }) => {
+    for (const key of ["staff", "manager", "accounting"] satisfies AccountKey[]) {
+      const client = await signedIn(key);
+      for (const path of ["/api/admin/users", "/api/admin/branches"]) {
+        expect((await expectApiError(await client.get(path), 403)).error, `${key} ${path}`).toBe("forbidden");
+      }
+    }
+    const admin = await signedIn("admin");
+    for (const path of ["/api/admin/users", "/api/admin/branches"]) {
+      const res = await admin.get(path);
+      expect(res.status(), path).toBe(200);
+      expect(res.headers()["cache-control"], path).toBe("no-store");
+    }
   });
 
   test("a sign-in posted from another site is refused before it reaches auth (CSRF)", async ({

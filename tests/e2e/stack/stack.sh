@@ -2,7 +2,8 @@
 # e2e stack (compose project ong-e2e) — one entry point for make, CI and the Playwright setup project.
 #
 #   stack.sh up            generate this run's secrets, build what is missing, start, wait until healthy
-#   stack.sh down          remove containers, network, volumes and the secrets (safe to run any time)
+#   stack.sh down          stop the api with SIGTERM (fails unless it exits 0), then remove containers, network,
+#                          volumes and the secrets — always, safe to run any time
 #   stack.sh logs|ps|exec  pass through to docker compose with the same project/file/secrets
 #
 # API_IMAGE=<tag> (CI): use that docker-loaded image and never rebuild it — only Gotenberg is built here.
@@ -43,10 +44,26 @@ ensure_secrets() {
 
 down() {
   ensure_secrets # compose needs the variables to parse the file, even to remove it
+  local status=0 api code
+  api=$(compose ps --quiet api 2>/dev/null || true)
+  if [[ -n "$api" ]]; then
+    # like a Railway redeploy: SIGTERM, 10 s to drain, then SIGKILL — the api must exit 0 by itself
+    # (apps/api/src/lib/shutdown.ts); 143 = died on the signal, 137 = killed after the grace period
+    compose stop --timeout 10 api >/dev/null 2>&1 || true
+    code=$(docker inspect --format '{{.State.ExitCode}}' "$api" 2>/dev/null || echo unknown)
+    if [[ "$code" == 0 ]]; then
+      echo "ong-e2e: api shut down cleanly on SIGTERM (exit 0)"
+    else
+      echo "ong-e2e: api did not shut down cleanly on SIGTERM (exit $code)" >&2
+      compose logs --no-color --tail 20 api >&2 || true
+      status=1
+    fi
+  fi
   compose down --volumes --remove-orphans --timeout 10
   # only what this script and the setup project write — never a blanket rm -rf of a configurable path
   rm -f "$secrets" "$state_dir/accounts.json"
   rmdir "$state_dir" 2>/dev/null || true
+  return "$status"
 }
 
 diagnose() {

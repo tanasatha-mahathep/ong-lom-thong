@@ -5,12 +5,57 @@ import postgres from "postgres";
 import { createApp } from "../app";
 import { createAuth } from "../auth";
 import { loadEnv } from "../env";
-import { createGotenbergClient } from "../lib/gotenberg";
+import { type BackgroundTasks, createBackgroundTasks, createManualTasks } from "../lib/background";
+import { type HtmlToPdfInput, PdfRenderError, type PdfRenderer, createGotenbergClient } from "../lib/gotenberg";
 import { createMemoryStorage } from "../lib/storage";
+import { companyFromEnv, createReceiptPdfService, loadPdfFonts } from "../services/receiptPdf";
 
 const BASE_URL = process.env.TEST_DATABASE_URL ?? "postgres://ong:ong@localhost:5432/postgres";
 const MIGRATIONS = fileURLToPath(new URL("../../../../packages/db/migrations", import.meta.url));
 const ORIGIN = "http://localhost:8787";
+/** Sarabun ชุดเดียวกับที่ image ของ api มี (build ของ apps/web) */
+export const TEST_FONT_DIR = fileURLToPath(new URL("../../../web/public/fonts", import.meta.url));
+
+/**
+ * Gotenberg ปลอม — ได้ PDF เล็ก ๆ ที่ต่างกันทุกครั้ง (เหมือน Chromium ที่ใส่เวลาสร้าง) · จดทุก request
+ * failNext(n): n ครั้งถัดไปล้ม · hold(): ค้างทุก request จนกว่าจะเรียกฟังก์ชันที่คืนมา
+ */
+export function createFakeRenderer() {
+  const calls: HtmlToPdfInput[] = [];
+  let failures = 0;
+  let gate: Promise<void> | null = null;
+  let count = 0;
+  const renderer: PdfRenderer = {
+    async htmlToPdf(input) {
+      calls.push(input);
+      if (gate) await gate;
+      if (failures > 0) {
+        failures--;
+        throw new PdfRenderError("unreachable", "fake gotenberg is down");
+      }
+      const title = /<title>([^<]*)<\/title>/.exec(input.html)?.[1] ?? "";
+      return new TextEncoder().encode(`%PDF-1.4\n% fake #${++count} ${title}\n%%EOF\n`);
+    },
+    health: () => Promise.resolve({ up: true, status: 200 }),
+  };
+  return {
+    renderer,
+    calls,
+    failNext(n: number) {
+      failures = n;
+    },
+    hold() {
+      let release = () => {};
+      gate = new Promise<void>((resolve) => {
+        release = () => {
+          gate = null;
+          resolve();
+        };
+      });
+      return release;
+    },
+  };
+}
 
 /** Gotenberg สำหรับเทสต์ที่แปลง PDF จริง — ค่าเริ่มต้นตาม docker-compose.yml (basic auth ong/ongongong) */
 export const TEST_GOTENBERG = {
@@ -54,8 +99,14 @@ export interface TestUser {
   active?: boolean;
 }
 
-/** database ใหม่ต่อไฟล์เทสต์ — migrate + seed (สาขา 00000/00001/00002 · โลหะ 4 ชนิด) */
-export async function startTestApp(options: { now?: () => Date } = {}) {
+/**
+ * database ใหม่ต่อไฟล์เทสต์ — migrate + seed (สาขา 00000/00001/00002 · โลหะ 4 ชนิด)
+ * PDF: renderer ปลอมเป็นค่าเริ่มต้น · pdfTasks "manual" (ค่าเริ่มต้น) = งานหลังบันทึกบิลค้างไว้จนเรียก
+ * tasks.idle() (บิลยัง pending ให้ตรวจได้) · "auto" = รันทันทีแบบเดียวกับ production
+ */
+export async function startTestApp(
+  options: { now?: () => Date; renderer?: PdfRenderer; pdfTasks?: "manual" | "auto" } = {},
+) {
   const admin = postgres(BASE_URL, { max: 1, onnotice: () => {} });
   const name = `test_${randomUUID().replaceAll("-", "")}`;
   await admin.unsafe(`CREATE DATABASE ${name}`);
@@ -77,7 +128,7 @@ export async function startTestApp(options: { now?: () => Date } = {}) {
     S3_BUCKET: "test",
     S3_ACCESS_KEY: "test",
     S3_SECRET_KEY: "test",
-    // ยังไม่มี route ไหนแปลง PDF — ค่าพวกนี้แค่ให้ผ่าน schema (ข้อมูลกิจการสมมติ · เลขผู้เสียภาษี checksum ถูก)
+    // renderer ของเทสต์ส่งเข้ามาตรง ๆ — ค่า Gotenberg แค่ให้ผ่าน schema (ข้อมูลกิจการสมมติ · เลขผู้เสียภาษี checksum ถูก)
     GOTENBERG_URL: "http://gotenberg.invalid",
     GOTENBERG_USERNAME: "test",
     GOTENBERG_PASSWORD: "test",
@@ -88,7 +139,20 @@ export async function startTestApp(options: { now?: () => Date } = {}) {
   });
   const auth = createAuth(db, env);
   const storage = createMemoryStorage();
-  const app = createApp({ db, auth, env, storage, now: options.now });
+  const fake = createFakeRenderer();
+  const manualTasks = options.pdfTasks === "auto" ? null : createManualTasks();
+  const tasks: BackgroundTasks = manualTasks ?? createBackgroundTasks();
+  const pdf = createReceiptPdfService({
+    db,
+    storage,
+    renderer: options.renderer ?? fake.renderer,
+    company: companyFromEnv(env),
+    fonts: await loadPdfFonts(TEST_FONT_DIR),
+    tasks,
+    now: options.now ?? (() => new Date()),
+    watermark: env.RECEIPT_WATERMARK,
+  });
+  const app = createApp({ db, auth, env, storage, pdf, now: options.now });
   const branches = Object.fromEntries((await db.select().from(branch)).map((b) => [b.code, b.id]));
 
   async function createUser(u: TestUser) {
@@ -140,12 +204,14 @@ export async function startTestApp(options: { now?: () => Date } = {}) {
   }
 
   async function close() {
+    // งาน PDF ที่ยังวิ่งอยู่ต้องจบก่อนลบ database · งานที่ค้างในโหมด manual ไม่ต้องรัน
+    if (!manualTasks) await tasks.idle();
     await db.$client.end({ timeout: 1 });
     await admin.unsafe(`DROP DATABASE ${name} WITH (FORCE)`);
     await admin.end({ timeout: 1 });
   }
 
-  return { app, db, auth, env, storage, branches, createUser, request, login, close };
+  return { app, db, auth, env, storage, pdf, tasks, fake, branches, createUser, request, login, close };
 }
 
 export type TestApp = Awaited<ReturnType<typeof startTestApp>>;

@@ -1,14 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  PHOTO_EMPTY_MESSAGE,
-  PHOTO_MAX_BYTES,
-  PHOTO_SIZE_MESSAGE,
-  PHOTO_TYPE_MESSAGE,
-  canReadClipboard,
-  imageFromDataTransfer,
-  photoProblem,
-  readClipboardImage,
-} from "./photo";
+import { PHOTO_MAX_BYTES, canReadClipboard, imageFromDataTransfer, photoProblem, readClipboardImage } from "./photo";
 
 const file = (name: string, type: string, size = 3) => new File([new Uint8Array(size)], name, { type });
 const png = file("image.png", "image/png");
@@ -28,10 +19,10 @@ describe("photoProblem — เกณฑ์เดียวกับ API", () => {
   });
 
   it("ชนิดอื่น · ใหญ่เกิน · ไฟล์ว่าง → ข้อความเดียวกับ API", () => {
-    expect(photoProblem(pdf)).toBe(PHOTO_TYPE_MESSAGE);
-    expect(photoProblem(file("a.bmp", "image/bmp"))).toBe(PHOTO_TYPE_MESSAGE);
-    expect(photoProblem(file("big.png", "image/png", 6 * 1024 * 1024))).toBe(PHOTO_SIZE_MESSAGE);
-    expect(photoProblem(file("empty.png", "image/png", 0))).toBe(PHOTO_EMPTY_MESSAGE);
+    expect(photoProblem(pdf)).toBe("photo.wrongType");
+    expect(photoProblem(file("a.bmp", "image/bmp"))).toBe("photo.wrongType");
+    expect(photoProblem(file("big.png", "image/png", 6 * 1024 * 1024))).toBe("photo.tooLarge");
+    expect(photoProblem(file("empty.png", "image/png", 0))).toBe("photo.emptyFile");
   });
 
   it("browser ไม่รู้ชนิด (type ว่าง) → ให้ API ตรวจจาก byte", () => {

@@ -7,20 +7,23 @@ import { target } from "./target";
 export const FOREIGN_ORIGIN = "https://attacker.invalid";
 
 /**
- * A distinct client address per simulated browser, from 198.18.0.0/15 (RFC 2544, never routed).
- * In production Railway's edge adds the client IP; the local stack has no proxy, so the tests play that part.
- * Without it better-auth puts every sign-in into one shared bucket (5 a minute for everybody).
+ * A distinct client address per simulated browser, from 198.18.0.0/15 (RFC 2544, never routed), sent as
+ * X-Real-IP — the only header the api reads the client IP from (apps/api/src/auth.ts): Railway's edge overwrites
+ * it on every request. The local stack has no edge, so the tests play that part; without it better-auth in
+ * production counts every sign-in in one shared bucket (20 a minute for everybody).
  */
 export function clientAddress(): string {
   return `198.${randomInt(18, 20)}.${randomInt(0, 256)}.${randomInt(1, 255)}`;
 }
 
+/** header name of the client IP the edge sets — what the api's sign-in limit is keyed on */
+export const CLIENT_IP_HEADER = "x-real-ip";
+
 /** a fresh cookie jar that behaves like a browser tab on the site: same-origin Origin header, own client IP */
 export async function newClient(playwright: PlaywrightWorkerArgs["playwright"]): Promise<APIRequestContext> {
-  const ip = clientAddress();
   return playwright.request.newContext({
     baseURL: target.baseURL,
-    extraHTTPHeaders: { origin: target.origin, "x-forwarded-for": ip, "x-real-ip": ip },
+    extraHTTPHeaders: { origin: target.origin, [CLIENT_IP_HEADER]: clientAddress() },
   });
 }
 
