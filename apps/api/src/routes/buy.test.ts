@@ -138,6 +138,10 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       cookies[a.who] = await t.login(`${a.who}@ong.test`, PW);
     }
     metals = Object.fromEntries((await t.db.select().from(metal)).map((m) => [m.code, m.id]));
+    // seed ตั้งรหัสสาขาสรรพากรให้เฉพาะสำนักงานใหญ่ — สาขาอื่นต้องมีรหัสก่อนขายได้ (ดูเทสต์รหัสสาขาข้างล่าง)
+    for (const code of ["00001", "00002"]) {
+      await t.db.update(branch).set({ taxBranchCode: code }).where(eq(branch.code, code));
+    }
 
     // ราคากลางของวันนี้และของวันย้อนหลัง · สาขา 00001 มีราคาของตัวเองวันนี้ · 3 ต.ค. ไม่มีราคา
     await t.db.insert(goldPrice).values([
@@ -1280,6 +1284,26 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     for (const pii of [ID_A, "0812345678", "นายทดสอบ ซื้อทอง", "Mr. Test Buyer", "photos/a/card.png"]) {
       expect(text).not.toContain(pii);
     }
+  });
+
+  it("สาขาที่ยังไม่มีรหัสสาขาสรรพากร ขายไม่ได้ (quote ok:false · POST 409) · ตั้งรหัสแล้วขายได้ · สำนักงานใหญ่ขายได้", async () => {
+    const b1 = eq(branch.code, "00001");
+    const message = "สาขานี้ยังไม่ได้ตั้งรหัสสาขาของกรมสรรพากร — ติดต่อผู้ดูแลระบบ";
+    expect(((await (await quote(bill())).json()) as QuoteRes).ok).toBe(true); // 00000 (seed มีรหัส)
+    await t.db.update(branch).set({ taxBranchCode: null }).where(b1);
+    try {
+      const q = (await (await quote(bill(), "staff1")).json()) as QuoteRes;
+      expect(q.ok).toBe(false);
+      expect(q.errors[0]).toEqual({ field: "branch", message });
+      const before = await receiptCount();
+      const res = await save(bill(), "staff1");
+      expect(res.status).toBe(409);
+      expect(await res.json()).toMatchObject({ error: message, field: "branch" });
+      expect(await receiptCount()).toBe(before);
+    } finally {
+      await t.db.update(branch).set({ taxBranchCode: "00001" }).where(b1);
+    }
+    expect(((await (await quote(bill(), "staff1")).json()) as QuoteRes).ok).toBe(true);
   });
 
   it("customer_snapshot เก็บเป็น jsonb object (ค้นด้วย ->> ได้ ไม่ใช่ string ซ้อน)", async () => {

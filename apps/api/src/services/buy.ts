@@ -37,6 +37,7 @@ import { type TodayPrice, priceForBranch } from "./goldPrice";
 
 export const BUY_API_MSG = {
   noBranch: "ยังไม่ได้เลือกสาขาที่ทำงาน",
+  noTaxBranchCode: "สาขานี้ยังไม่ได้ตั้งรหัสสาขาของกรมสรรพากร — ติดต่อผู้ดูแลระบบ",
   futureDate: "วันที่ต้องไม่เกินวันนี้",
   backdateRole: "เปิดบิลย้อนหลังได้เฉพาะผู้จัดการขึ้นไป",
   backdateWindow: "ย้อนหลังได้ไม่เกิน 7 วัน",
@@ -178,10 +179,11 @@ export async function prepareBuy(db: Db, viewer: Viewer, body: QuoteBody, now: D
   const today = businessDate(now);
   // ย้อนหลังได้ (คีย์ใบเขียนมือหลังระบบล่ม · spec §11) — ราคาทองของวันนั้นต้องมี · อนาคตไม่ได้
   const date = body.date ?? today;
-  const [price, customerRow, metals] = await Promise.all([
+  const [price, customerRow, metals, [head]] = await Promise.all([
     priceForBranch(db, date, where.id),
     body.customer_id ? findCustomer(db, body.customer_id) : null,
     db.select({ id: metal.id }).from(metal),
+    db.select({ taxBranchCode: branch.taxBranchCode }).from(branch).where(eq(branch.id, where.id)),
   ]);
 
   const quote = quoteBuy({
@@ -194,6 +196,8 @@ export async function prepareBuy(db: Db, viewer: Viewer, body: QuoteBody, now: D
 
   const known = new Set(metals.map((m) => m.id));
   const errors: QuoteError[] = [
+    // ไม่มีรหัสสาขาของกรมสรรพากร = ออก PDF เก็บถาวรไม่ได้ตลอดไป (หัวใบถูก snapshot ตอนบันทึก · R15) → ห้ามขายตั้งแต่แรก
+    ...(head?.taxBranchCode?.trim() ? [] : [{ field: "branch", message: BUY_API_MSG.noTaxBranchCode }]),
     ...dateErrors(viewer, body, date, today),
     // ข้อความของ core พูดถึง "วันนี้" — บิลย้อนหลังบอกวันที่ที่ขาดราคาให้ชัด
     ...quote.errors.map((e) =>
