@@ -6,14 +6,18 @@ import { groupLinesByMetal } from "../receiptLines";
 import { bahtText, taxBranchLabel, thaiDate } from "../thai";
 import { RECEIPT_CSS } from "./styles";
 import type { ReceiptData } from "./types";
+import { assertReceiptTotals } from "./validate";
 
 /**
  * ใบรับซื้อของเก่า/ใบสำคัญจ่าย — A4 ตั้ง
  * พอร์ตจาก Django print/buy_receipt.html (จำลองจากใบจริง RC6909-0010) — ข้อความ ลำดับ และตำแหน่งตามใบจริง
  * ห้ามแก้ข้อความ/ลำดับโดยไม่เทียบใบจริงของร้าน · สำเนาบัตรแยกเป็น <IdCardCopy/> (สิทธิ์เข้าถึงต่างกัน)
  * markup ชุดเดียวใช้ทั้งหน้าเว็บ (/buy/$id, window.print) และ PDF เก็บถาวร (renderReceiptHtml)
+ * ข้อมูลผิด (ยอดไม่ตรง · วันที่ · ตัวเลข · รหัสสาขาผิดรูป) = ReceiptDataError ทั้งบนเว็บและใน PDF — ครอบด้วย error boundary
+ * หน้าเว็บ: ไม่มี taxBranchCode = ไม่พิมพ์ป้ายสาขา · PDF (renderReceiptHtml) ไม่มีรหัส = throw (fail-closed)
  */
 export function Receipt({ data }: { data: ReceiptData }): JSX.Element {
+  assertReceiptTotals(data);
   const { company, customer } = data;
   const branchLabel = taxBranchLabel(data.branch.taxBranchCode);
   const rows = groupLinesByMetal(data.lines);
