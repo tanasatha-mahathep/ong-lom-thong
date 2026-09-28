@@ -1,6 +1,20 @@
 import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
-import { D, ZERO, floorTo, fmtInt, fmtMoney, fmtWeight, halfUp, isBlank, parseDecimal } from "./money";
+import { ReceiptDataError } from "./errors";
+import {
+  D,
+  ZERO,
+  floorTo,
+  fmtInt,
+  fmtMoney,
+  fmtWeight,
+  formatMoney,
+  formatWeight,
+  halfUp,
+  isBlank,
+  parseDecimal,
+  requireDecimal,
+} from "./money";
 
 // money.ts ทั้งไฟล์ — ค่าที่คาดหวังทุกตัวคิดมือจากสเปก §8 (R3 · R8 · R10) ใบจริง กระดานราคา และนิยามโหมดปัด
 // (IEEE 754-2019 §4.3) ไม่ได้คัดลอกจากผลรัน · เทคนิคออกแบบเทสต์ (ISO/IEC/IEEE 29119-4) ระบุไว้ที่ชื่อแต่ละ describe
@@ -358,5 +372,43 @@ describe("ZERO — ค่าเริ่มของยอดสะสม", () =
     expectDecimal(total, "23030.50"); // 20,030 + 3,000.50
     expect(total).not.toBe(ZERO);
     expectDecimal(ZERO, "0");
+  });
+});
+
+describe("formatMoney / formatWeight — ตัวเลขบนใบพิมพ์", () => {
+  it.each([
+    ["20030", "20,030.00"],
+    ["3418.09", "3,418.09"],
+    ["999", "999.00"],
+    ["1000", "1,000.00"],
+    ["0", "0.00"],
+    ["0.5", "0.50"],
+    ["999999999999.99", "999,999,999,999.99"],
+    ["-1234.5", "-1,234.50"],
+    ["-0.001", "0.00"],
+    ["1.005", "1.01"],
+    ["67,850", "67,850.00"],
+  ])("เงิน %s → %s", (v, want) => {
+    expect(formatMoney(v)).toBe(want);
+  });
+
+  it.each([
+    ["5.86", "5.860"],
+    ["5.860", "5.860"],
+    ["0.1", "0.100"],
+    ["1250.5", "1,250.500"],
+    ["1234567.891", "1,234,567.891"],
+  ])("น้ำหนัก %s → %s", (v, want) => {
+    expect(formatWeight(v)).toBe(want);
+  });
+
+  it("รับ Decimal ได้", () => {
+    expect(formatMoney(new Decimal("0.1").plus("0.2"))).toBe("0.30");
+  });
+
+  it.each(["", " ", "abc", "Infinity", "NaN"])("ไม่ใช่ตัวเลข (%s) → ReceiptDataError", (bad) => {
+    expect(() => formatMoney(bad)).toThrow(ReceiptDataError);
+    expect(() => formatWeight(bad)).toThrow(ReceiptDataError);
+    expect(() => requireDecimal(bad, "ยอดบิล")).toThrow(/ยอดบิลไม่ใช่ตัวเลข/);
   });
 });

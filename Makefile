@@ -35,7 +35,7 @@ install: ## ติดตั้ง dependency (เวอร์ชัน pnpm ต�
 dev: .env ## web :5173 + api :8787 (โหลด .env)
 	$(WITH_ENV) pnpm dev
 
-infra-up: ## เปิด postgres · gotenberg · minio แล้วรอ postgres พร้อม
+infra-up: ## เปิด postgres · gotenberg · s3 (RustFS) แล้วรอ postgres พร้อม
 	docker compose up -d
 	@for i in $$(seq 1 30); do docker compose exec -T postgres pg_isready -U ong >/dev/null 2>&1 && exit 0; sleep 1; done; \
 	echo "postgres ยังไม่พร้อม — ดู make logs SVC=postgres" >&2; exit 1
@@ -47,7 +47,7 @@ infra-reset: ## ลบ infra พร้อมข้อมูล local ทั้�
 	@test "$(CONFIRM)" = yes || { echo "ลบข้อมูล local ทั้งหมด — รันซ้ำด้วย CONFIRM=yes" >&2; exit 1; }
 	docker compose down -v
 
-logs: ## log ของ infra (SVC=postgres|gotenberg|minio)
+logs: ## log ของ infra (SVC=postgres|gotenberg|s3|s3-init)
 	docker compose logs -f $(SVC)
 
 ##@ ฐานข้อมูล (local)
@@ -114,7 +114,7 @@ railway-logs: ## log ของ service
 railway-status: ## สถานะ service ทั้งหมด
 	railway service list --environment $(ENV)
 
-##@ Git — PR เท่านั้น · merge แบบ rebase
+##@ Git — PR เท่านั้น · merge commit (ห้าม rebase)
 branch: ## สร้าง feature branch จาก dev (NAME=feat/xxx)
 	@test -n "$(NAME)" || { echo "ต้องระบุ NAME=feat/..." >&2; exit 1; }
 	git fetch -q origin
@@ -126,12 +126,12 @@ pr: ## push branch ปัจจุบันแล้วเปิด PR เข้
 	git push -u origin HEAD
 	gh pr create --base dev --fill-first
 
-merge: ## รอ CI ผ่านแล้ว merge แบบ rebase (PR=เลข)
+merge: ## รอ CI ผ่านแล้ว merge แบบ merge commit (PR=เลข)
 	@test -n "$(PR)" || { echo "ต้องระบุ PR=<เลข>" >&2; exit 1; }
 	@for i in $$(seq 1 30); do \
 	[ "$$(gh pr view $(PR) --json statusCheckRollup --jq '.statusCheckRollup | length')" != 0 ] && break; sleep 3; done
 	gh pr checks $(PR) --watch
-	gh pr merge $(PR) --rebase --delete-branch
+	gh pr merge $(PR) --merge --delete-branch
 	git switch dev && git pull --ff-only
 
 promote: ## promote ทีละขั้นแบบ fast-forward (TO=testing|staging|main · main ต้อง CONFIRM=yes)

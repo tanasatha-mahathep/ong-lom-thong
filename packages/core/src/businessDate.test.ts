@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { businessDate, SHOP_TIME_ZONE } from "./businessDate";
+import { businessDate, businessTime, SHOP_TIME_ZONE } from "./businessDate";
 import { docPeriod } from "./docNo";
 
 // ค่าที่คาดทุกตัวคิดมือ ไม่ได้รันโค้ดแล้วลอกผล:
@@ -274,5 +274,20 @@ describe("fault injection — Intl.DateTimeFormat คืนชิ้นส่ว
     // คืน Intl ของจริงแล้วต้องได้ค่าปกติทันที — ไม่มีผลเสียค้างอยู่ใน cache
     vi.restoreAllMocks();
     expect(businessDate(NOW)).toBe("2026-09-28");
+  });
+});
+
+describe("businessTime — เวลาไทย HH:MM (24 ชม.)", () => {
+  it.each([
+    ["2026-09-28T03:05:00Z", "10:05"],
+    ["2026-09-27T16:59:59Z", "23:59"], // วินาทีตัดทิ้ง ไม่ปัดขึ้น
+    ["2026-09-27T17:00:00Z", "00:00"], // เที่ยงคืนไทย = 00 ไม่ใช่ 24
+    ["2026-09-27T17:30:00Z", "00:30"],
+  ])("%s → %s", (iso, expected) => {
+    expect(businessTime(new Date(iso))).toBe(expected);
+  });
+
+  it("เปลี่ยนเขตเวลาได้", () => {
+    expect(businessTime(new Date("2026-09-27T18:30:00Z"), "UTC")).toBe("18:30");
   });
 });
