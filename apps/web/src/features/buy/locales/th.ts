@@ -137,7 +137,6 @@ export default {
 
   save: {
     button: "บันทึก",
-    saving: "กำลังบันทึก…",
     clear: "ล้างบิล",
     clearTitle: "ล้างบิลนี้?",
     clearBody: "ลูกค้า รายการ และการชำระที่กรอกไว้จะหายทั้งหมด",
@@ -145,7 +144,6 @@ export default {
     total: "ยอดรวม",
     paid: "ชำระแล้ว",
     balance: "คงเหลือ",
-    baht: "บาท",
     calculating: "กำลังคำนวณ…",
     unsavedEntry: "มีรายการที่ยังไม่ได้เพิ่ม — กด Enter หรือ Esc",
     offline: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — กำลังลองใหม่",

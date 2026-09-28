@@ -196,7 +196,7 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
 
   /** เหตุที่ยังบันทึกไม่ได้ + ช่องที่ต้องไปแก้ — null = บันทึกได้ */
   function computeSaveBlock(): SaveBlock | null {
-    if (saving) return { message: t("save.saving"), target: null };
+    if (saving) return { message: t("saving", { ns: "common" }), target: null };
     if (noBranch) {
       const closed = me.branch_closed;
       const message = closed ? t("access.branchClosedTitle") : t("access.noBranchTitle");
