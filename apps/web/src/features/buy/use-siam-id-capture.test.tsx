@@ -61,10 +61,23 @@ describe("useSiamIdCapture", () => {
     expect(swallowed("Tab")).toBe(false);
     expect(found).not.toHaveBeenCalled();
 
-    fireEvent.change(idBox(), { target: { value: "1234567890123" } });
+    // เลขบัตร 13 หลักที่หลักตรวจสอบถูกต้อง (ต่างจากเลขที่ใช้เจอในเทสต์อื่น)
+    fireEvent.change(idBox(), { target: { value: "1909900001028" } });
     expect(swallowed("Tab")).toBe(true);
     await act(() => vi.advanceTimersByTimeAsync(SIAM_ID_BURST_IDLE_MS));
     expect(idBox()).toHaveFocus();
+    expect(found).toHaveBeenCalledExactlyOnceWith("1909900001028");
+  });
+
+  it("reports a bad checksum but does not swallow keys for it, so Backspace fixes the digits right away", () => {
+    const found = vi.fn<OnNationalId>(() => Promise.resolve(null));
+    render(<Harness onNationalId={found} />);
+    idBox().focus();
+
+    // "1234567890123" หลักตรวจสอบไม่ผ่าน (ไม่ใช่ Siam ID จริง พิมพ์เองพลาด) — แจ้งผลแต่ต้องไม่ล็อกปุ่ม
+    fireEvent.change(idBox(), { target: { value: "1234567890123" } });
     expect(found).toHaveBeenCalledExactlyOnceWith("1234567890123");
+    expect(swallowed("Backspace")).toBe(false);
+    expect(swallowed("Tab")).toBe(false);
   });
 });

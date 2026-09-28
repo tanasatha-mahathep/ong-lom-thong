@@ -134,20 +134,28 @@ merge: ## รอ CI ผ่านแล้ว merge แบบ merge commit (PR=�
 	gh pr merge $(PR) --merge --delete-branch
 	git switch dev && git pull --ff-only
 
-promote: ## promote ทีละขั้นแบบ fast-forward (TO=testing|staging|main · main ต้อง CONFIRM=yes)
+promote: ## promote ทีละขั้นด้วย merge commit ผ่าน PR promotion (TO=testing|staging|main · main ต้อง CONFIRM=yes)
 	@case "$(TO)" in testing) from=dev;; staging) from=testing;; main) from=staging;; \
 	*) echo "TO ต้องเป็น testing|staging|main" >&2; exit 1;; esac; \
 	if [ "$(TO)" = main ] && [ "$(CONFIRM)" != yes ]; then echo "main = release + production — รันซ้ำด้วย CONFIRM=yes" >&2; exit 1; fi; \
 	git fetch -q origin; \
 	sha=$$(git rev-parse "origin/$${from}"); \
-	if [ "$$(git rev-parse "origin/$(TO)")" = "$$sha" ]; then echo "$(TO) อยู่ที่ $${sha:0:7} แล้ว"; exit 0; fi; \
-	git merge-base --is-ancestor "origin/$(TO)" "$$sha" || { echo "$(TO) มี commit ที่ $${from} ไม่มี — fast-forward ไม่ได้" >&2; exit 1; }; \
-	ok=$$(gh run list --workflow ci.yml --commit "$$sha" --status success --json databaseId --jq length); \
-	[ "$$ok" != 0 ] || { echo "CI ยังไม่ผ่านบน $${sha:0:7} ($${from})" >&2; exit 1; }; \
-	gh pr create --base "$(TO)" --head "$${from}" --title "chore(release): promote $${from} to $(TO)" \
-	--body "Promotion `$(TO) ← $${from}` by fast-forward push (same SHAs). Do not use the merge buttons."; \
-	git push origin "$${sha}:refs/heads/$(TO)"; \
-	echo "promoted $${from} → $(TO) at $${sha:0:7}"
+	if git merge-base --is-ancestor "$$sha" "origin/$(TO)"; then echo "$(TO) มี $${from} ($${sha:0:7}) ครบแล้ว"; exit 0; fi; \
+	ok=$$(gh run list --workflow ci.yml --branch "$${from}" --commit "$$sha" --status success --json event \
+	--jq '[.[] | select(.event == "push" or .event == "workflow_dispatch")] | length'); \
+	[ "$$ok" != 0 ] || { echo "CI บน $${from} ($${sha:0:7}) ยังไม่ผ่าน" >&2; exit 1; }; \
+	n=$$(gh pr list --base "$(TO)" --head "$${from}" --state open --json number --jq '.[0].number // empty'); \
+	if [ -z "$$n" ]; then \
+	url=$$(gh pr create --base "$(TO)" --head "$${from}" --title "chore(release): promote $${from} to $(TO)" \
+	--body "Promotion step in dev → testing → staging → main, by merge commit (not fast-forward). Merging this PR (\`gh pr merge --merge\`) is what advances \`$(TO)\`. Do NOT delete the \`$${from}\` branch when merging — it is a long-lived branch, not a feature branch."); \
+	n=$${url##*/}; \
+	fi; \
+	for i in $$(seq 1 30); do \
+	[ "$$(gh pr view $$n --json statusCheckRollup --jq '.statusCheckRollup | length')" != 0 ] && break; sleep 3; done; \
+	gh pr checks $$n --watch || { echo "CI ของ PR promotion #$$n ไม่ผ่าน" >&2; exit 1; }; \
+	gh pr merge $$n --merge || { echo "merge PR promotion #$$n ไม่สำเร็จ" >&2; exit 1; }; \
+	mc=$$(gh pr view $$n --json mergeCommit --jq .mergeCommit.oid); \
+	echo "promoted $${from} → $(TO) (merge commit $${mc:0:7})"
 
 sync: ## อัปเดต dev/testing/staging/main ในเครื่องให้ตรงกับ GitHub
 	git fetch -q --prune origin

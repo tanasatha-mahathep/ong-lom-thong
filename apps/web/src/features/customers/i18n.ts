@@ -1,6 +1,8 @@
-import th from "./locales/th";
+import { useTranslation as useNamespace } from "react-i18next";
+import i18n from "@/i18n";
+import type th from "./locales/th";
 
-/** key แบบจุดของทุกข้อความใน locales/th.ts เช่น "form.save" — ชุดเดียวกับ react-i18next (namespace "customers") */
+/** key แบบจุดของทุกข้อความใน locales/th.ts เช่น "form.save" — ชุดเดียวกับ namespace "customers" ของ i18n กลาง */
 type Leaves<T> = {
   [K in keyof T & string]: T[K] extends string ? K : `${K}.${Leaves<T[K]>}`;
 }[keyof T & string];
@@ -13,29 +15,11 @@ export interface Message {
   vars?: Vars;
 }
 
-function lookup(key: string): string | undefined {
-  let node: unknown = th;
-  for (const part of key.split(".")) {
-    if (typeof node !== "object" || node === null || !(part in node)) return undefined;
-    node = (node as Record<string, unknown>)[part];
-  }
-  return typeof node === "string" ? node : undefined;
-}
-
+/** key ที่มีข้อความจริง (ปลายทางเป็น string ไม่ใช่กลุ่มย่อย) ใน namespace "customers" */
 export const isCustomersKey = (value: unknown): value is CustomersKey =>
-  typeof value === "string" && lookup(value) !== undefined;
+  typeof value === "string" && typeof i18n.getResource(i18n.language, "customers", value) === "string";
 
-/** แทน {{ชื่อ}} ด้วยค่า — รูปเดียวกับ interpolation ของ i18next */
-function t(key: CustomersKey, vars?: Vars): string {
-  const template = lookup(key) ?? key;
-  if (!vars) return template;
-  return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, name: string) => (name in vars ? String(vars[name]) : match));
-}
-
-/**
- * ชั่วคราวจนกว่า i18n กลาง (feat/web-i18n-theme) จะเข้า dev — รูปเดียวกับ `useTranslation("customers")` ของ
- * react-i18next (key และ {{ตัวแปร}} ชุดเดียวกัน) จึงเปลี่ยนแค่ import แล้วลบไฟล์นี้ได้เลย
- */
-export function useTranslation(_namespace: "customers") {
-  return { t };
+/** `useTranslation("customers")` ของ react-i18next — คงชื่อเดิมไว้ให้ไฟล์ในโฟลเดอร์นี้ import ที่เดิมได้ */
+export function useTranslation(namespace: "customers" = "customers") {
+  return useNamespace(namespace);
 }

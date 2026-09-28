@@ -31,7 +31,8 @@ const TONE: Record<ReturnType<typeof balanceView>["tone"], string> = {
   stale: "text-muted-foreground",
   due: "text-destructive",
   over: "text-destructive",
-  balanced: "text-foreground",
+  // กรอบเขียวแบบเดียวกับป้ายเตือน (bg-warning) ที่อื่นในแอป — ไม่ใช่แค่สีตัวอักษร
+  balanced: "rounded-md border border-success-border bg-success px-3 py-1.5 text-success-foreground",
 };
 
 /** ชำระเงิน: วิธี (เงินสด/โอนเงิน+ธนาคาร) → จำนวนเงิน → Enter · "เต็มจำนวน" ใช้ยอดคงเหลือจาก API */
@@ -213,6 +214,8 @@ function PaymentsTable({ c }: { c: BuyController }) {
         </TableHeader>
         <TableBody>
           {state.payments.map((p, i) => {
+            // ยอดจาก quote ล่าสุด (รูปมาตรฐาน 2 ตำแหน่ง) เหมือนราคาต่อหน่วยของรายการ — ใช้ข้อความที่พิมพ์เองเฉพาะตอนยังไม่ fresh
+            const quoted = fresh ? quote?.payments.find((x) => x.index === i) : undefined;
             const problems = rowErrors(errors, "payments", i).map((e) => e.message);
             return (
               <PaymentRowView
@@ -220,7 +223,7 @@ function PaymentsTable({ c }: { c: BuyController }) {
                 n={i + 1}
                 method={PAYMENT_METHODS[p.method]}
                 bank={p.method === "transfer" ? p.bank : t("payments.noBank")}
-                amount={formatMoney(p.amount)}
+                amount={formatMoney(quoted?.amount ?? p.amount)}
                 problems={problems}
                 onRemove={() => actions.removePayment(p.key)}
               />
@@ -262,11 +265,11 @@ function PaymentRowView(props: {
         <TableCell className="px-3">{props.bank}</TableCell>
         <TableCell className="px-3 text-right tabular-nums">{props.amount}</TableCell>
         <TableCell className="px-3">
+          {/* ลบได้ทั้งเมาส์และคีย์บอร์ด (WCAG 2.1.1) — อยู่ในลำดับ Tab ท้ายแถวของตัวเอง */}
           <Button
             type="button"
             variant="ghost"
             size="icon-sm"
-            tabIndex={-1}
             aria-label={t("payments.remove", { n: props.n })}
             onClick={props.onRemove}
           >

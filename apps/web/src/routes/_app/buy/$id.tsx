@@ -7,7 +7,7 @@ import { billQuery } from "@/features/buy/bill-api";
 const searchSchema = z.object({ print: z.boolean().optional().catch(undefined) });
 
 export const Route = createFileRoute("/_app/buy/$id")({
-  staticData: { title: "ดูบิล", crumbs: [{ title: "ค้นบิล", to: "/bills" }] },
+  staticData: { title: "bill", crumbs: [{ title: "bills", to: "/bills" }] },
   validateSearch: searchSchema,
   loader: ({ context: { queryClient }, params }) => queryClient.ensureQueryData(billQuery(params.id)),
   component: BillRoute,

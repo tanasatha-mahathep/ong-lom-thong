@@ -66,6 +66,7 @@ export function fakeQuote(body: QuoteBody, customers: readonly FakeCustomer[], g
       amount: l.amount,
       price_per_g: l.pricePerG,
     })),
+    payments: q.payments.map((p) => ({ index: p.index, method: p.method, bank: p.bank, amount: p.amount })),
     total_weight: q.totalWeight,
     total_amount: q.totalAmount,
     avg_price_per_g: q.avgPricePerG,

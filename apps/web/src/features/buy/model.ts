@@ -168,7 +168,9 @@ export function buyReducer(state: BuyState, action: BuyAction): BuyState {
           : EMPTY_BACKDATE,
       };
     case "backdateDateTyped":
-      return { ...state, backdate: { ...state.backdate, dateText: action.text, dateError: null } };
+      // date เป็น null จนกว่าจะยืนยัน (blur/Enter) — กันไม่ให้ quote/save เงียบ ๆ ใช้วันที่เดิมที่เคยยืนยันไว้
+      // ทั้งที่ตัวหนังสือในช่องเปลี่ยนไปแล้ว (buildQuoteBody คืน null เมื่อ enabled && date === null)
+      return { ...state, backdate: { ...state.backdate, dateText: action.text, date: null, dateError: null } };
     case "backdateDateCommitted":
       return { ...state, backdate: commitBackdate(state.backdate, action.today) };
     case "backdateTimeTyped":
@@ -379,11 +381,17 @@ export function focusTargetForField(field: string, hasCustomer: boolean): FocusT
   return null;
 }
 
-/** ปัญหาของบิลย้อนหลังที่ตรวจได้ก่อนส่ง (API ตรวจซ้ำ) — ช่องแรกที่ต้องแก้ */
+/**
+ * ปัญหาของบิลย้อนหลังที่ตรวจได้ก่อนส่ง (API ตรวจซ้ำ) — ช่องแรกที่ต้องแก้
+ * date: null + dateError: null = พิมพ์แล้วแต่ยังไม่ได้ยืนยัน (ต่างจาก null + error = ยืนยันแล้วแต่ผิด)
+ * time: ตรวจจากข้อความปัจจุบันเสมอ (ไม่ใช้ timeError ที่ตั้งไว้ตอน commit) กัน Ctrl+Enter ทันทีหลังพิมพ์เวลาใหม่
+ * โดยยังไม่ blur/Enter หลุดผ่านไปพร้อมเวลาที่ยังไม่ตรวจ
+ */
 export function backdateIssue(b: Backdate): { field: "date" | "time"; error: BackdateError } | null {
   if (!b.enabled) return null;
-  if (b.date === null) return { field: "date", error: b.dateError ?? "badDate" };
-  if (b.timeError) return { field: "time", error: b.timeError };
-  if (b.past && b.timeText.trim() === "") return { field: "time", error: "timeRequired" };
+  if (b.date === null) return { field: "date", error: b.dateError ?? "dateNotConfirmed" };
+  const time = b.timeText.trim();
+  if (time !== "" && !TIME.test(time)) return { field: "time", error: "badTime" };
+  if (b.past && time === "") return { field: "time", error: "timeRequired" };
   return null;
 }

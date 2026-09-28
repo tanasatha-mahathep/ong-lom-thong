@@ -20,11 +20,13 @@ interface Options {
   role?: Role;
   me?: Me;
   customers?: FakeCustomer[];
-  /** แทนคำตอบของ POST /api/buy (ค่าเริ่มต้น 201 + SAVED) */
-  save?: (body: SaveBody, attempt: number) => Response;
+  /** แทนคำตอบของ POST /api/buy (ค่าเริ่มต้น 201 + SAVED) — คืน Promise ได้เพื่อคุมเวลาตอบเอง (ดู defer()) */
+  save?: (body: SaveBody, attempt: number) => Response | Promise<Response>;
+  /** แทนคำตอบของ POST /api/buy/quote (ค่าเริ่มต้น fakeQuote ที่คำนวณจริงด้วย quoteBuy) */
+  quote?: (body: QuoteBody) => Response;
 }
 
-function setup({ role = "staff", me, customers = [CUSTOMER_OK, CUSTOMER_EXPIRED], save }: Options = {}) {
+function setup({ role = "staff", me, customers = [CUSTOMER_OK, CUSTOMER_EXPIRED], save, quote }: Options = {}) {
   const db = { customers: [...customers] };
   let attempts = 0;
   const api = fakeApi({
@@ -32,7 +34,8 @@ function setup({ role = "staff", me, customers = [CUSTOMER_OK, CUSTOMER_EXPIRED]
     "GET /api/gold-price/today": () => json(GOLD_PRICE),
     "GET /api/metals": () => json(METALS),
     "GET /api/customers": ({ path }) => fakeCustomerSearch(path, db.customers),
-    "POST /api/buy/quote": ({ body }) => json(fakeQuote(body as QuoteBody, db.customers)),
+    "POST /api/buy/quote": ({ body }) =>
+      quote ? quote(body as QuoteBody) : json(fakeQuote(body as QuoteBody, db.customers)),
     "POST /api/buy": ({ body }) => (save ? save(body as SaveBody, ++attempts) : json(SAVED, 201)),
   });
   const user = userEvent.setup();
@@ -58,6 +61,15 @@ async function insertCard(user: ReturnType<typeof userEvent.setup>, nationalId: 
 async function addLine(user: ReturnType<typeof userEvent.setup>, w: string, a: string) {
   await user.click(weight());
   await user.keyboard(`${w}{Enter}${a}{Enter}`);
+}
+
+/** promise ที่คุมเวลาตอบเอง — ใช้จำลองช่วงที่ POST /api/buy ยัง pending จริง (fieldset ปิดค้างอยู่จริง ไม่ใช่ผ่านไปเร็วจนไม่มีใครเห็น) */
+function defer<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 describe("/buy", () => {
@@ -297,6 +309,17 @@ describe("/buy", () => {
     expect(api.callsTo("GET", "/api/metals")).toHaveLength(0);
   });
 
+  it("tells a closed working branch apart from never having picked one", async () => {
+    const { api } = setup({
+      me: { ...makeMe("staff"), branch: null, branch_closed: { id: "b-old", code: "00002", name: "สาขา 3" } },
+    });
+    expect(await screen.findByText(t("access.branchClosedTitle"))).toBeInTheDocument();
+    expect(screen.getByText(t("access.branchClosedBody", { name: "สาขา 3" }))).toBeInTheDocument();
+    expect(screen.queryByText(t("access.noBranchTitle"))).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(t("customer.idLabel"))).not.toBeInTheDocument();
+    expect(quotes(api)).toHaveLength(0);
+  });
+
   it("hides backdating from staff", async () => {
     setup();
     await waitFor(() => expect(idBox()).toHaveFocus());
@@ -347,5 +370,156 @@ describe("/buy", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("blocks Ctrl+Enter while a backdate change is typed but not confirmed (B1)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-29T05:00:00Z")); // 12:00 เวลาไทย
+    try {
+      const { api, user } = setup({ role: "manager" });
+      await waitFor(() => expect(idBox()).toHaveFocus());
+      await user.click(screen.getByRole("switch", { name: t("backdate.toggle") }));
+      const date = screen.getByLabelText(t("backdate.date"));
+
+      // ยืนยันวันที่ 22 ก่อน
+      await user.clear(date);
+      await user.keyboard("22/9/2569{Enter}");
+      expect(date).toHaveValue("22/09/2569");
+      await waitFor(() => expect(quotes(api).at(-1)?.body).toMatchObject({ date: "2026-09-22" }));
+
+      // กลับไปแก้เป็นวันที่ 23 โดยยังไม่กด Enter/ออกจากช่อง
+      await user.click(date);
+      await user.clear(date);
+      await user.keyboard("23/09/2569");
+      expect(date).toHaveValue("23/09/2569");
+
+      const before = saves(api).length;
+      await user.keyboard("{Control>}{Enter}{/Control}");
+      expect(date).toHaveFocus();
+      expect(saves(api)).toHaveLength(before);
+      expect(saveButton()).toHaveAccessibleDescription(new RegExp(t("backdate.errors.dateNotConfirmed")));
+
+      // กด Enter ยืนยันแล้วค่อยบันทึกได้ ด้วยวันที่ใหม่ (23) ไม่ใช่วันที่เดิม (22)
+      await user.keyboard("{Enter}");
+      await waitFor(() => expect(quotes(api).at(-1)?.body).toMatchObject({ date: "2026-09-23" }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("blocks save while a typed line or payment entry has not been added yet (S1)", async () => {
+    const { api, user } = setup();
+    await insertCard(user, CUSTOMER_OK.national_id);
+    await waitFor(() => expect(weight()).toHaveFocus());
+    await addLine(user, "5.86", "20030");
+    await user.click(await screen.findByRole("button", { name: t("payments.payFull") }));
+    await screen.findByText(t("payments.balanced"));
+    expect(saveButton()).toHaveAttribute("aria-disabled", "false");
+
+    // พิมพ์ปริมาณของแถวใหม่ไว้แต่ยังไม่ได้กด Enter เพิ่มเข้ารายการ
+    await user.click(weight());
+    await user.keyboard("1");
+    expect(saveButton()).toHaveAttribute("aria-disabled", "true");
+    expect(saveButton()).toHaveAccessibleDescription(t("save.unsavedEntry"));
+    const before = saves(api).length;
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    expect(weight()).toHaveFocus();
+    expect(saves(api)).toHaveLength(before);
+
+    await user.clear(weight());
+    expect(saveButton()).toHaveAttribute("aria-disabled", "false");
+
+    // ช่องชำระเงินก็เช่นกัน
+    await user.click(payAmount());
+    await user.keyboard("5");
+    expect(saveButton()).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    expect(payAmount()).toHaveFocus();
+    expect(saves(api)).toHaveLength(before);
+  });
+
+  it("returns focus to Save once the fieldset re-enables, not while it is still disabled (S2)", async () => {
+    const pending = defer<Response>();
+    const { user } = setup({ save: () => pending.promise });
+    await insertCard(user, CUSTOMER_OK.national_id);
+    await waitFor(() => expect(weight()).toHaveFocus());
+    await addLine(user, "5.86", "20030");
+    await user.click(await screen.findByRole("button", { name: t("payments.payFull") }));
+    await screen.findByText(t("payments.balanced"));
+
+    // จับ element ไว้ก่อนกด — ข้อความในปุ่มเปลี่ยนเป็น "กำลังบันทึก…" ระหว่างรอ ทำให้ query ด้วยชื่อ "บันทึก" หาไม่เจอ
+    const save = saveButton();
+    await user.click(save);
+    // ปุ่มบันทึกมีโฟกัสจากการคลิกอยู่แล้ว — ย้ายโฟกัสออกไปนอก fieldset ก่อน (เมนูข้างที่ไม่ได้อยู่ใต้ fieldset ที่ปิด)
+    // แล้วค่อยลองย้ายกลับมาที่ปุ่ม เพื่อพิสูจน์ว่า .focus() ตรง ๆ ระหว่างรอคำตอบใช้ไม่ได้จริง (ไม่ใช่แค่ปุ่มยังมีโฟกัสเดิมค้างอยู่)
+    const homeLink = screen.getByRole("link", { name: "หน้าแรก" });
+    homeLink.focus();
+    expect(homeLink).toHaveFocus();
+    save.focus();
+    expect(save).not.toHaveFocus();
+
+    // ตอบ 409 แบบไม่มี existing (key ชนแต่ parse ไม่ออก) → คืน key ใหม่ + โฟกัสปุ่มบันทึกอีกครั้ง
+    pending.resolve(json({ error: "idempotency_key นี้ถูกใช้แล้ว", field: "idempotency_key" }, 409));
+    await waitFor(() => expect(save).toHaveFocus());
+  });
+
+  it("returns focus to the payment amount once the fieldset re-enables, after a 409 on payments (S2)", async () => {
+    const pending = defer<Response>();
+    const { user } = setup({ save: () => pending.promise });
+    await insertCard(user, CUSTOMER_OK.national_id);
+    await waitFor(() => expect(weight()).toHaveFocus());
+    await addLine(user, "5.86", "20030");
+    await user.click(await screen.findByRole("button", { name: t("payments.payFull") }));
+    await screen.findByText(t("payments.balanced"));
+
+    await user.click(saveButton());
+    // เช่นเดียวกับเทสต์ข้างบน — ระหว่างรอคำตอบ .focus() ตรง ๆ บนช่องจำนวนเงินทำอะไรไม่ได้เพราะ fieldset ปิดอยู่
+    payAmount().focus();
+    expect(payAmount()).not.toHaveFocus();
+
+    const q = fakeQuote(
+      { customer_id: CUSTOMER_OK.id, lines: [{ metal_id: "m-gold", weight_g: "5.86", amount: "20030" }], payments: [] },
+      [CUSTOMER_OK],
+    );
+    pending.resolve(json({ error: "ยอดชำระไม่ตรงกับยอดบิล", field: "payments", ...q }, 409));
+    await waitFor(() => expect(payAmount()).toHaveFocus());
+  });
+
+  it("removes a line or payment row with the keyboard, not just the mouse (S3)", async () => {
+    const { user } = setup();
+    await insertCard(user, CUSTOMER_OK.national_id);
+    await waitFor(() => expect(weight()).toHaveFocus());
+    await addLine(user, "5.86", "20030");
+    await within(linesTable()).findAllByText("3,418.09");
+    const removeLine = screen.getByRole("button", { name: t("lines.remove", { n: 1 }) });
+    removeLine.focus();
+    expect(removeLine).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(within(linesTable()).getByText(t("lines.empty"))).toBeInTheDocument();
+
+    await addLine(user, "5.86", "20030");
+    await user.click(await screen.findByRole("button", { name: t("payments.payFull") }));
+    await screen.findByText(t("payments.balanced"));
+    const removePayment = screen.getByRole("button", { name: t("payments.remove", { n: 1 }) });
+    removePayment.focus();
+    expect(removePayment).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByText(t("payments.empty"))).toBeInTheDocument();
+  });
+
+  it("shows a payment's amount from the fresh quote by index, like lines' price_per_g (#77)", async () => {
+    const { user } = setup({
+      quote: (body) => {
+        const q = fakeQuote(body, [CUSTOMER_OK]);
+        // จงใจให้ยอดที่ quote ตอบต่างจากตัวเลขที่พิมพ์ ("100" → "100.50") พิสูจน์ว่าตารางอ่านจาก quote ไม่ใช่ข้อความที่พิมพ์เอง
+        return json({ ...q, payments: q.payments.map((p) => (p.index === 0 ? { ...p, amount: "100.50" } : p)) });
+      },
+    });
+    await insertCard(user, CUSTOMER_OK.national_id);
+    await waitFor(() => expect(weight()).toHaveFocus());
+    await addLine(user, "5.86", "20030");
+    await user.click(payAmount());
+    await user.keyboard("100{Enter}");
+    expect(await screen.findByText("100.50")).toBeInTheDocument();
   });
 });

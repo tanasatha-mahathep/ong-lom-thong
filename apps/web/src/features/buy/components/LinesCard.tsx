@@ -283,12 +283,11 @@ function LineRowView(props: {
         <TableCell className="px-3 text-right tabular-nums">{props.unitPrice}</TableCell>
         <TableCell className="px-3 text-right tabular-nums">{props.amount}</TableCell>
         <TableCell className="px-3">
-          {/* ลบด้วยเมาส์ (แบบ X ของระบบเดิม) — ไม่อยู่ในลำดับ Tab */}
+          {/* ลบได้ทั้งเมาส์และคีย์บอร์ด (WCAG 2.1.1) — อยู่ในลำดับ Tab ท้ายแถวของตัวเอง */}
           <Button
             type="button"
             variant="ghost"
             size="icon-sm"
-            tabIndex={-1}
             aria-label={t("lines.remove", { n: props.n })}
             onClick={props.onRemove}
           >

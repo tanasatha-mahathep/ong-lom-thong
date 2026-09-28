@@ -55,6 +55,15 @@ export const QuoteSchema = z.object({
       price_per_g: decimalString,
     }),
   ),
+  // แถวชำระรูปมาตรฐาน (ตัดคอมมา · ปัด 2 ตำแหน่ง) — จับคู่กับ state.payments ด้วย index เหมือน lines
+  payments: z.array(
+    z.object({
+      index: z.number().int().nonnegative(),
+      method: z.enum(["cash", "transfer"]),
+      bank: z.string().nullable(),
+      amount: decimalString,
+    }),
+  ),
   total_weight: decimalString,
   total_amount: decimalString,
   avg_price_per_g: decimalString,

@@ -5,6 +5,9 @@ import { z } from "zod";
 import { csvText, toCsv } from "../lib/csv";
 import { type BranchRef, type Viewer, forUserHistory } from "../lib/scope";
 
+/** ทรานแซกชันที่เปิดอยู่ของ drizzle — ให้ผู้เรียกรวมรายงานไว้ใน snapshot เดียวกับงานของตัวเอง */
+export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
 /**
  * ชุดสาขาของรายงานทุกตัว — จุดเดียวที่เลือก (fail-closed: ไม่มีสิทธิ์ = [] → route ตอบ 403 ไม่ใช่ทุกสาขา)
  * = forUserHistory: accounting/admin อ่านย้อนหลังของสาขาที่ปิดแล้วได้ (เอกสารภาษีเก็บ ≥ 5 ปี) · role อื่น = forUser
@@ -123,7 +126,7 @@ const totalsOf = (metals: MetalRow[], all: Sum | undefined, perMetal: (m: MetalR
 });
 
 /** โลหะตามลำดับของร้าน (ทอง · นาก · เงิน · แพลตตินั่ม) */
-const allMetals = (db: Db): Promise<MetalRow[]> =>
+const allMetals = (db: Db | Tx): Promise<MetalRow[]> =>
   db
     .select({ id: metal.id, code: metal.code, nameTh: metal.nameTh })
     .from(metal)
@@ -135,8 +138,19 @@ const allMetals = (db: Db): Promise<MetalRow[]> =>
  * แถวของบิล · ต่อสาขา · ต่อโลหะ · รวมทั้งสิ้น จึงรวมกันลงตัวเสมอ · ทุกคำสั่งอยู่ใน snapshot เดียว (repeatable read)
  * ตัวกรองโลหะ = นับเฉพาะแถวของโลหะนั้น (บิลที่มีทองกับเงิน กรองทอง → เห็นเฉพาะส่วนของทอง)
  */
-export async function purchaseReport(db: Db, scope: BranchRef[], f: PurchaseFilter): Promise<PurchaseReport> {
-  const metals = (await allMetals(db)).filter((m) => f.metal === null || m.code === f.metal);
+export function purchaseReport(db: Db, scope: BranchRef[], f: PurchaseFilter): Promise<PurchaseReport> {
+  return db.transaction((tx) => purchaseReportIn(tx, scope, f), {
+    isolationLevel: "repeatable read",
+    accessMode: "read only",
+  });
+}
+
+/**
+ * ตัวเดียวกับ purchaseReport() แต่รันในทรานแซกชันของผู้เรียก — export รายเดือน (§9.4) ได้ CSV จาก snapshot
+ * เดียวกับรายการบิลใน manifest · ผู้เรียกต้องเปิดทรานแซกชันแบบ repeatable read เอง (ไม่งั้นแต่ละคำสั่งเห็นคนละ snapshot)
+ */
+export async function purchaseReportIn(tx: Tx, scope: BranchRef[], f: PurchaseFilter): Promise<PurchaseReport> {
+  const metals = (await allMetals(tx)).filter((m) => f.metal === null || m.code === f.metal);
   const head = { date_from: f.from, date_to: f.to, metal: f.metal };
   if (scope.length === 0 || metals.length === 0) {
     const zero = totalsOf(metals, undefined, () => undefined);
@@ -155,71 +169,65 @@ export async function purchaseReport(db: Db, scope: BranchRef[], f: PurchaseFilt
   );
   const lineWhere = and(billWhere, inArray(buyLine.metalId, metalIds));
 
-  const { bills, perBill, sums } = await db.transaction(
-    async (tx) => {
-      const bills = await tx
-        .select({
-          id: buyReceipt.id,
-          docNo: buyReceipt.docNo,
-          date: buyReceipt.date,
-          time: buyReceipt.time,
-          branchId: buyReceipt.branchId,
-          branchCode: branch.code,
-          branchName: branch.name,
-          customerId: buyReceipt.customerId,
-          snapshot: buyReceipt.customerSnapshot,
-          createdBy: buyReceipt.createdBy,
-          createdByName: user.name,
-        })
-        .from(buyReceipt)
-        .innerJoin(branch, eq(branch.id, buyReceipt.branchId))
-        .innerJoin(user, eq(user.id, buyReceipt.createdBy))
-        .where(
-          and(
-            billWhere,
-            exists(
-              tx
-                .select({ one: sql`1` })
-                .from(buyLine)
-                .where(and(eq(buyLine.receiptId, buyReceipt.id), inArray(buyLine.metalId, metalIds))),
-            ),
-          ),
-        )
-        .orderBy(asc(buyReceipt.date), asc(branch.code), asc(buyReceipt.docNo), asc(buyReceipt.id));
-      // ต่อบิลต่อโลหะ + ต่อบิล ในคำสั่งเดียว (grouping sets)
-      const perBill = await tx
-        .select({
-          receiptId: buyLine.receiptId,
-          metalId: sql<string | null>`${buyLine.metalId}`,
-          allMetals: sql<number>`grouping(${buyLine.metalId})`,
-          grams: sql<string>`sum(${buyLine.weightG})::text`,
-          amount: sql<string>`sum(${buyLine.amount})::text`,
-        })
-        .from(buyLine)
-        .innerJoin(buyReceipt, eq(buyReceipt.id, buyLine.receiptId))
-        .where(lineWhere)
-        .groupBy(sql`grouping sets ((${buyLine.receiptId}, ${buyLine.metalId}), (${buyLine.receiptId}))`);
-      // ต่อสาขาต่อโลหะ · ต่อสาขา · ต่อโลหะ · รวมทั้งสิ้น ในคำสั่งเดียว
-      const sums = await tx
-        .select({
-          branchId: sql<string | null>`${buyReceipt.branchId}`,
-          metalId: sql<string | null>`${buyLine.metalId}`,
-          allBranches: sql<number>`grouping(${buyReceipt.branchId})`,
-          allMetals: sql<number>`grouping(${buyLine.metalId})`,
-          count: sql<string>`count(distinct ${buyReceipt.id})::text`,
-          grams: sql<string>`sum(${buyLine.weightG})::text`,
-          amount: sql<string>`sum(${buyLine.amount})::text`,
-        })
-        .from(buyLine)
-        .innerJoin(buyReceipt, eq(buyReceipt.id, buyLine.receiptId))
-        .where(lineWhere)
-        .groupBy(
-          sql`grouping sets ((${buyReceipt.branchId}, ${buyLine.metalId}), (${buyReceipt.branchId}), (${buyLine.metalId}), ())`,
-        );
-      return { bills, perBill, sums };
-    },
-    { isolationLevel: "repeatable read", accessMode: "read only" },
-  );
+  const bills = await tx
+    .select({
+      id: buyReceipt.id,
+      docNo: buyReceipt.docNo,
+      date: buyReceipt.date,
+      time: buyReceipt.time,
+      branchId: buyReceipt.branchId,
+      branchCode: branch.code,
+      branchName: branch.name,
+      customerId: buyReceipt.customerId,
+      snapshot: buyReceipt.customerSnapshot,
+      createdBy: buyReceipt.createdBy,
+      createdByName: user.name,
+    })
+    .from(buyReceipt)
+    .innerJoin(branch, eq(branch.id, buyReceipt.branchId))
+    .innerJoin(user, eq(user.id, buyReceipt.createdBy))
+    .where(
+      and(
+        billWhere,
+        exists(
+          tx
+            .select({ one: sql`1` })
+            .from(buyLine)
+            .where(and(eq(buyLine.receiptId, buyReceipt.id), inArray(buyLine.metalId, metalIds))),
+        ),
+      ),
+    )
+    .orderBy(asc(buyReceipt.date), asc(branch.code), asc(buyReceipt.docNo), asc(buyReceipt.id));
+  // ต่อบิลต่อโลหะ + ต่อบิล ในคำสั่งเดียว (grouping sets)
+  const perBill = await tx
+    .select({
+      receiptId: buyLine.receiptId,
+      metalId: sql<string | null>`${buyLine.metalId}`,
+      allMetals: sql<number>`grouping(${buyLine.metalId})`,
+      grams: sql<string>`sum(${buyLine.weightG})::text`,
+      amount: sql<string>`sum(${buyLine.amount})::text`,
+    })
+    .from(buyLine)
+    .innerJoin(buyReceipt, eq(buyReceipt.id, buyLine.receiptId))
+    .where(lineWhere)
+    .groupBy(sql`grouping sets ((${buyLine.receiptId}, ${buyLine.metalId}), (${buyLine.receiptId}))`);
+  // ต่อสาขาต่อโลหะ · ต่อสาขา · ต่อโลหะ · รวมทั้งสิ้น ในคำสั่งเดียว
+  const sums = await tx
+    .select({
+      branchId: sql<string | null>`${buyReceipt.branchId}`,
+      metalId: sql<string | null>`${buyLine.metalId}`,
+      allBranches: sql<number>`grouping(${buyReceipt.branchId})`,
+      allMetals: sql<number>`grouping(${buyLine.metalId})`,
+      count: sql<string>`count(distinct ${buyReceipt.id})::text`,
+      grams: sql<string>`sum(${buyLine.weightG})::text`,
+      amount: sql<string>`sum(${buyLine.amount})::text`,
+    })
+    .from(buyLine)
+    .innerJoin(buyReceipt, eq(buyReceipt.id, buyLine.receiptId))
+    .where(lineWhere)
+    .groupBy(
+      sql`grouping sets ((${buyReceipt.branchId}, ${buyLine.metalId}), (${buyReceipt.branchId}), (${buyLine.metalId}), ())`,
+    );
 
   const key = (a: string | null, b: string | null) => `${a ?? "*"}|${b ?? "*"}`;
   const billSum = new Map(perBill.map((s) => [key(s.receiptId, s.allMetals ? null : s.metalId), s]));

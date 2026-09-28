@@ -1,6 +1,8 @@
 // zod แบบไม่ใช้ eval เหมือนในแอป (main.tsx import เป็นบรรทัดแรก)
 import "@/lib/zod-config";
 import "@testing-library/jest-dom/vitest";
+// i18n ตัวเดียวกับแอป (ภาษาไทย) — component ที่ใช้ useTranslation ได้ข้อความจริงแม้ render เดี่ยว ๆ
+import "@/i18n";
 import { cleanup, configure } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, vi } from "vitest";
@@ -14,6 +16,10 @@ afterEach(() => {
   cleanup();
   // sonner เก็บ toast ไว้ใน store ระดับโมดูลและ replay ให้ Toaster ที่ mount ใหม่ — ปิดทิ้งไม่ให้ค้างไปเทสต์ถัดไป
   toast.dismiss();
+  // ธีม/ภาษาที่เทสต์ก่อนหน้าตั้งไว้ไม่ค้างมาเทสต์ถัดไป
+  localStorage.clear();
+  sessionStorage.clear();
+  document.documentElement.classList.remove("dark");
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -51,5 +57,6 @@ function stubMissing(target: object, key: string, value: unknown) {
 stubMissing(Element.prototype, "scrollIntoView", () => undefined);
 stubMissing(Element.prototype, "hasPointerCapture", () => false);
 stubMissing(Element.prototype, "releasePointerCapture", () => undefined);
+stubMissing(Element.prototype, "setPointerCapture", () => undefined);
 // router คืนตำแหน่ง scroll เอง — scrollTo ของ jsdom แค่พิมพ์ "not implemented"
 window.scrollTo = () => undefined;
