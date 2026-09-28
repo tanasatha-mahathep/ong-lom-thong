@@ -26,7 +26,7 @@ description: สร้างหรือแก้หน้าใน apps/web (Vi
 
 ## ธีม (สว่าง · มืด · ตามระบบ)
 
-- ใช้ **token เท่านั้น**: `bg-background` `text-foreground` `text-muted-foreground` `bg-card` `bg-muted` `border` `border-input` `bg-primary` `text-destructive` `bg-warning text-warning-foreground border-warning-border` — **ห้ามสีดิบ** (`bg-white` `text-black` `gray-500` `amber-50` …) เพราะโหมดมืดจะไม่เปลี่ยนตาม
+- ใช้ **token เท่านั้น**: `bg-background` `text-foreground` `text-muted-foreground` `bg-card` `bg-muted` `border` `border-input` `bg-primary` `text-destructive` · เตือน `bg-warning text-warning-foreground border-warning-border` · สำเร็จ (เช่น "ชำระเงินครบถ้วน") `bg-success text-success-foreground border-success-border` — **ห้ามสีดิบ** (`bg-white` `text-black` `gray-500` `amber-50` …) เพราะโหมดมืดจะไม่เปลี่ยนตาม
 - สิ่งที่ต้องต่างกันจริงระหว่างธีมใช้ `dark:` (ทำงานบนจอเท่านั้น) · WCAG 2.2 AA ทั้งสองธีม: ตัวอักษร ≥ 4.5:1 · ขอบช่องกรอก/โฟกัส ≥ 3:1 (token ผ่านแล้ว)
 - **พิมพ์ = สว่างเสมอ** (token มืดอยู่ใน `@media screen`) · ใบรับซื้อ/สำเนาบัตรที่แสดงบนจอ ครอบด้วย `className="theme-light"` ให้สว่างแม้แอปเป็นโหมดมืด
 - ธีมเก็บใน localStorage `ong.theme` · `public/theme-init.js` ตั้ง `.dark` ก่อนวาดหน้า (CSP ห้าม inline script — ห้ามเพิ่ม `<script>` แบบ inline ใน index.html)

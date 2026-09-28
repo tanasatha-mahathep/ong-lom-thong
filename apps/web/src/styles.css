@@ -69,6 +69,9 @@
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
   --color-warning-border: var(--warning-border);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-border: var(--success-border);
 }
 
 /*
@@ -76,7 +79,8 @@
  * --muted-foreground เข้มขึ้น (0.556 → 0.52): ตัวอักษรรองบนพื้น muted/sidebar ได้ ≥ 4.5:1
  * --input เข้มขึ้น (0.922 → 0.64): ขอบช่องกรอก/radio ≥ 3:1 บนขาว sidebar และ muted (1.4.11) · --border ยังอ่อนเพราะแค่ตกแต่ง
  * --ring เป็นสีน้ำเงินโฟกัส (#0071e3 · 4.7:1 บนพื้นขาว): หน้าร้านใช้คีย์บอร์ดล้วน โฟกัสต้องเห็นชัด
- * --warning* สำหรับป้าย/กล่องเตือน (เช่น ยังไม่ได้ตั้งราคาทอง) — หน้าใช้ bg-warning ไม่ใช้สี amber ตรง ๆ
+ * --warning* / --success* สำหรับป้าย/กล่องเตือน (ยังไม่ได้ตั้งราคาทอง) และสำเร็จ (ชำระเงินครบ) — หน้าใช้ bg-warning / bg-success
+ *   ไม่ใช้สี amber/emerald ตรง ๆ · ทั้งสองธีม: ตัวอักษรบนพื้นของมัน ≥ 9:1 · ขอบ ≥ 3:1 ทั้งกับพื้นหน้าและพื้นของมัน
  */
 :root,
 .theme-light {
@@ -110,7 +114,10 @@
   --sidebar-ring: oklch(0.563 0.187 257.5);
   --warning: oklch(0.987 0.022 95.277);
   --warning-foreground: oklch(0.279 0.077 45.635);
-  --warning-border: oklch(0.879 0.169 91.605);
+  --warning-border: oklch(0.666 0.179 58.318);
+  --success: oklch(0.979 0.021 166.113);
+  --success-foreground: oklch(0.378 0.077 168.94);
+  --success-border: oklch(0.596 0.145 163.225);
 }
 
 /*
@@ -148,7 +155,10 @@
     --sidebar-ring: oklch(0.68 0.15 255);
     --warning: oklch(0.279 0.077 45.635);
     --warning-foreground: oklch(0.962 0.059 95.617);
-    --warning-border: oklch(0.473 0.137 46.201);
+    --warning-border: oklch(0.769 0.188 70.08);
+    --success: oklch(0.262 0.051 172.552);
+    --success-foreground: oklch(0.95 0.052 163.051);
+    --success-border: oklch(0.696 0.17 162.48);
   }
 }
 
