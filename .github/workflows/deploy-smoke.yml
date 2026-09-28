@@ -1,0 +1,69 @@
+name: deploy-smoke
+
+# ring 2 — Railway deploy สำเร็จแล้ว → รัน Playwright project `smoke` (อ่านอย่างเดียว) ใส่เว็บจริงของ environment นั้น
+# Railway GitHub app สร้าง deployment ให้ (creator railway-app[bot] · environment "<project> / <env>")
+# แต่ environment_url ชี้ไป dashboard ของ Railway ไม่ใช่เว็บ → URL มาจาก repository variables
+#   E2E_URL_STAGING · E2E_URL_PRODUCTION (เพิ่ม E2E_URL_TESTING เมื่อสร้าง environment testing) · ไม่ตั้ง = ข้าม
+# smoke ไม่เขียนข้อมูล (fixture มีแค่ GET/HEAD และ write ข้าม origin ที่ต้องโดนปฏิเสธ) — ยิง production ได้
+on:
+  deployment_status:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: smoke (${{ github.event.deployment.environment }})
+    if: github.event.deployment_status.state == 'success' && github.event.deployment.creator.login == 'railway-app[bot]'
+    # Railway ส่ง success ต่อ service (Office · PDF) ของ deploy เดียวกัน — ตัวหลังสุดชนะ
+    # concurrency ระดับ job: event in_progress/failure ก็สร้าง run — ต้องไม่ไปยกเลิก smoke ที่กำลังรัน
+    concurrency:
+      group: deploy-smoke-${{ github.event.deployment.environment }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DEPLOY_ENVIRONMENT: ${{ github.event.deployment.environment }}
+      URL_TESTING: ${{ vars.E2E_URL_TESTING }}
+      URL_STAGING: ${{ vars.E2E_URL_STAGING }}
+      URL_PRODUCTION: ${{ vars.E2E_URL_PRODUCTION }}
+    steps:
+      # commit ที่ deploy (GITHUB_SHA ของ deployment_status) — เทสต์ตรงกับโค้ดที่ถูกตรวจ
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: pick the site URL
+        id: site
+        run: |
+          case "$DEPLOY_ENVIRONMENT" in
+            */\ testing) url=$URL_TESTING ;;
+            */\ staging) url=$URL_STAGING ;;
+            */\ production) url=$URL_PRODUCTION ;;
+            *) url= ;;
+          esac
+          [ -n "$url" ] || echo "::notice::no E2E_URL_* variable for \"$DEPLOY_ENVIRONMENT\" — smoke skipped"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: steps.site.outputs.url != ''
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: steps.site.outputs.url != ''
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        if: steps.site.outputs.url != ''
+      # smoke ใช้ request fixture อย่างเดียว — ไม่ต้องติดตั้ง browser
+      - name: smoke (read-only)
+        if: steps.site.outputs.url != ''
+        env:
+          E2E_BASE_URL: ${{ steps.site.outputs.url }}
+        run: pnpm --filter @ong/e2e exec playwright test --project=smoke
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: deploy-smoke-report
+          path: |
+            tests/e2e/playwright-report/
+            tests/e2e/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
