@@ -213,8 +213,14 @@ async function main(argv: string[]): Promise<number> {
 try {
   process.exitCode = await main(process.argv.slice(2));
 } catch (e) {
-  const err = e as Error & { code?: string; detail?: string; hint?: string; position?: string };
-  console.error(`db-verify: ${err.message}`);
-  for (const field of ["code", "detail", "hint"] as const) if (err[field]) console.error(`  ${field}: ${err[field]}`);
+  // drizzle wraps PostgreSQL's error in "Failed query: …" — the reason is further down the cause chain
+  let err: unknown = e;
+  for (let depth = 0; err instanceof Error && depth < 5; depth++, err = err.cause) {
+    const pg = err as Error & { code?: string; detail?: string; hint?: string; where?: string };
+    console.error(`${depth ? "  caused by: " : "db-verify: "}${pg.message}`);
+    for (const field of ["code", "detail", "hint", "where"] as const) {
+      if (pg[field]) console.error(`    ${field}: ${pg[field]}`);
+    }
+  }
   process.exitCode = e instanceof UsageError ? 2 : 1;
 }
