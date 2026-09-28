@@ -467,3 +467,48 @@ describe("deriveGoldPrice — ค่าตั้งจาก DB ที่ผิ�
     expect([q.barBuy.toFixed(2), q.jewelryBuy.toFixed(0)]).toEqual(["67650.00", "64268"]);
   });
 });
+
+// ── ด่านค่าตั้ง (dev PR #68): ส่วนต่าง finite และ ≥ 0 · ส่วนลด finite และ 0 < ส่วนลด ≤ 1 — BVA ทุกขอบ · ข้อความตรงตัว ─────
+// เดิมค่าตั้ง NaN/∞/ติดลบ ได้ราคาเพี้ยนออกไปเงียบ ๆ · ค่าที่คาดคิดมือ: รับซื้อ = 67,850 − ส่วนต่าง · รูปพรรณ = HALF_UP(รับซื้อ × ส่วนลด, 0)
+const SETTING_ERROR = "ค่าตั้งราคาทองไม่ถูกต้อง (ส่วนต่าง / ส่วนลดทองรูปพรรณ)";
+
+describe("deriveGoldPrice — ค่าตั้งที่อยู่บนขอบของช่วงที่รับ (BVA ฝั่งรับ)", () => {
+  it.each([
+    { label: "ส่วนต่าง 0 (ขอบล่างพอดี)", s: setting("0", "0.95"), barBuy: "67850", jewelryBuy: "64458" }, // 67,850 × 0.95 = 64,457.5 → 64,458
+    { label: "ส่วนต่าง 0.00 แบบแถว DB", s: setting("0.00", "0.95"), barBuy: "67850", jewelryBuy: "64458" },
+    { label: "ส่วนต่าง −0 (มีค่าเท่าศูนย์)", s: setting("-0", "0.95"), barBuy: "67850", jewelryBuy: "64458" },
+    { label: "ส่วนลด 1 (ขอบบนพอดี) = รับซื้อเต็ม", s: setting("200", "1"), barBuy: "67650", jewelryBuy: "67650" },
+    { label: "ส่วนลด 1.0000 แบบแถว DB", s: setting("200", "1.0000"), barBuy: "67650", jewelryBuy: "67650" },
+    { label: "ส่วนลดบวกเล็กสุดของ numeric(6,4)", s: setting("200", "0.0001"), barBuy: "67650", jewelryBuy: "7" }, // 6.765 → 7
+  ])("$label → รับซื้อ $barBuy · รูปพรรณ $jewelryBuy", ({ s, barBuy, jewelryBuy }) => {
+    expect(exact(deriveGoldPrice("67850", s))).toStrictEqual({ barSell: "67850", barBuy, jewelryBuy });
+  });
+});
+
+describe("deriveGoldPrice — ค่าตั้งนอกช่วง → RangeError ข้อความตรงตัว ไม่คืนราคา (BVA ฝั่งปฏิเสธ · EP ค่าไม่จำกัด)", () => {
+  it.each([
+    { label: "ส่วนต่างติดลบ 1 สตางค์", s: setting("-0.01", "0.95") },
+    { label: "ส่วนต่างติดลบเล็กมาก −0.0000001", s: setting("-0.0000001", "0.95") },
+    { label: "ส่วนต่าง NaN", s: setting("NaN", "0.95") },
+    { label: "ส่วนต่าง Infinity", s: setting("Infinity", "0.95") },
+    { label: "ส่วนต่าง −Infinity", s: setting("-Infinity", "0.95") },
+    { label: "ส่วนลด 0 (ขอบล่าง ไม่รวม)", s: setting("200", "0") },
+    { label: "ส่วนลดติดลบ", s: setting("200", "-0.95") },
+    { label: "ส่วนลดเกิน 1 เล็กน้อย 1.0000001", s: setting("200", "1.0000001") },
+    { label: "ส่วนลด 1.5", s: setting("200", "1.5") },
+    { label: "ส่วนลด NaN", s: setting("200", "NaN") },
+    { label: "ส่วนลด Infinity", s: setting("200", "Infinity") },
+    { label: "number NaN", s: setting(Number.NaN, 0.95) },
+    { label: "Decimal Infinity", s: setting(new Decimal(Infinity), "0.95") },
+  ])("$label → RangeError", ({ s }) => {
+    const e = thrownBy(() => deriveGoldPrice("67850", s));
+    expect(e).toBeInstanceOf(RangeError);
+    expect(e).toHaveProperty("message", SETTING_ERROR);
+  });
+
+  it("ราคาขายออกผิดถูกตรวจก่อนค่าตั้ง — ผิดทั้งคู่ได้ข้อความของราคา", () => {
+    const e = thrownBy(() => deriveGoldPrice("0", setting("NaN", "0")));
+    expect(e).toBeInstanceOf(RangeError);
+    expect(e).toHaveProperty("message", BAR_SELL_ERROR);
+  });
+});
