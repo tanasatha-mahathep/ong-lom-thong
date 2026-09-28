@@ -1,5 +1,7 @@
 import type { Db } from "@ong/db";
 import { Hono } from "hono";
+import { accessLog } from "./lib/accessLog";
+import { noStoreByDefault, securityHeaders } from "./lib/httpHeaders";
 import type { Auth } from "./auth";
 import type { Env } from "./env";
 import { type AppEnv, apiError } from "./lib/context";
@@ -11,6 +13,7 @@ import { customerRoutes } from "./routes/customers";
 import { goldPriceRoutes } from "./routes/goldPrice";
 import { me } from "./routes/me";
 import { metalRoutes } from "./routes/metals";
+import { reportRoutes } from "./routes/reports";
 
 export interface AppDeps {
   db: Db;
@@ -25,6 +28,10 @@ const health = () => ({ ok: true, time: new Date().toISOString() });
 /** ประกอบแอปจาก dependency ที่ส่งเข้ามา — เทสต์เรียก app.request() ได้โดยไม่ต้องเปิดพอร์ต */
 export function createApp({ db, auth, env, storage, now = () => new Date() }: AppDeps) {
   const app = new Hono<AppEnv>();
+  // ก่อนทุก route (รวม SPA ใน index.ts): access log ไม่มี PII · header ความปลอดภัย · API ไม่ cache
+  app.use(accessLog(env.NODE_ENV === "test" ? null : (line) => console.log(line)));
+  app.use(securityHeaders);
+  app.use("/api/*", noStoreByDefault);
   app.use(async (c, next) => {
     c.set("db", db);
     c.set("auth", auth);
@@ -46,9 +53,12 @@ export function createApp({ db, auth, env, storage, now = () => new Date() }: Ap
   api.route("/metals", metalRoutes);
   api.route("/customers", customerRoutes);
   api.route("/buy", buyRoutes);
+  api.route("/reports", reportRoutes);
 
-  api.notFound((c) => c.json(apiError("not found"), 404));
   app.route("/api", api);
+  // notFound ของ sub-app ไม่ถูกใช้ตอน mount — path ใต้ /api ที่ไม่มี route ตอบ JSON 404 ทุก method
+  // ไม่งั้นตกไปที่ SPA fallback ใน index.ts (index.html 200)
+  app.all("/api/*", (c) => c.json(apiError("not found"), 404));
 
   app.onError((err, c) => {
     // ห้าม log ค่า params ของ query — มีข้อมูลลูกค้า (lib/log.ts)
