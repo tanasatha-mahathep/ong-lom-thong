@@ -97,6 +97,21 @@ test.describe("sign-in, session and sign-out — spec §10 · OWASP ASVS V3", ()
     expect((await signIn(counter, accounts.staff)).status()).toBe(200);
   });
 
+  test("user and branch administration is for admins only (spec §10)", async ({ signedIn }) => {
+    for (const key of ["staff", "manager", "accounting"] satisfies AccountKey[]) {
+      const client = await signedIn(key);
+      for (const path of ["/api/admin/users", "/api/admin/branches"]) {
+        expect((await expectApiError(await client.get(path), 403)).error, `${key} ${path}`).toBe("forbidden");
+      }
+    }
+    const admin = await signedIn("admin");
+    for (const path of ["/api/admin/users", "/api/admin/branches"]) {
+      const res = await admin.get(path);
+      expect(res.status(), path).toBe(200);
+      expect(res.headers()["cache-control"], path).toBe("no-store");
+    }
+  });
+
   test("a sign-in posted from another site is refused before it reaches auth (CSRF)", async ({
     anonymous,
     accounts,

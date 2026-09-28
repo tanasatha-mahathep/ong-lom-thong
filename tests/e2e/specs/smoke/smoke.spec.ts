@@ -89,6 +89,8 @@ test.describe("access control — fail closed without a session (spec §10 · AS
     "/api/buy",
     "/api/reports/purchase",
     "/api/reports/stock",
+    "/api/admin/users",
+    "/api/admin/branches",
   ];
   for (const path of protectedPaths) {
     test(`GET ${path} without a session is 401`, async ({ site }) => {
