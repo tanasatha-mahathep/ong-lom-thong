@@ -21,7 +21,7 @@
 
 ## คำสั่ง
 
-`pnpm test` · `pnpm typecheck` · `pnpm lint` · `pnpm format:check` — ต้องเขียวทั้งหมดก่อน commit (CI รันชุดเดียวกัน)
+`make check` (= `pnpm lint` · `format:check` · `typecheck` · `test` · `build`) — ต้องเขียวทั้งหมดก่อน commit (CI รันชุดเดียวกัน) · `make help` ดูคำสั่งทั้งหมด
 `pnpm dev` · `pnpm db:generate` หลังแก้ schema · plpgsql อยู่ `packages/db/sql/functions.sql`
 
 ## Commit
