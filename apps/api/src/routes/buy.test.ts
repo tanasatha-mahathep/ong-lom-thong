@@ -1,4 +1,4 @@
-import { BUY_MSG } from "@ong/core";
+import { BUY_MSG, ZERO, fmtMoney, fmtWeight } from "@ong/core";
 import {
   auditLog,
   branch,
@@ -11,7 +11,7 @@ import {
   payment,
   stockMovement,
 } from "@ong/db";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { type SQL, and, asc, eq, ne, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type TestApp, databaseAvailable, startTestApp } from "../test/harness";
 
@@ -88,11 +88,20 @@ interface ListItem {
   pdf_status: string;
   created_by: { id: string; name: string };
 }
+interface Totals {
+  count: string;
+  total_weight: string;
+  total_amount: string;
+}
 interface ListRes {
   items: ListItem[];
   page: number;
   has_more: boolean;
+  totals: Totals;
 }
+const ZERO_TOTALS: Totals = { count: "0", total_weight: "0.000", total_amount: "0.00" };
+/** บิล bill() ปกติหนึ่งใบ: 5.860 กรัม · 20,030 บาท */
+const ONE_BILL: Totals = { count: "1", total_weight: "5.860", total_amount: "20030.00" };
 
 describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R1–R5 · R7 · R9 · R11 · R13 · R15) — /api/buy", () => {
   let t: TestApp;
@@ -722,7 +731,12 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     expect(own.items.length).toBeGreaterThan(0);
     expect(own.items.every((i) => i.branch.code === "00000")).toBe(true);
     // ขอสาขาที่ไม่มีสิทธิ์ = ว่าง (ไม่ใช่ 403 และไม่ใช่ทุกสาขา) · id มั่ว ๆ ก็ว่าง
-    expect(await list(`branch_id=${t.branches["00001"]}`, "staff")).toEqual({ items: [], page: 1, has_more: false });
+    expect(await list(`branch_id=${t.branches["00001"]}`, "staff")).toEqual({
+      items: [],
+      page: 1,
+      has_more: false,
+      totals: ZERO_TOTALS,
+    });
     expect((await list("branch_id=nonsense", "staff")).items).toEqual([]);
     expect((await list(`branch_id=${t.branches["00000"]}`, "staff")).items.length).toBe(own.items.length);
   });
@@ -840,10 +854,89 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     const p2 = await list("page=2");
     expect([p1.items.length, p1.has_more, p2.items.length, p2.has_more]).toEqual([50, true, total - 50, false]);
     expect(new Set([...p1.items, ...p2.items].map((i) => i.id)).size).toBe(total);
-    expect(await list("page=3")).toEqual({ items: [], page: 3, has_more: false });
+    const p3 = await list("page=3");
+    expect([p3.items, p3.has_more]).toEqual([[], false]);
+    expect(p3.totals).toEqual(p1.totals); // ยอดรวมครอบทุกหน้า ไม่ใช่เฉพาะหน้าที่ขอ
     // เลขที่ของงวดยังต่อเนื่องหลังเปิดบิลพร้อมกันอีก 40 ใบ
     const nos = await docNos("00000", "6910");
     expect(nos).toEqual(running("6910", 1, nos.length));
+  });
+
+  // ---------- totals (การ์ด "ยอดซื้อวันนี้" · หน้าค้นบิล) ----------
+
+  /** ยอดที่ควรได้ คิดจากแถวใน DB ด้วย decimal.js — เฉพาะบิลที่ยังไม่ยกเลิก */
+  const expectedTotals = async (where?: SQL): Promise<Totals> => {
+    const rows = await t.db
+      .select({ weight: buyReceipt.totalWeight, amount: buyReceipt.totalAmount })
+      .from(buyReceipt)
+      .where(and(where, eq(buyReceipt.status, "active")));
+    return {
+      count: String(rows.length),
+      total_weight: fmtWeight(rows.reduce((sum, r) => sum.plus(r.weight), ZERO)),
+      total_amount: fmtMoney(rows.reduce((sum, r) => sum.plus(r.amount), ZERO)),
+    };
+  };
+
+  it("totals = ผลรวมของบิลทุกหน้าตามตัวกรองเดียวกับรายการ (ตรงกับ DB และกับผลรวมของรายการ)", async () => {
+    const own = await expectedTotals(eq(buyReceipt.branchId, t.branches["00000"] ?? ""));
+    const p1 = await list();
+    const p2 = await list("page=2");
+    expect(p1.totals).toEqual(own);
+    expect(p2.totals).toEqual(own);
+    const items = [...p1.items, ...p2.items];
+    expect({
+      count: String(items.length),
+      total_weight: fmtWeight(items.reduce((sum, i) => sum.plus(i.total_weight), ZERO)),
+      total_amount: fmtMoney(items.reduce((sum, i) => sum.plus(i.total_amount), ZERO)),
+    }).toEqual(p1.totals);
+
+    // การ์ดหน้าแรก: ?date_from=วันนี้&date_to=วันนี้&branch_id=สาขาปัจจุบัน
+    const card = await list(`date_from=${TODAY}&date_to=${TODAY}&branch_id=${t.branches["00000"]}`);
+    expect(card.totals).toEqual(
+      await expectedTotals(and(eq(buyReceipt.branchId, t.branches["00000"] ?? ""), eq(buyReceipt.date, TODAY))),
+    );
+  });
+
+  it.each([
+    ["date_from=2026-09-30&date_to=2026-09-30", ONE_BILL],
+    ["q=rc6909", ONE_BILL],
+    [`q=${encodeURIComponent("บัตร หมด")}`, ONE_BILL],
+    ["metal=nak", { count: "1", total_weight: "269.033", total_amount: "64787.50" }], // ยอดทั้งบิลที่มีนาก
+    ["date_from=2026-10-06", ZERO_TOTALS],
+    ["metal=platinum", ZERO_TOTALS],
+  ])("totals ตามตัวกรอง %s → %j", async (qs, totals) => {
+    expect((await list(qs)).totals).toEqual(totals);
+  });
+
+  it("totals ไม่นับบิลที่ยกเลิก — บิลยังอยู่ในรายการ", async () => {
+    const qs = "date_from=2026-09-30&date_to=2026-09-30";
+    await t.db.update(buyReceipt).set({ status: "void" }).where(eq(buyReceipt.id, backdatedId));
+    try {
+      const res = await list(qs);
+      expect(res.items.map((i) => [i.doc_no, i.status])).toEqual([["RC6909-0001", "void"]]);
+      expect(res.totals).toEqual(ZERO_TOTALS);
+    } finally {
+      await t.db.update(buyReceipt).set({ status: "active" }).where(eq(buyReceipt.id, backdatedId));
+    }
+    expect((await list(qs)).totals).toEqual(ONE_BILL);
+  });
+
+  it("totals ตามสิทธิ์สาขา: สาขาอื่นไม่ถูกนับ · branch_id ที่ไม่มีสิทธิ์ = ศูนย์ · สาขาที่ปิดไม่นับ", async () => {
+    const b1 = t.branches["00001"] ?? "";
+    expect((await list("", "staff1")).totals).toEqual(ONE_BILL);
+    expect((await list(`branch_id=${t.branches["00000"]}`, "staff1")).totals).toEqual(ZERO_TOTALS);
+    expect((await list(`branch_id=${b1}`, "staff")).totals).toEqual(ZERO_TOTALS);
+    expect((await list("", "boss")).totals).toEqual(await expectedTotals());
+    expect((await list(`branch_id=${b1}`, "boss")).totals).toEqual(ONE_BILL);
+
+    await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
+    try {
+      expect((await list("", "boss")).totals).toEqual(
+        await expectedTotals(ne(buyReceipt.branchId, t.branches["00002"] ?? "")),
+      );
+    } finally {
+      await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
+    }
   });
 
   it("customer_snapshot เก็บเป็น jsonb object (ค้นด้วย ->> ได้ ไม่ใช่ string ซ้อน)", async () => {

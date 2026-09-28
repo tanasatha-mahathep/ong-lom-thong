@@ -1,10 +1,14 @@
 import {
+  D,
   PAYMENT_METHODS,
   type QuoteBuyResult,
   type QuoteError,
+  ZERO,
   avgPricePerG,
   businessDate,
   cardStatus,
+  fmtMoney,
+  fmtWeight,
   isPaymentMethod,
   maskNationalId,
   quoteBuy,
@@ -360,13 +364,27 @@ export type ListQuery = z.infer<typeof ListQuery>;
 
 const hhmm = (t: string) => t.slice(0, 5);
 
+/** ยอดรวมของทุกหน้าตามตัวกรอง — string ทั้งหมด (จำนวนบิล · กรัม 3 ตำแหน่ง · บาท 2 ตำแหน่ง) */
+export interface ListTotals {
+  count: string;
+  total_weight: string;
+  total_amount: string;
+}
+const totalsOf = (count: string, weight: string, amount: string): ListTotals => ({
+  count,
+  total_weight: fmtWeight(D(weight)),
+  total_amount: fmtMoney(D(amount)),
+});
+const NO_TOTALS = totalsOf("0", ZERO.toString(), ZERO.toString());
+
 /**
- * ค้นบิลย้อนหลัง — เฉพาะสาขาที่อ่านได้ (fail-closed): branch_id ที่ไม่มีสิทธิ์ = รายการว่าง ไม่ใช่ทุกสาขา
+ * ค้นบิลย้อนหลัง — เฉพาะสาขาที่อ่านได้ (fail-closed): branch_id ที่ไม่มีสิทธิ์ = รายการว่าง ยอดศูนย์ ไม่ใช่ทุกสาขา
  * ลูกค้าแสดงจาก snapshot ตอนเปิดบิล · เลขบัตรมาสก์ (R13)
+ * totals = ยอดของบิลที่ยังไม่ยกเลิกทุกหน้าตามตัวกรองเดียวกัน (การ์ด "ยอดซื้อวันนี้" · หน้าค้นบิล)
  */
 export async function listBuys(db: Db, readable: BranchRef[], query: ListQuery) {
   const scope = query.branch_id ? readable.filter((b) => b.id === query.branch_id) : readable;
-  if (scope.length === 0) return { items: [], hasMore: false };
+  if (scope.length === 0) return { items: [], hasMore: false, totals: NO_TOTALS };
   const branches = new Map(scope.map((b) => [b.id, { id: b.id, code: b.code, name: b.name }]));
 
   const conditions: SQL[] = [
@@ -402,28 +420,40 @@ export async function listBuys(db: Db, readable: BranchRef[], query: ListQuery) 
     if (match) conditions.push(match);
   }
 
-  const rows = await db
-    .select({
-      id: buyReceipt.id,
-      docNo: buyReceipt.docNo,
-      date: buyReceipt.date,
-      time: buyReceipt.time,
-      branchId: buyReceipt.branchId,
-      customerId: buyReceipt.customerId,
-      snapshot: buyReceipt.customerSnapshot,
-      totalWeight: buyReceipt.totalWeight,
-      totalAmount: buyReceipt.totalAmount,
-      status: buyReceipt.status,
-      pdfStatus: buyReceipt.pdfStatus,
-      createdBy: buyReceipt.createdBy,
-      createdByName: user.name,
-    })
-    .from(buyReceipt)
-    .innerJoin(user, eq(user.id, buyReceipt.createdBy))
-    .where(and(...conditions))
-    .orderBy(desc(buyReceipt.date), desc(buyReceipt.time), desc(buyReceipt.docNo), desc(buyReceipt.id))
-    .limit(LIST_PAGE_SIZE + 1)
-    .offset((query.page - 1) * LIST_PAGE_SIZE);
+  const where = and(...conditions);
+  const [rows, [sums]] = await Promise.all([
+    db
+      .select({
+        id: buyReceipt.id,
+        docNo: buyReceipt.docNo,
+        date: buyReceipt.date,
+        time: buyReceipt.time,
+        branchId: buyReceipt.branchId,
+        customerId: buyReceipt.customerId,
+        snapshot: buyReceipt.customerSnapshot,
+        totalWeight: buyReceipt.totalWeight,
+        totalAmount: buyReceipt.totalAmount,
+        status: buyReceipt.status,
+        pdfStatus: buyReceipt.pdfStatus,
+        createdBy: buyReceipt.createdBy,
+        createdByName: user.name,
+      })
+      .from(buyReceipt)
+      .innerJoin(user, eq(user.id, buyReceipt.createdBy))
+      .where(where)
+      .orderBy(desc(buyReceipt.date), desc(buyReceipt.time), desc(buyReceipt.docNo), desc(buyReceipt.id))
+      .limit(LIST_PAGE_SIZE + 1)
+      .offset((query.page - 1) * LIST_PAGE_SIZE),
+    // SUM ของ numeric ใน Postgres (แม่นตรง) ส่งออกมาเป็นข้อความ — ไม่ผ่าน float · บิลยกเลิกไม่นับ
+    db
+      .select({
+        count: sql<string>`count(*)::text`,
+        weight: sql<string>`coalesce(sum(${buyReceipt.totalWeight}), 0)::text`,
+        amount: sql<string>`coalesce(sum(${buyReceipt.totalAmount}), 0)::text`,
+      })
+      .from(buyReceipt)
+      .where(and(where, eq(buyReceipt.status, "active"))),
+  ]);
 
   const items = rows.slice(0, LIST_PAGE_SIZE).map((r) => ({
     id: r.id,
@@ -442,7 +472,8 @@ export async function listBuys(db: Db, readable: BranchRef[], query: ListQuery) 
     pdf_status: r.pdfStatus,
     created_by: { id: r.createdBy, name: r.createdByName },
   }));
-  return { items, hasMore: rows.length > LIST_PAGE_SIZE };
+  const totals = sums ? totalsOf(sums.count, sums.weight, sums.amount) : NO_TOTALS;
+  return { items, hasMore: rows.length > LIST_PAGE_SIZE, totals };
 }
 
 /** บิลเดียว — uuid ผิดรูป / ไม่มี / สาขาอ่านไม่ได้ = null (route ตอบ 404 เหมือนกันหมด ไม่บอกว่ามีอยู่) */
