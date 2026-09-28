@@ -49,8 +49,10 @@ export function createApp({ db, auth, env, storage, now = () => new Date() }: Ap
   api.route("/customers", customerRoutes);
   api.route("/buy", buyRoutes);
 
-  api.notFound((c) => c.json(apiError("not found"), 404));
   app.route("/api", api);
+  // notFound ของ sub-app ไม่ถูกใช้ตอน mount — path ใต้ /api ที่ไม่มี route ตอบ JSON 404 ทุก method
+  // ไม่งั้นตกไปที่ SPA fallback ใน index.ts (index.html 200)
+  app.all("/api/*", (c) => c.json(apiError("not found"), 404));
 
   app.onError((err, c) => {
     console.error(err);
