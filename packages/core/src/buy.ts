@@ -1,5 +1,14 @@
+import type Decimal from "decimal.js";
 import { CARD_STATUS_MESSAGE, type CardStatus } from "./card";
 import { ZERO, fmtMoney, fmtWeight, halfUp, parseDecimal } from "./money";
+
+/**
+ * ราคา/กรัม = ราคา ÷ น้ำหนัก ปัดครึ่งขึ้น 2 ตำแหน่ง (R3) — แสดงเท่านั้น ไม่ใช้คำนวณต่อ
+ * สูตรเดียวของทั้งระบบ: quoteBuy() ใช้ต่อแถว · ใบรับซื้อใช้ต่อกลุ่มโลหะ (groupLinesByMetal)
+ */
+export function pricePerGram(amount: Decimal, weight: Decimal): Decimal {
+  return halfUp(amount.div(weight), 2);
+}
 
 export interface BuyLineInput {
   metalId: string;
@@ -110,7 +119,7 @@ export function quoteBuy(input: QuoteBuyInput): QuoteBuyResult {
       metalId: line.metalId,
       weightG: fmtWeight(w),
       amount: fmtMoney(a),
-      pricePerG: fmtMoney(halfUp(a.div(w), 2)),
+      pricePerG: fmtMoney(pricePerGram(a, w)),
     });
   });
 

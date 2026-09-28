@@ -33,3 +33,25 @@ export const floorTo = (v: Decimal, dp: number): Decimal => v.toDecimalPlaces(dp
 export const fmtMoney = (v: Decimal): string => v.toFixed(2);
 export const fmtWeight = (v: Decimal): string => v.toFixed(3);
 export const fmtInt = (v: Decimal): string => v.toFixed(0);
+
+/** คั่นหลักพันด้วยคอมมาบนสตริงที่ fix ทศนิยมแล้ว ("20030.00" → "20,030.00") — ไม่ผ่าน float */
+function groupThousands(fixed: string): string {
+  const negative = fixed.startsWith("-") && /[1-9]/.test(fixed);
+  const body = fixed.replace(/^-/, "");
+  const dot = body.indexOf(".");
+  const int = dot === -1 ? body : body.slice(0, dot);
+  const frac = dot === -1 ? "" : body.slice(dot);
+  return `${negative ? "-" : ""}${int.replace(/\B(?=(\d{3})+$)/g, ",")}${frac}`;
+}
+
+function finite(v: string | Decimal): Decimal {
+  const d = D(v);
+  if (!d.isFinite()) throw new RangeError(`ไม่ใช่ตัวเลข: ${String(v)}`);
+  return d;
+}
+
+/** เงินสำหรับแสดง/พิมพ์ (ใบรับซื้อ): HALF_UP 2 ตำแหน่ง + คอมมา — "20030" → "20,030.00" */
+export const formatMoney = (v: string | Decimal): string => groupThousands(halfUp(finite(v), 2).toFixed(2));
+
+/** น้ำหนักสำหรับแสดง/พิมพ์: 3 ตำแหน่ง + คอมมา (แบบ currencyFormat6 ของระบบเดิม) — "1250.5" → "1,250.500" */
+export const formatWeight = (v: string | Decimal): string => groupThousands(halfUp(finite(v), 3).toFixed(3));
