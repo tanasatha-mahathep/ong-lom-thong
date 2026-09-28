@@ -290,6 +290,23 @@ describe.skipIf(!available)("ลูกค้า (Siam ID · R12 · R13) — /api
     expect(last?.diff).toEqual({ photo: { before: "set", after: "replaced" } });
   });
 
+  it("PUT ตอบแบบมาสก์ — เลขบัตรเต็มออกเฉพาะ GET /:id (R13 · spec §5)", async () => {
+    const res = await put(idA, form({ mobile: "0899999999", card_expire_text: "31/12/2574" }));
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).not.toContain(ID_A);
+    const body = JSON.parse(text) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("national_id");
+    expect(body).toMatchObject({
+      id: idA,
+      national_id_masked: "1 XXXX XXXXX 45 8",
+      name_th: "นายทดสอบ ระบบ",
+      card_status: "ok",
+      has_photo: true,
+    });
+    expect(((await (await get(`/${idA}`)).json()) as Detail).national_id).toBe(ID_A);
+  });
+
   it("แก้เลขบัตรไปชนคนอื่น = 409 · ข้อมูลเดิมไม่เปลี่ยน", async () => {
     const created = await post(
       form({ national_id: ID_B, name_th: "นางสาวสอง ทดสอบ", name_en: "", mobile: "0922222222" }),

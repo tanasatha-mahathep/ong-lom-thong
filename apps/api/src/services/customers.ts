@@ -76,6 +76,15 @@ export function toDetail(row: CustomerRow, today: string) {
   };
 }
 
+/**
+ * รูปเดียวกับ toDetail แต่เลขบัตรมาสก์ — ใช้กับ response ของ PUT (spec §5: เลขเต็มเฉพาะ GET /:id และ PDF)
+ * หน้าเว็บที่ต้องใช้เลขเต็มโหลด GET /:id ใหม่เอง
+ */
+export function toMaskedDetail(row: CustomerRow, today: string) {
+  const { id, national_id, ...rest } = toDetail(row, today);
+  return { id, national_id_masked: maskNationalId(national_id), ...rest };
+}
+
 /** รายการ — เลขบัตรมาสก์เสมอ (R13) */
 export function toListItem(row: CustomerRow, today: string) {
   return {
