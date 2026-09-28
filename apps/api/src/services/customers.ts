@@ -90,7 +90,8 @@ export function toListItem(row: CustomerRow, today: string) {
 }
 
 export const PAGE_SIZE = 20;
-const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
+/** คำค้นที่ผู้ใช้พิมพ์ใช้ใน LIKE — % _ และ backslash เป็นตัวอักษรธรรมดา */
+export const escapeLike = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 /** ค้นจากชื่อ (ไทย/อังกฤษ) · เลขบัตร · เบอร์ — ว่าง = ล่าสุดก่อน */
 export async function searchCustomers(db: Db, q: string, page: number) {

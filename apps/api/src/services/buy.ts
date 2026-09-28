@@ -1,0 +1,542 @@
+import {
+  PAYMENT_METHODS,
+  type QuoteBuyResult,
+  type QuoteError,
+  avgPricePerG,
+  businessDate,
+  cardStatus,
+  isPaymentMethod,
+  maskNationalId,
+  quoteBuy,
+} from "@ong/core";
+import {
+  type CustomerSnapshot,
+  type Db,
+  auditLog,
+  branch,
+  buyLine,
+  buyReceipt,
+  type customer,
+  metal,
+  payment,
+  stockMovement,
+  user,
+} from "@ong/db";
+import { type SQL, and, asc, desc, eq, exists, gte, ilike, inArray, lte, or, sql } from "drizzle-orm";
+import { z } from "zod";
+import { type BranchRef, type Viewer, currentBranch, forUser } from "../lib/scope";
+import { escapeLike, findCustomer } from "./customers";
+import { type TodayPrice, priceForBranch } from "./goldPrice";
+
+export const BUY_API_MSG = {
+  noBranch: "ยังไม่ได้เลือกสาขาที่ทำงาน",
+  futureDate: "วันที่ต้องไม่เกินวันนี้",
+  unknownMetal: "ไม่พบประเภทโลหะ",
+  keyTaken: "idempotency_key นี้ถูกใช้แล้ว",
+  docNoTaken: "เลขที่เอกสารชนกับบิลที่มีอยู่แล้ว — แจ้งผู้ดูแลระบบตรวจตัวนับเลขที่ (doc_sequence)",
+  noGoldPriceOn: (isoDate: string) => `ยังไม่ได้ตั้งราคาทองของวันที่ ${beDate(isoDate)}`,
+} as const;
+
+/** "2026-09-30" → "30/09/2569" (วันที่แบบที่ร้านใช้ — ใช้ในข้อความเท่านั้น) */
+const beDate = (iso: string) => {
+  const [y = "", m = "", d = ""] = iso.split("-");
+  return `${d}/${m}/${Number(y) + 543}`;
+};
+
+/** error ที่ route แปลงเป็น HTTP ได้ตรง ๆ — extra = ข้อมูลเพิ่มใน body (เช่นผล quote ตอน 409) */
+export class BuyError extends Error {
+  constructor(
+    message: string,
+    readonly field: string,
+    readonly status: 403 | 409,
+    readonly extra: Record<string, unknown> = {},
+  ) {
+    super(message);
+  }
+}
+
+// ---------- body ----------
+
+// เงิน/น้ำหนักรับเป็น string เท่านั้น — ตัวเลข JSON (float) = 400 (CLAUDE.md กฎ 1) · ตรวจค่าต่อใน quoteBuy
+const decimalText = z.string({ error: "ต้องส่งเป็นข้อความตัวเลข" }).max(32, "ตัวเลขยาวเกินไป");
+const optionalText = (max: number, label: string) =>
+  z
+    .string({ error: `${label}ต้องเป็นข้อความ` })
+    .trim()
+    .max(max, `${label}ยาวเกิน ${max} ตัวอักษร`)
+    .nullish()
+    .transform((v) => v || null);
+
+const LineBody = z.object({
+  // โลหะที่ไม่รู้จักตรวจใน prepareBuy (ตอบเป็น error ของแถว ไม่ใช่ 400)
+  metal_id: z.string({ error: "กรุณาเลือกประเภทโลหะ" }).max(64, "metal_id ไม่ถูกต้อง"),
+  weight_g: decimalText,
+  amount: decimalText,
+});
+
+const PaymentBody = z.object({
+  // วิธีที่ไม่รู้จักตรวจใน quoteBuy (PAYMENT_METHODS)
+  method: z.string({ error: "กรุณาเลือกประเภทเงินที่ชำระ" }).max(32, "กรุณาเลือกประเภทเงินที่ชำระ"),
+  bank: optionalText(100, "ชื่อธนาคาร"),
+  amount: decimalText,
+});
+
+/** payload ของ POST /buy/quote — POST /buy ใช้ตัวนี้ + ช่องของหัวบิล (SaveBody) */
+export const QuoteBody = z.object(
+  {
+    date: z.iso.date("วันที่ต้องเป็นรูปแบบ YYYY-MM-DD").optional(),
+    customer_id: z.uuid("customer_id ไม่ถูกต้อง").nullish(),
+    lines: z.array(LineBody, { error: "ต้องส่ง lines เป็นรายการ" }).max(50, "รายการในบิลเกิน 50 แถว — แยกเป็นหลายบิล"),
+    payments: z
+      .array(PaymentBody, { error: "ต้องส่ง payments เป็นรายการ" })
+      .max(10, "วิธีชำระเงินเกิน 10 รายการต่อบิล"),
+  },
+  { error: "ต้องส่งข้อมูลเป็น JSON object" },
+);
+export type QuoteBody = z.infer<typeof QuoteBody>;
+
+const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+const IDEMPOTENCY_KEY = /^[A-Za-z0-9_-]{16,128}$/;
+
+export const SaveBody = QuoteBody.extend({
+  time: z.string({ error: "เวลาต้องเป็นรูปแบบ HH:MM" }).regex(TIME, "เวลาต้องเป็นรูปแบบ HH:MM").optional(),
+  detail: optionalText(2000, "รายละเอียด"),
+  full_tax: z.boolean({ error: "full_tax ต้องเป็น true หรือ false" }).default(false),
+  idempotency_key: z
+    .string({ error: "ต้องมี idempotency_key" })
+    .regex(IDEMPOTENCY_KEY, "idempotency_key ต้องยาว 16–128 ตัวอักษร (A-Z a-z 0-9 _ -)"),
+});
+export type SaveBody = z.infer<typeof SaveBody>;
+
+// ---------- quote (ฟังก์ชันเดียวกันทั้ง preview และบันทึก) ----------
+
+type CustomerRow = typeof customer.$inferSelect;
+
+export interface PreparedBuy {
+  branch: BranchRef;
+  /** วันทำการตามเวลาไทย */
+  today: string;
+  /** วันที่ของบิล (ย้อนหลังได้ · ห้ามเกินวันนี้) */
+  date: string;
+  price: TodayPrice | null;
+  customer: CustomerRow | null;
+  quote: QuoteBuyResult;
+  errors: QuoteError[];
+  ok: boolean;
+}
+
+/**
+ * ขั้นเดียวที่ทั้ง POST /buy/quote และ POST /buy เรียก (CLAUDE.md กฎ 2) — ตัวเลขทั้งหมดมาจาก quoteBuy() ใน @ong/core
+ * ส่วนที่ต้องอ่าน DB (สาขา · ราคาทองของวันบิล · ลูกค้า · โลหะ) ทำที่นี่แล้วต่อ error เข้ากับผลของ quoteBuy
+ */
+export async function prepareBuy(db: Db, viewer: Viewer, body: QuoteBody, now: Date): Promise<PreparedBuy> {
+  const where = currentBranch(viewer, await forUser(db, viewer));
+  if (!where) throw new BuyError(BUY_API_MSG.noBranch, "branch", 403);
+
+  const today = businessDate(now);
+  // ย้อนหลังได้ (คีย์ใบเขียนมือหลังระบบล่ม · spec §11) — ราคาทองของวันนั้นต้องมี · อนาคตไม่ได้
+  const date = body.date ?? today;
+  const [price, customerRow, metals] = await Promise.all([
+    priceForBranch(db, date, where.id),
+    body.customer_id ? findCustomer(db, body.customer_id) : null,
+    db.select({ id: metal.id }).from(metal),
+  ]);
+
+  const quote = quoteBuy({
+    lines: body.lines.map((l) => ({ metalId: l.metal_id, weightG: l.weight_g, amount: l.amount })),
+    payments: body.payments.map((p) => ({ method: p.method, bank: p.bank, amount: p.amount })),
+    // สถานะบัตรคิด ณ วันที่ของบิล — บิลย้อนหลังใช้บัตรที่ยังไม่หมดอายุในวันนั้นได้
+    customer: customerRow ? { id: customerRow.id, cardStatus: cardStatus(customerRow.cardExpireText, date) } : null,
+    goldPriceSet: price !== null,
+  });
+
+  const known = new Set(metals.map((m) => m.id));
+  const errors: QuoteError[] = [
+    ...(date > today ? [{ field: "date", message: BUY_API_MSG.futureDate }] : []),
+    // ข้อความของ core พูดถึง "วันนี้" — บิลย้อนหลังบอกวันที่ที่ขาดราคาให้ชัด
+    ...quote.errors.map((e) =>
+      e.field === "gold_price" && date !== today ? { ...e, message: BUY_API_MSG.noGoldPriceOn(date) } : e,
+    ),
+    ...body.lines.flatMap((l, i) =>
+      known.has(l.metal_id) ? [] : [{ field: `lines.${i}.metal_id`, message: BUY_API_MSG.unknownMetal }],
+    ),
+  ];
+  return { branch: where, today, date, price, customer: customerRow, quote, errors, ok: errors.length === 0 };
+}
+
+/** ผลของ POST /buy/quote (และแนบกับ 409 ของ POST /buy) — เงิน/น้ำหนักเป็น string */
+export const quoteJson = (p: PreparedBuy) => ({
+  ok: p.ok,
+  errors: p.errors,
+  date: p.date,
+  branch: { id: p.branch.id, code: p.branch.code, name: p.branch.name },
+  gold_price_snapshot: p.price?.barSell ?? null,
+  lines: p.quote.lines.map((l) => ({
+    index: l.index,
+    metal_id: l.metalId,
+    weight_g: l.weightG,
+    amount: l.amount,
+    price_per_g: l.pricePerG,
+  })),
+  total_weight: p.quote.totalWeight,
+  total_amount: p.quote.totalAmount,
+  avg_price_per_g: p.quote.avgPricePerG,
+  paid: p.quote.paid,
+  balance: p.quote.balance,
+});
+
+// ---------- บันทึก ----------
+
+export interface SavedBuy {
+  id: string;
+  doc_no: string;
+  pdf_status: string;
+}
+
+const snapshotOf = (c: CustomerRow): CustomerSnapshot => ({
+  national_id: c.nationalId,
+  name_th: c.nameTh,
+  name_en: c.nameEn,
+  birthday_text: c.birthdayText,
+  religion: c.religion,
+  address: c.address,
+  card_issue_text: c.cardIssueText,
+  card_expire_text: c.cardExpireText,
+  mobile: c.mobile,
+  phone2: c.phone2,
+  photo_key: c.photoKey,
+});
+
+/** error ของ Postgres (drizzle ห่อไว้ใน cause) */
+const pgError = (e: unknown): { code?: string; constraint_name?: string } | null => {
+  for (let cur: unknown = e, depth = 0; cur && depth < 3; depth++) {
+    const err = cur as { code?: unknown; constraint_name?: unknown; cause?: unknown };
+    if (typeof err.code === "string") return err as { code: string; constraint_name?: string };
+    cur = err.cause;
+  }
+  return null;
+};
+
+/** key เดิมของผู้ใช้คนเดิม = คำตอบเดิม (กดซ้ำ/เน็ตหลุด) · ของคนอื่น = 409 */
+async function findReplay(db: Db, viewer: Viewer, key: string): Promise<SavedBuy | null> {
+  const [row] = await db
+    .select({ id: buyReceipt.id, docNo: buyReceipt.docNo, pdfStatus: buyReceipt.pdfStatus, by: buyReceipt.createdBy })
+    .from(buyReceipt)
+    .where(eq(buyReceipt.idempotencyKey, key))
+    .limit(1);
+  if (!row) return null;
+  if (row.by !== viewer.userId) throw new BuyError(BUY_API_MSG.keyTaken, "idempotency_key", 409);
+  return { id: row.id, doc_no: row.docNo, pdf_status: row.pdfStatus };
+}
+
+async function insertBuy(db: Db, viewer: Viewer, p: PreparedBuy, body: SaveBody, time: string): Promise<SavedBuy> {
+  const buyer = p.customer;
+  const price = p.price;
+  if (!p.ok || !buyer || !price) throw new Error("insertBuy: quote ไม่ผ่าน");
+  return db.transaction(async (tx) => {
+    // ออกเลขในทรานแซกชันเดียวกัน — rollback แล้วเลขคืน ไม่มีเลขหาย · ล็อกแถวตัวนับกันเลขชน (R9)
+    const [seq] = await tx.execute<{ doc_no: string }>(
+      sql`select next_doc_no(${p.branch.id}::uuid, 'RC', ${p.date}::date) as doc_no`,
+    );
+    if (!seq) throw new Error("next_doc_no returned nothing");
+    const [receipt] = await tx
+      .insert(buyReceipt)
+      .values({
+        branchId: p.branch.id,
+        docNo: seq.doc_no,
+        date: p.date,
+        time,
+        customerId: buyer.id,
+        customerSnapshot: snapshotOf(buyer),
+        goldPriceSnapshot: price.barSell,
+        detail: body.detail,
+        fullTax: body.full_tax,
+        totalWeight: p.quote.totalWeight,
+        totalAmount: p.quote.totalAmount,
+        pdfStatus: "pending",
+        idcardStatus: buyer.photoKey ? "pending" : "none",
+        createdBy: viewer.userId,
+        idempotencyKey: body.idempotency_key,
+      })
+      .returning({ id: buyReceipt.id, docNo: buyReceipt.docNo, pdfStatus: buyReceipt.pdfStatus });
+    if (!receipt) throw new Error("insert buy_receipt returned nothing");
+
+    await tx.insert(buyLine).values(
+      p.quote.lines.map((l, i) => ({
+        receiptId: receipt.id,
+        lineNo: i + 1,
+        metalId: l.metalId,
+        weightG: l.weightG,
+        amount: l.amount,
+        pricePerG: l.pricePerG,
+      })),
+    );
+    await tx
+      .insert(payment)
+      .values(
+        p.quote.payments.map((x) => ({ receiptId: receipt.id, method: x.method, bank: x.bank, amount: x.amount })),
+      );
+    // R11 — ของเข้าสต็อกของสาขา ณ วันที่ของบิล
+    await tx.insert(stockMovement).values(
+      p.quote.lines.map((l) => ({
+        branchId: p.branch.id,
+        metalId: l.metalId,
+        date: p.date,
+        grams: l.weightG,
+        sourceReceiptId: receipt.id,
+      })),
+    );
+    if (p.date < p.today) {
+      await tx.insert(auditLog).values({
+        userId: viewer.userId,
+        action: "buy.backdate",
+        tableName: "buy_receipt",
+        rowId: receipt.id,
+        diff: { doc_no: receipt.docNo, date: p.date, time, entered_on: p.today },
+      });
+    }
+    // Σชำระ = ยอดบิล ตรวจซ้ำตอน commit โดย deferred trigger check_receipt_paid (ตาข่ายชั้นสุดท้าย)
+    return { id: receipt.id, doc_no: receipt.docNo, pdf_status: receipt.pdfStatus };
+  });
+}
+
+/**
+ * POST /buy — quote ด้วยขั้นเดียวกับ /buy/quote แล้วบันทึกทั้งบิลในทรานแซกชันเดียว
+ * replay = key เดิมของผู้ใช้คนเดิม (ตอบ 200 ด้วยบิลเดิม ไม่สร้างใหม่)
+ */
+export async function saveBuy(
+  db: Db,
+  viewer: Viewer,
+  body: SaveBody,
+  now: Date,
+  time: string,
+): Promise<{ replay: boolean; receipt: SavedBuy }> {
+  const prepared = await prepareBuy(db, viewer, body, now);
+  // ตรวจ key ก่อนผล quote — กดซ้ำหลังบันทึกไปแล้ว (เช่นข้ามเที่ยงคืน) ต้องได้บิลเดิม ไม่ใช่ error
+  const existing = await findReplay(db, viewer, body.idempotency_key);
+  if (existing) return { replay: true, receipt: existing };
+  const first = prepared.errors[0];
+  if (first) throw new BuyError(first.message, first.field, 409, quoteJson(prepared));
+  try {
+    return { replay: false, receipt: await insertBuy(db, viewer, prepared, body, time) };
+  } catch (e) {
+    const pg = pgError(e);
+    if (pg?.code === "23505" && pg.constraint_name === "buy_receipt_idempotency_key_unique") {
+      // ส่งพร้อมกันด้วย key เดียวกัน — ตัวที่ commit ก่อนชนะ ตัวที่เหลือได้บิลนั้น
+      const winner = await findReplay(db, viewer, body.idempotency_key);
+      if (winner) return { replay: true, receipt: winner };
+    }
+    if (pg?.code === "23505" && pg.constraint_name === "buy_receipt_branch_doc_no") {
+      throw new BuyError(BUY_API_MSG.docNoTaken, "doc_no", 409);
+    }
+    throw e;
+  }
+}
+
+// ---------- อ่าน (scoped ตามสาขาที่อ่านได้) ----------
+
+export const LIST_PAGE_SIZE = 50;
+
+export const ListQuery = z.object({
+  date_from: z.iso.date("date_from ต้องเป็นรูปแบบ YYYY-MM-DD").optional(),
+  date_to: z.iso.date("date_to ต้องเป็นรูปแบบ YYYY-MM-DD").optional(),
+  /** code ของโลหะ (gold · nak · silver · platinum) — บิลที่มีโลหะนั้นอย่างน้อยหนึ่งแถว */
+  metal: z.string().trim().max(32, "metal ไม่ถูกต้อง").optional(),
+  q: z
+    .string()
+    .trim()
+    .max(100, "คำค้นยาวเกิน 100 ตัวอักษร")
+    .refine((q) => q.length === 0 || q.length >= 2, "ค้นอย่างน้อย 2 ตัวอักษร")
+    .default(""),
+  branch_id: z.string().max(64, "branch_id ไม่ถูกต้อง").optional(),
+  page: z.coerce
+    .number("page ต้องเป็นตัวเลข")
+    .int("page ต้องเป็นจำนวนเต็ม")
+    .min(1, "page เริ่มที่ 1")
+    .max(10_000)
+    .default(1),
+});
+export type ListQuery = z.infer<typeof ListQuery>;
+
+const hhmm = (t: string) => t.slice(0, 5);
+
+/**
+ * ค้นบิลย้อนหลัง — เฉพาะสาขาที่อ่านได้ (fail-closed): branch_id ที่ไม่มีสิทธิ์ = รายการว่าง ไม่ใช่ทุกสาขา
+ * ลูกค้าแสดงจาก snapshot ตอนเปิดบิล · เลขบัตรมาสก์ (R13)
+ */
+export async function listBuys(db: Db, readable: BranchRef[], query: ListQuery) {
+  const scope = query.branch_id ? readable.filter((b) => b.id === query.branch_id) : readable;
+  if (scope.length === 0) return { items: [], hasMore: false };
+  const branches = new Map(scope.map((b) => [b.id, { id: b.id, code: b.code, name: b.name }]));
+
+  const conditions: SQL[] = [
+    inArray(
+      buyReceipt.branchId,
+      scope.map((b) => b.id),
+    ),
+  ];
+  if (query.date_from) conditions.push(gte(buyReceipt.date, query.date_from));
+  if (query.date_to) conditions.push(lte(buyReceipt.date, query.date_to));
+  if (query.metal) {
+    conditions.push(
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(buyLine)
+          .innerJoin(metal, eq(metal.id, buyLine.metalId))
+          .where(and(eq(buyLine.receiptId, buyReceipt.id), eq(metal.code, query.metal))),
+      ),
+    );
+  }
+  if (query.q) {
+    const text = `%${escapeLike(query.q)}%`;
+    const snap = buyReceipt.customerSnapshot;
+    const any: SQL[] = [
+      ilike(buyReceipt.docNo, text),
+      sql`${snap}->>'name_th' ilike ${text}`,
+      sql`${snap}->>'name_en' ilike ${text}`,
+    ];
+    const digits = query.q.replace(/\D/g, "");
+    if (digits.length >= 2) any.push(sql`${snap}->>'national_id' like ${`%${digits}%`}`);
+    const match = or(...any);
+    if (match) conditions.push(match);
+  }
+
+  const rows = await db
+    .select({
+      id: buyReceipt.id,
+      docNo: buyReceipt.docNo,
+      date: buyReceipt.date,
+      time: buyReceipt.time,
+      branchId: buyReceipt.branchId,
+      customerId: buyReceipt.customerId,
+      snapshot: buyReceipt.customerSnapshot,
+      totalWeight: buyReceipt.totalWeight,
+      totalAmount: buyReceipt.totalAmount,
+      status: buyReceipt.status,
+      pdfStatus: buyReceipt.pdfStatus,
+      createdBy: buyReceipt.createdBy,
+      createdByName: user.name,
+    })
+    .from(buyReceipt)
+    .innerJoin(user, eq(user.id, buyReceipt.createdBy))
+    .where(and(...conditions))
+    .orderBy(desc(buyReceipt.date), desc(buyReceipt.time), desc(buyReceipt.docNo), desc(buyReceipt.id))
+    .limit(LIST_PAGE_SIZE + 1)
+    .offset((query.page - 1) * LIST_PAGE_SIZE);
+
+  const items = rows.slice(0, LIST_PAGE_SIZE).map((r) => ({
+    id: r.id,
+    doc_no: r.docNo,
+    date: r.date,
+    time: hhmm(r.time),
+    branch: branches.get(r.branchId) ?? null,
+    customer: {
+      id: r.customerId,
+      name_th: r.snapshot.name_th,
+      national_id_masked: maskNationalId(r.snapshot.national_id),
+    },
+    total_weight: r.totalWeight,
+    total_amount: r.totalAmount,
+    status: r.status,
+    pdf_status: r.pdfStatus,
+    created_by: { id: r.createdBy, name: r.createdByName },
+  }));
+  return { items, hasMore: rows.length > LIST_PAGE_SIZE };
+}
+
+/** บิลเดียว — uuid ผิดรูป / ไม่มี / สาขาอ่านไม่ได้ = null (route ตอบ 404 เหมือนกันหมด ไม่บอกว่ามีอยู่) */
+export async function getBuy(db: Db, readable: BranchRef[], id: string) {
+  if (!z.uuid().safeParse(id).success || readable.length === 0) return null;
+  const [row] = await db
+    .select({
+      receipt: buyReceipt,
+      branch: { id: branch.id, code: branch.code, name: branch.name, taxBranchCode: branch.taxBranchCode },
+      createdByName: user.name,
+    })
+    .from(buyReceipt)
+    .innerJoin(branch, eq(branch.id, buyReceipt.branchId))
+    .innerJoin(user, eq(user.id, buyReceipt.createdBy))
+    .where(
+      and(
+        eq(buyReceipt.id, id),
+        inArray(
+          buyReceipt.branchId,
+          readable.map((b) => b.id),
+        ),
+      ),
+    )
+    .limit(1);
+  if (!row) return null;
+
+  const [lines, payments] = await Promise.all([
+    db
+      .select({
+        lineNo: buyLine.lineNo,
+        weightG: buyLine.weightG,
+        amount: buyLine.amount,
+        pricePerG: buyLine.pricePerG,
+        metalId: metal.id,
+        metalCode: metal.code,
+        metalName: metal.nameTh,
+      })
+      .from(buyLine)
+      .innerJoin(metal, eq(metal.id, buyLine.metalId))
+      .where(eq(buyLine.receiptId, id))
+      .orderBy(asc(buyLine.lineNo)),
+    db
+      .select()
+      .from(payment)
+      .where(eq(payment.receiptId, id))
+      // payment ไม่มีลำดับแถว — เรียงให้คงที่: เงินสดก่อน แล้วตามธนาคาร
+      .orderBy(asc(payment.method), asc(payment.bank), asc(payment.amount), asc(payment.id)),
+  ]);
+
+  const r = row.receipt;
+  const snap = r.customerSnapshot;
+  return {
+    id: r.id,
+    doc_no: r.docNo,
+    date: r.date,
+    time: hhmm(r.time),
+    branch: {
+      id: row.branch.id,
+      code: row.branch.code,
+      name: row.branch.name,
+      tax_branch_code: row.branch.taxBranchCode,
+    },
+    customer: {
+      id: r.customerId,
+      name_th: snap.name_th,
+      name_en: snap.name_en,
+      address: snap.address,
+      national_id_masked: maskNationalId(snap.national_id),
+    },
+    gold_price_snapshot: r.goldPriceSnapshot,
+    detail: r.detail,
+    full_tax: r.fullTax,
+    lines: lines.map((l) => ({
+      line_no: l.lineNo,
+      metal: { id: l.metalId, code: l.metalCode, name_th: l.metalName },
+      weight_g: l.weightG,
+      amount: l.amount,
+      price_per_g: l.pricePerG,
+    })),
+    payments: payments.map((p) => ({
+      method: p.method,
+      method_label: isPaymentMethod(p.method) ? PAYMENT_METHODS[p.method] : p.method,
+      bank: p.bank,
+      amount: p.amount,
+    })),
+    total_weight: r.totalWeight,
+    total_amount: r.totalAmount,
+    avg_price_per_g: avgPricePerG(r.totalAmount, r.totalWeight),
+    status: r.status,
+    pdf_status: r.pdfStatus,
+    idcard_status: r.idcardStatus,
+    created_by: { id: r.createdBy, name: row.createdByName },
+    created_at: r.createdAt.toISOString(),
+    voided_at: r.voidedAt?.toISOString() ?? null,
+    void_reason: r.voidReason,
+  };
+}
