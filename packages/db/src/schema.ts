@@ -188,6 +188,25 @@ export const docSequence = pgTable(
 
 // ---------- ซื้อเข้าหน้าร้าน ----------
 
+/**
+ * ข้อมูลลูกค้า ณ ตอนเปิดบิล (R15) — PDF ทุกฉบับของบิล (รวมฉบับยกเลิกที่สร้างทีหลังหลายวัน) ต้องออกมาเหมือนตอนขาย
+ * แม้ลูกค้าถูกแก้ภายหลัง · ชื่อ key ตามคอลัมน์ของ customer · เลขบัตรเต็มอยู่ที่นี่เพื่อ PDF — api ต้องมาสก์ทุกที่ (R13)
+ */
+export interface CustomerSnapshot {
+  national_id: string;
+  name_th: string;
+  name_en: string | null;
+  birthday_text: string | null;
+  religion: string | null;
+  address: string | null;
+  card_issue_text: string | null;
+  card_expire_text: string | null;
+  mobile: string | null;
+  phone2: string | null;
+  /** object key ของรูปบัตรตอนเปิดบิล — สำเนาบัตรต้องใช้รูปนี้ ไม่ใช่รูปล่าสุด */
+  photo_key: string | null;
+}
+
 export const buyReceipt = pgTable(
   "buy_receipt",
   {
@@ -201,6 +220,7 @@ export const buyReceipt = pgTable(
     customerId: uuid("customer_id")
       .notNull()
       .references(() => customer.id),
+    customerSnapshot: jsonb("customer_snapshot").$type<CustomerSnapshot>().notNull(),
     /** ราคาทองแท่งขายออก ณ วันเปิดบิล (ระบบเดิม sold_out) — ติดบิล ไม่ใช้คำนวณ */
     goldPriceSnapshot: money("gold_price_snapshot").notNull(),
     detail: text("detail"),
