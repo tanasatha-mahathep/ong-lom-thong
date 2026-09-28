@@ -100,3 +100,23 @@ describe("apiFetch — error เป็น ApiError เสมอ", () => {
     expect(errorMessage(new Error("boom"))).toBe("เกิดข้อผิดพลาด ลองใหม่อีกครั้ง");
   });
 });
+
+describe("errorMessage — จอภาษาไทยไม่แสดงข้อความอังกฤษจาก API", () => {
+  it.each([
+    [400, "branch_id ไม่ถูกต้อง", "branch_id ไม่ถูกต้อง"],
+    [404, "ยังไม่ได้ตั้งราคาทองของวันนี้", "ยังไม่ได้ตั้งราคาทองของวันนี้"],
+    [400, "invalid query", "ข้อมูลไม่ถูกต้อง"],
+    [401, "unauthorized", "หมดเวลาใช้งาน เข้าสู่ระบบใหม่อีกครั้ง"],
+    [403, "forbidden", "ไม่มีสิทธิ์"],
+    [404, "not found", "ไม่พบข้อมูล"],
+    [409, "Conflict", "ข้อมูลขัดแย้งกับที่มีอยู่"],
+    [413, "Payload Too Large", "ไฟล์ใหญ่เกินไป"],
+    [429, "Too many requests. Please try again later.", "ลองใหม่อีกครั้งในอีกสักครู่"],
+    [500, "internal error", "เซิร์ฟเวอร์ขัดข้อง ลองใหม่อีกครั้ง"],
+    [502, "Bad Gateway", "เซิร์ฟเวอร์ขัดข้อง ลองใหม่อีกครั้ง"],
+    [0, "ติดต่อเซิร์ฟเวอร์ไม่ได้", "ติดต่อเซิร์ฟเวอร์ไม่ได้ ตรวจการเชื่อมต่อแล้วลองใหม่"],
+    [418, "I'm a teapot", "เกิดข้อผิดพลาด ลองใหม่อีกครั้ง"],
+  ])("%i %j → %j", (status, error, expected) => {
+    expect(errorMessage(new ApiError(status, error, undefined, { error }))).toBe(expected);
+  });
+});

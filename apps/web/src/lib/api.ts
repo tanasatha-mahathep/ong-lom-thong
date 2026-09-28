@@ -101,8 +101,26 @@ export async function apiFetch<T>(
   return schema ? schema.parse(data) : data;
 }
 
-/** ข้อความสำหรับแสดงผู้ใช้จาก error ใด ๆ */
+const THAI = /[\u0E00-\u0E7F]/;
+const FALLBACK = "เกิดข้อผิดพลาด ลองใหม่อีกครั้ง";
+const STATUS_MESSAGE: Readonly<Record<number, string>> = {
+  0: "ติดต่อเซิร์ฟเวอร์ไม่ได้ ตรวจการเชื่อมต่อแล้วลองใหม่",
+  400: "ข้อมูลไม่ถูกต้อง",
+  401: "หมดเวลาใช้งาน เข้าสู่ระบบใหม่อีกครั้ง",
+  403: "ไม่มีสิทธิ์",
+  404: "ไม่พบข้อมูล",
+  409: "ข้อมูลขัดแย้งกับที่มีอยู่",
+  413: "ไฟล์ใหญ่เกินไป",
+  415: "รูปแบบข้อมูลไม่ถูกต้อง",
+  429: "ลองใหม่อีกครั้งในอีกสักครู่",
+};
+
+/**
+ * ข้อความภาษาไทยสำหรับแสดงผู้ใช้จาก error ใด ๆ — ที่เดียวของทั้งแอป
+ * ข้อความจาก API แสดงตรง ๆ เฉพาะเมื่อเป็นภาษาไทย (เช่น "branch_id ไม่ถูกต้อง") · อังกฤษ/ไม่มีข้อความ = แปลตาม status
+ */
 export function errorMessage(e: unknown): string {
-  if (e instanceof ApiError) return e.error;
-  return "เกิดข้อผิดพลาด ลองใหม่อีกครั้ง";
+  if (!(e instanceof ApiError)) return FALLBACK;
+  if (e.status !== 0 && THAI.test(e.error)) return e.error;
+  return STATUS_MESSAGE[e.status] ?? (e.status >= 500 ? "เซิร์ฟเวอร์ขัดข้อง ลองใหม่อีกครั้ง" : FALLBACK);
 }

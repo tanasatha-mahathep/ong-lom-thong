@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ApiError, apiFetch } from "@/lib/api";
+import { ApiError, apiFetch, errorMessage } from "@/lib/api";
 import { BranchSchema } from "@/lib/queries";
 
 /** login ด้วย better-auth (origin เดียวกัน) — สำเร็จแล้ว server ตั้ง cookie HttpOnly ให้เอง ไม่มี token ฝั่ง browser */
@@ -26,8 +26,7 @@ export async function switchBranch(branchId: string) {
 /** ข้อความภาษาไทยของ error ตอน login (เรียงตามสิ่งที่พนักงานเจอบ่อย) */
 export function signInErrorMessage(e: unknown, origin: string): string {
   if (!(e instanceof ApiError)) return "เข้าสู่ระบบไม่สำเร็จ ลองใหม่อีกครั้ง";
-  if (e.status === 0) return "ติดต่อเซิร์ฟเวอร์ไม่ได้ ตรวจการเชื่อมต่อแล้วลองใหม่";
-  if (e.status === 429) return "ลองใหม่อีกครั้งในอีกสักครู่";
+  if (e.status === 0 || e.status === 429) return errorMessage(e);
   // บัญชีถูกปิด — databaseHooks ของ api ไม่ยอมสร้าง session
   if (e.code === "FAILED_TO_CREATE_SESSION") return "บัญชีนี้ถูกปิดใช้งาน ติดต่อผู้ดูแลระบบ";
   if (e.status === 400 || e.status === 401) return "อีเมลหรือรหัสผ่านไม่ถูกต้อง";
