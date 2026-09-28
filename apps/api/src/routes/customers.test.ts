@@ -239,10 +239,31 @@ describe.skipIf(!available)("ลูกค้า (Siam ID · R12 · R13) — /api
     ["ตลอดชีพ", "ok", null],
     ["", "missing", null],
     ["31/02/2570", "invalid", null],
+    // ชื่อเดือน (Siam ID · ระบบเดิม · หน้าบัตร) · ค่าดิบจากชิป · บัตรตลอดชีพ
+    ["31 ธันวาคม 2574", "ok", "2031-12-31"],
+    ["27 ก.ย. 2569", "expired", "2026-09-27"],
+    ["28 Sep. 2026", "ok", "2026-09-28"],
+    ["25741231", "ok", "2031-12-31"],
+    ["LIFELONG", "ok", null],
+    ["99999999", "ok", null],
+    ["1 มกรา 2570", "invalid", null], // ชื่อเดือนแบบพูด — ต้องสะกดตรงตัว
   ])("สถานะบัตร: หมดอายุ %j → %s", async (card_expire_text, status, date) => {
     const res = await put(idA, form({ card_expire_text }));
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ card_status: status, card_expire_date: date });
+  });
+
+  it("Siam ID พิมพ์ '31 ธันวาคม 2574' → เก็บข้อความดิบ · card_expire_date ค.ศ. · สถานะ ok ทั้งหน้าเดี่ยวและรายการ", async () => {
+    const res = await put(idA, form({ card_expire_text: "31 ธันวาคม 2574" }));
+    expect(res.status).toBe(200);
+    const expected = { card_expire_text: "31 ธันวาคม 2574", card_expire_date: "2031-12-31", card_status: "ok" };
+    expect(await res.json()).toMatchObject(expected);
+    expect(await (await get(`/${idA}`)).json()).toMatchObject(expected);
+
+    const [row] = await t.db.select().from(customer).where(eq(customer.id, idA));
+    expect(row).toMatchObject({ cardExpireText: "31 ธันวาคม 2574", cardExpireDate: "2031-12-31" });
+    const list = (await (await get("")).json()) as ListBody;
+    expect(list.items.find((c) => c.id === idA)?.card_status).toBe("ok");
   });
 
   it("แก้ไข: เก็บ audit เฉพาะช่องที่เปลี่ยน · ไม่ส่งรูป = รูปเดิม", async () => {
