@@ -1,3 +1,4 @@
+import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
 import {
   BUY_MSG,
@@ -6,6 +7,7 @@ import {
   PAYMENT_METHODS,
   avgPricePerG,
   isPaymentMethod,
+  pricePerGram,
   quoteBuy,
   type BuyLineInput,
   type PaymentInput,
@@ -636,14 +638,6 @@ describe("quoteBuy — วิธีชำระซ้ำ (R5): กุญแจ�
       [payRow(0, "transfer", "10000.00", "KBANK"), payRow(1, "transfer", "10030.00")],
     ],
     [
-      // วิธีที่รับได้เหลือ cash/transfer (PAYMENT_METHODS) — ใช้ cash + ธนาคารเดียวกันแทน cheque
-      // เพื่อคงเจตนาเดิม: สองแถวต่างกันที่ "วิธี" อย่างเดียว กุญแจจึงไม่ชนกัน
-      "คนละวิธี ธนาคารเดียวกัน",
-      transfer("KBANK", "10000"),
-      { method: "cash", bank: "KBANK", amount: "10030" },
-      [payRow(0, "transfer", "10000.00", "KBANK"), payRow(1, "cash", "10030.00", "KBANK")],
-    ],
-    [
       "คนละวิธี ไม่มีธนาคารทั้งคู่",
       cash("10000"),
       { method: "transfer", amount: "10030" },
@@ -651,6 +645,16 @@ describe("quoteBuy — วิธีชำระซ้ำ (R5): กุญแจ�
     ],
   ])("%s → ไม่ซ้ำ ชำระครบ ok", (_label, first, second, payments) => {
     expect(quoteBuy(base({ payments: [first, second] }))).toStrictEqual({ ...REAL_OK, payments });
+  });
+
+  // "คนละวิธี ธนาคารเดียวกัน" ต้องใช้เงินสด + ธนาคาร (วิธีที่รับได้มีแค่ cash/transfer) แต่ธนาคารบนแถวเงินสด
+  // ยังเป็นคำถาม product (เก็บ/ทิ้ง/ปฏิเสธ) — จึงตรวจเฉพาะเจตนาของกุญแจ: วิธีต่างกัน → แถวหลังไม่ขึ้น "ซ้ำ"
+  it("คนละวิธี ธนาคารเดียวกัน → ไม่ซ้ำ (ไม่ผูกผลของธนาคารบนแถวเงินสด)", () => {
+    const r = quoteBuy(
+      base({ payments: [transfer("KBANK", "10000"), { method: "cash", bank: "KBANK", amount: "10030" }] }),
+    );
+    expect(r.errors).not.toContainEqual(err("payments.1.method", BUY_MSG.paymentDup));
+    expect(r.payments[0]).toStrictEqual(payRow(0, "transfer", "10000.00", "KBANK"));
   });
 
   it("ซ้ำสามแถว → ข้อผิดที่แถว 1 และ 2 · นับเฉพาะแถวแรก", () => {
@@ -839,6 +843,344 @@ describe("quoteBuy — ฟังก์ชันบริสุทธิ์: prev
       ok: false,
       errors: [err("lines.1.weight_g", BUY_MSG.weightPositive), err("payments.1.method", BUY_MSG.paymentDup)],
     });
+  });
+});
+
+// ── เพดานต่อแถว ──────────────────────────────────────────────────────────────────────────────────────
+// เพดานพิมพ์ตรงตัวในตาราง (ไม่อ้าง MAX_LINE_*) ให้ oracle อิสระ · ขั้นเล็กสุด: น้ำหนัก 0.001 g · เงิน 0.01 บาท
+describe("quoteBuy — เพดานต่อแถว: ค่าขอบ น้ำหนัก 999,999.999 g · ราคา 99,999,999.99 บาท", () => {
+  it("ค่าคงที่กับข้อความที่พนักงานเห็นบอกเพดานเดียวกัน", () => {
+    expect(MAX_LINE_WEIGHT_G).toBe("999999.999");
+    expect(MAX_LINE_AMOUNT).toBe("99999999.99");
+    expect(BUY_MSG.weightMax).toContain("999,999.999");
+    expect(BUY_MSG.amountMax).toContain("99,999,999.99");
+  });
+
+  it.each([
+    ["1000000.000", BUY_MSG.weightMax], // เหนือเพดาน 1 ขั้น (0.001 g)
+    ["1000000", BUY_MSG.weightMax], // ค่าเดียวกัน ไม่มีทศนิยม
+    ["1,000,000", BUY_MSG.weightMax], // คอมมาหลักพันถูกตัดก่อนตรวจ
+    ["1000000.0001", BUY_MSG.weightScale], // เกินทั้งเพดานและสเกล → ตรวจสเกลก่อน บอกข้อเดียว
+    ["-1000000", BUY_MSG.weightPositive], // ติดลบ → ตรวจค่าบวกก่อน
+  ])("น้ำหนัก %j → %s ที่ lines.0.weight_g ข้อเดียว และไม่นับรวมยอด", (w, msg) => {
+    expect(quoteBuy(base({ lines: [line(w, "100")], payments: [] }))).toStrictEqual({
+      ok: false,
+      errors: [err("lines.0.weight_g", msg)],
+      ...NOTHING_COUNTED,
+    });
+  });
+
+  it.each([
+    ["999999.998", "ต่ำกว่าเพดาน 1 ขั้น"],
+    ["999999.999", "เท่าเพดานพอดี"],
+  ])("น้ำหนัก %s (%s) → ใช้ได้", (weightG) => {
+    // 100 ÷ 999,999.99x = 0.0001000… → HALF_UP 2 → 0.00 (ราคา/กรัมใช้แสดงเท่านั้น แถวยังใช้ได้)
+    expect(quoteBuy(base({ lines: [line(weightG, "100")], payments: [cash("100")] }))).toStrictEqual({
+      ok: true,
+      errors: [],
+      lines: [{ index: 0, metalId: GOLD, weightG, amount: "100.00", pricePerG: "0.00" }],
+      payments: [payRow(0, "cash", "100.00")],
+      totalWeight: weightG,
+      totalAmount: "100.00",
+      avgPricePerG: "0.00",
+      paid: "100.00",
+      balance: "0.00",
+    });
+  });
+
+  it.each([
+    ["100000000.00", BUY_MSG.amountMax], // เหนือเพดาน 1 ขั้น (0.01 บาท)
+    ["100000000", BUY_MSG.amountMax],
+    ["100,000,000", BUY_MSG.amountMax],
+    ["100000000.001", BUY_MSG.amountScale], // เกินทั้งเพดานและสเกล → ตรวจสเกลก่อน
+    ["-100000000", BUY_MSG.amountPositive],
+  ])("ราคา %j → %s ที่ lines.0.amount ข้อเดียว และไม่นับรวมยอด", (a, msg) => {
+    expect(quoteBuy(base({ lines: [line("1", a)], payments: [] }))).toStrictEqual({
+      ok: false,
+      errors: [err("lines.0.amount", msg)],
+      ...NOTHING_COUNTED,
+    });
+  });
+
+  it.each([
+    ["99999999.98", "ต่ำกว่าเพดาน 1 ขั้น"],
+    ["99999999.99", "เท่าเพดานพอดี"],
+  ])("ราคา %s (%s) → ใช้ได้", (amount) => {
+    // น้ำหนัก 1 กรัม → ราคา/กรัม = ราคาเฉลี่ย/กรัม = ราคา
+    expect(quoteBuy(base({ lines: [line("1", amount)], payments: [cash(amount)] }))).toStrictEqual({
+      ok: true,
+      errors: [],
+      lines: [{ index: 0, metalId: GOLD, weightG: "1.000", amount, pricePerG: amount }],
+      payments: [payRow(0, "cash", amount)],
+      totalWeight: "1.000",
+      totalAmount: amount,
+      avgPricePerG: amount,
+      paid: amount,
+      balance: "0.00",
+    });
+  });
+
+  it("ราคา/กรัมสูงสุดที่เกิดได้: เพดานราคา ÷ น้ำหนักเล็กสุด = 99,999,999.99 ÷ 0.001 = 99,999,999,990.00", () => {
+    expect(quoteBuy(base({ lines: [line("0.001", "99999999.99")], payments: [cash("99999999.99")] }))).toStrictEqual({
+      ok: true,
+      errors: [],
+      lines: [{ index: 0, metalId: GOLD, weightG: "0.001", amount: "99999999.99", pricePerG: "99999999990.00" }],
+      payments: [payRow(0, "cash", "99999999.99")],
+      totalWeight: "0.001",
+      totalAmount: "99999999.99",
+      avgPricePerG: "99999999990.00",
+      paid: "99999999.99",
+      balance: "0.00",
+    });
+  });
+
+  it("เพดานเป็นต่อแถว ไม่ใช่ต่อบิล: 50 แถว (สูงสุดที่ API รับ) ที่เพดานพอดี → ใช้ได้ ยอดรวมยังพอดี numeric ใน DB", () => {
+    const r = quoteBuy(
+      base({
+        lines: Array.from({ length: 50 }, () => line("999999.999", "99999999.99")),
+        payments: [cash("4999999999.50")],
+      }),
+    );
+    expect(r.errors).toStrictEqual([]);
+    expect(r.ok).toBe(true);
+    expect(r.lines.map((l) => l.index)).toStrictEqual(Array.from({ length: 50 }, (_, i) => i));
+    // ต่อแถว: 99,999,999.99 ÷ 999,999.999 = 100.00000009 → 100.00
+    expect(r.lines.map((l) => l.pricePerG)).toStrictEqual(Array.from({ length: 50 }, () => "100.00"));
+    expect(r.payments).toStrictEqual([payRow(0, "cash", "4999999999.50")]);
+    expect([r.totalWeight, r.totalAmount, r.avgPricePerG, r.paid, r.balance]).toStrictEqual([
+      "49999999.950", // 50 × 999,999.999 — 8 หลักหน้าจุด ≤ 9 ของ numeric(12,3)
+      "4999999999.50", // 50 × 99,999,999.99 — 10 หลักหน้าจุด ≤ 12 ของ numeric(14,2)
+      "100.00", // 4,999,999,999.50 ÷ 49,999,999.95 = 100.00000009 → 100.00
+      "4999999999.50",
+      "0.00",
+    ]);
+  });
+});
+
+// ── วิธีชำระ ───────────────────────────────────────────────────────────────────────────────────────────
+const UNPAID = err("payments", BUY_MSG.unbalanced("20030.00")); // แถวชำระไม่ถูกนับ → ค้างเต็มยอดบิลใบจริง
+const NOT_COUNTED = { payments: [], paid: "0.00", balance: "20030.00" };
+
+describe("quoteBuy — วิธีชำระ: กลุ่มสมมูลของค่า method (PAYMENT_METHODS · isPaymentMethod)", () => {
+  it("ข้อความเดียวกับระบบเดิม (02 §3.4)", () => {
+    expect(BUY_MSG.paymentMethod).toBe("กรุณาเลือกประเภทเงินที่ชำระ");
+  });
+
+  it.each<[PaymentMethod]>([["cash"], ["transfer"]])("%s → วิธีที่รับได้ ชำระครบ ok", (method) => {
+    expect(isPaymentMethod(method)).toBe(true);
+    expect(quoteBuy(base({ payments: [{ method, amount: "20030" }] }))).toStrictEqual({
+      ...REAL_OK,
+      payments: [payRow(0, method, "20030.00")],
+    });
+  });
+
+  it.each<[string, unknown]>([
+    ["สตริงว่าง", ""],
+    ["วิธีที่ไม่รู้จัก", "cheque"],
+    ["ตัวพิมพ์ต่าง", "Cash"],
+    ["มีช่องว่างหัวท้าย — key ต้องตรงตัว ไม่ตัดให้", " cash "],
+    ["key ของ prototype: toString", "toString"],
+    ["key ของ prototype: __proto__", "__proto__"],
+    ["key ของ prototype: constructor", "constructor"],
+    ["key ของ prototype: hasOwnProperty", "hasOwnProperty"],
+    ["null (cast)", null],
+    ["undefined (cast)", undefined],
+    ["ตัวเลข (cast)", 1],
+    ["boolean (cast)", true],
+    ['อาร์เรย์ ["cash"] (cast) — ถ้าไม่เช็กชนิด key จะถูกแปลงเป็น "cash"', ["cash"]],
+    ['String object ของ "cash" (cast)', new String("cash")],
+    ['object ที่ toString() ได้ "cash" (cast)', { toString: () => "cash" }],
+  ])("%s → กรุณาเลือกประเภทเงินที่ชำระ · แถวไม่ถูกนับ", (_label, method) => {
+    expect(isPaymentMethod(method)).toBe(false);
+    expect(quoteBuy(base({ payments: [{ method: method as string, amount: "20030" }] }))).toStrictEqual({
+      ...REAL_OK,
+      ok: false,
+      errors: [err("payments.0.method", BUY_MSG.paymentMethod), UNPAID],
+      ...NOT_COUNTED,
+    });
+  });
+
+  it('แถวที่วิธีผิดไม่ถึงด่านวิธีซ้ำ: สองแถววิธีว่าง → แจ้ง "เลือกวิธี" ทั้งสองแถว ไม่ขึ้น "ซ้ำ"', () => {
+    expect(
+      quoteBuy(
+        base({
+          payments: [
+            { method: "", amount: "10000" },
+            { method: "", amount: "10030" },
+          ],
+        }),
+      ),
+    ).toStrictEqual({
+      ...REAL_OK,
+      ok: false,
+      errors: [
+        err("payments.0.method", BUY_MSG.paymentMethod),
+        err("payments.1.method", BUY_MSG.paymentMethod),
+        UNPAID,
+      ],
+      ...NOT_COUNTED,
+    });
+  });
+});
+
+describe("quoteBuy — แถวชำระ: ตารางตัดสินใจ วิธี × จำนวนเงิน (แจ้งครบทุกช่องของแถว ไม่หยุดที่ช่องแรก)", () => {
+  it("วิธีถูก · เงินถูก → นับเป็นยอดชำระ", () => {
+    expect(quoteBuy(base({ payments: [{ method: "cash", amount: "20030" }] }))).toStrictEqual(REAL_OK);
+  });
+
+  // ทุกกฎที่เหลือ: แถวไม่ถูกนับ · ข้อผิดของช่อง method มาก่อน amount เสมอ
+  it.each<[string, string, string, QuoteError[]]>([
+    ["วิธีผิด · เงินถูก", "", "20030", [err("payments.0.method", BUY_MSG.paymentMethod), UNPAID]],
+    ["วิธีถูก · เงินว่าง", "cash", "", [err("payments.0.amount", BUY_MSG.paymentAmount), UNPAID]],
+    ["วิธีถูก · เงินทศนิยมเกิน", "cash", "20030.001", [err("payments.0.amount", BUY_MSG.amountScale), UNPAID]],
+    [
+      "วิธีผิด · เงินว่าง",
+      "",
+      "",
+      [err("payments.0.method", BUY_MSG.paymentMethod), err("payments.0.amount", BUY_MSG.paymentAmount), UNPAID],
+    ],
+    [
+      "วิธีผิด · เงินติดลบ",
+      "cheque",
+      "-1",
+      [err("payments.0.method", BUY_MSG.paymentMethod), err("payments.0.amount", BUY_MSG.paymentAmount), UNPAID],
+    ],
+    [
+      "วิธีผิด · เงินทศนิยมเกิน",
+      "cheque",
+      "20030.001",
+      [err("payments.0.method", BUY_MSG.paymentMethod), err("payments.0.amount", BUY_MSG.amountScale), UNPAID],
+    ],
+  ])("%s", (_label, method, amount, errors) => {
+    expect(quoteBuy(base({ payments: [{ method, amount }] }))).toStrictEqual({
+      ...REAL_OK,
+      ok: false,
+      errors,
+      ...NOT_COUNTED,
+    });
+  });
+});
+
+// ── ธนาคาร ─────────────────────────────────────────────────────────────────────────────────────────────
+// ธนาคารที่มีค่าใช้กับ "โอน" · ธนาคารว่างใช้กับ "เงินสด" — ไม่ผูกคู่ที่ยังเป็นคำถาม product (เงินสด+ธนาคาร · โอนไม่มีธนาคาร)
+describe("quoteBuy — ธนาคาร: ตัดช่องว่างหัวท้ายทั้งในแถวที่บันทึกและในกุญแจวิธีซ้ำ · ว่าง = null", () => {
+  it.each<[string, string, string]>([
+    ["ช่องว่างหัวท้าย", "KBANK", " KBANK "],
+    ["tab/ขึ้นบรรทัด", "KBANK", "\tKBANK\n"],
+    ["NBSP จากการคัดลอกหน้าเว็บ", "KBANK", "\u00a0KBANK\u00a0"],
+  ])("โอน · ธนาคาร%s → %j", (_label, kept, bank) => {
+    expect(quoteBuy(base({ payments: [{ method: "transfer", bank, amount: "20030" }] }))).toStrictEqual({
+      ...REAL_OK,
+      payments: [payRow(0, "transfer", "20030.00", kept)],
+    });
+  });
+
+  it.each<[string, string | null | undefined]>([
+    ["มีแต่ช่องว่าง", "   "],
+    ["มีแต่ tab/ขึ้นบรรทัด", "\t\n"],
+    ["NBSP ล้วน", "\u00a0"],
+    ["สตริงว่าง", ""],
+    ["null", null],
+    ["ไม่ส่ง (undefined)", undefined],
+  ])("เงินสด · ธนาคาร%s → null", (_label, bank) => {
+    expect(quoteBuy(base({ payments: [{ method: "cash", bank, amount: "20030" }] }))).toStrictEqual(REAL_OK);
+  });
+
+  // สองแถว 10,000 + 10,030 ที่ธนาคารต่างกันแค่ช่องว่างหัวท้าย = กุญแจเดียวกัน → แถวหลังซ้ำ ไม่นับ
+  it.each<[string, PaymentMethod, string | null, string | null | undefined, string | null | undefined]>([
+    ['โอน " KBANK " กับ "KBANK"', "transfer", "KBANK", " KBANK ", "KBANK"],
+    ['โอน "KBANK" กับ "\\tKBANK\\n"', "transfer", "KBANK", "KBANK", "\tKBANK\n"],
+    ['โอน NBSP+KBANK กับ "KBANK "', "transfer", "KBANK", "\u00a0KBANK", "KBANK "],
+    ['เงินสด "   " กับ null', "cash", null, "   ", null],
+    ['เงินสด "\\t" กับไม่ส่ง bank', "cash", null, "\t", undefined],
+  ])("%s → ซ้ำ · เก็บแถวแรกเป็น %s ธนาคาร %j", (_label, method, kept, first, second) => {
+    expect(
+      quoteBuy(
+        base({
+          payments: [
+            { method, bank: first, amount: "10000" },
+            { method, bank: second, amount: "10030" },
+          ],
+        }),
+      ),
+    ).toStrictEqual({
+      ...REAL_OK,
+      ok: false,
+      errors: [err("payments.1.method", BUY_MSG.paymentDup), err("payments", BUY_MSG.unbalanced("10030.00"))],
+      payments: [payRow(0, method, "10000.00", kept)],
+      paid: "10000.00",
+      balance: "10030.00",
+    });
+  });
+
+  it('ตัดช่องว่างแล้วยังคนละธนาคาร (" KBANK " กับ " SCB ") → ไม่ซ้ำ · เก็บชื่อที่ตัดแล้ว', () => {
+    expect(
+      quoteBuy(
+        base({
+          payments: [
+            { method: "transfer", bank: " KBANK ", amount: "10000" },
+            { method: "transfer", bank: " SCB ", amount: "10030" },
+          ],
+        }),
+      ),
+    ).toStrictEqual({
+      ...REAL_OK,
+      payments: [payRow(0, "transfer", "10000.00", "KBANK"), payRow(1, "transfer", "10030.00", "SCB")],
+    });
+  });
+});
+
+// ── pricePerGram / avgPricePerG ────────────────────────────────────────────────────────────────────────
+describe("pricePerGram — ราคา ÷ น้ำหนัก HALF_UP 2 ตำแหน่ง (สูตรเดียว: ต่อแถว · ใบรับซื้อ · ราคาเฉลี่ย)", () => {
+  // ผลเป็น Decimal — เทียบด้วย toString() ที่แสดงค่าจริงทุกหลัก ไม่ใช้ toFixed(2) ซึ่งปัดเองจนซ่อนขั้นปัดที่หายไป
+  it.each([
+    // [ราคา, น้ำหนัก, ผลหารจริง, ที่ต้องได้]
+    ["12.44", "10", "1.244", "1.24"], // …4 → ลง (CEIL/UP จะได้ 1.25)
+    ["12.45", "10", "1.245", "1.25"], // …5 → ขึ้น (HALF_EVEN/HALF_DOWN จะได้ 1.24)
+    ["12.46", "10", "1.246", "1.25"], // …6 → ขึ้น (FLOOR/DOWN จะได้ 1.24)
+    ["0.04", "10", "0.004", "0"], // ปัดเหลือศูนย์
+    ["0.05", "10", "0.005", "0.01"], // HALF_EVEN/FLOOR → 0
+    ["0.06", "10", "0.006", "0.01"],
+    ["1", "8", "0.125", "0.13"],
+    ["1", "3", "0.333…", "0.33"], // ผลหารไม่รู้จบ
+    ["2", "3", "0.666…", "0.67"],
+    ["20030", "5.86", "3418.0887…", "3418.09"], // ใบจริง
+    ["99999999.99", "0.001", "99999999990", "99999999990"], // เพดานราคา ÷ น้ำหนักเล็กสุด
+  ])("%s ÷ %s = %s → %s", (amount, weight, _exact, expected) => {
+    expect(pricePerGram(new Decimal(amount), new Decimal(weight)).toString()).toBe(expected);
+  });
+});
+
+describe("avgPricePerG — ยอดรวม ÷ น้ำหนักรวม HALF_UP 2 · น้ำหนักรวม ≤ 0 → 0.00 · รับคอมมา", () => {
+  it.each([
+    ["0", "บนขอบพอดี"],
+    ["0.000", "ศูนย์ที่มีทศนิยม"],
+    ["-0", "ลบศูนย์"],
+    ["-0.001", "ต่ำกว่าศูนย์ 1 ขั้น"],
+    ["-5", "ติดลบ"],
+    ["-1,000", "ติดลบและมีคอมมา"],
+  ])("น้ำหนักรวม %j (%s) → 0.00 ไม่หาร", (weight) => {
+    expect(avgPricePerG("100", weight)).toBe("0.00");
+  });
+
+  it.each([
+    // [ยอดรวม, น้ำหนักรวม, ที่ต้องได้]
+    ["1", "0.001", "1000.00"], // เหนือศูนย์ 1 ขั้น: 1 ÷ 0.001 = 1,000
+    ["12.44", "10", "1.24"], // …4
+    ["12.45", "10", "1.25"], // …5 (HALF_EVEN → 1.24)
+    ["12.46", "10", "1.25"], // …6
+    ["0", "5.860", "0.00"], // ยอดศูนย์
+    ["21,530.00", "105.860", "203.38"], // 21,530 ÷ 105.86 = 203.3818… → 203.38
+    ["20,030", "5.860", "3418.09"], // 20,030 ÷ 5.86 = 3,418.0887… → 3,418.09
+    ["1,000,000.00", "1,000", "1000.00"], // คอมมาทั้งสองช่อง: 1,000,000 ÷ 1,000
+    [" 20030 ", " 5.860 ", "3418.09"], // ช่องว่างหัวท้าย
+  ])("%j ÷ %j → %s", (amount, weight, expected) => {
+    expect(avgPricePerG(amount, weight)).toBe(expected);
+  });
+
+  it("รับ Decimal ตรง ๆ (เส้นทางที่ quoteBuy ส่งเข้า)", () => {
+    expect(avgPricePerG(new Decimal("20030"), new Decimal("5.86"))).toBe("3418.09");
+    expect(avgPricePerG(new Decimal("100"), new Decimal("0"))).toBe("0.00");
   });
 });
 
