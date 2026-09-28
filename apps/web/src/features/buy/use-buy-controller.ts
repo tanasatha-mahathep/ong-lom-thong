@@ -1,7 +1,7 @@
 import { CARD_STATUS_MESSAGE, type CardStatus, isValidNationalId } from "@ong/core";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useReducer, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useReducer, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -122,6 +122,11 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
   const [saveIssue, setSaveIssue] = useState<{ field: string | undefined; message: string } | null>(null);
   const [conflict, setConflict] = useState<ExistingBill | null>(null);
   const [branchLost, setBranchLost] = useState(false);
+  /**
+   * โฟกัสที่รอ <fieldset disabled> เลิกปิดก่อน (React ยังไม่ทันเอา disabled ออกตอนบันทึกล้มเหลว — .focus() บน
+   * element ที่อยู่ใต้ fieldset disabled ไม่ทำอะไร) — ref ไม่ใช่ state: ไม่ต้อง render ซ้ำเพื่อจดจำค่านี้
+   */
+  const pendingFocus = useRef<FocusName | null>(null);
   const { nodes, register } = useFocusRegistry();
   /** หนึ่ง key ต่อบิลหนึ่งใบ — ใช้ซ้ำทุกครั้งที่กดบันทึกบิลนี้ (เน็ตหลุดแล้วกดใหม่ = ได้บิลเดิม) */
   const idempotencyKey = useRef<string | null>(null);
@@ -144,6 +149,7 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
     // ไม่รู้ผล (เน็ตหลุด/5xx) ส่งซ้ำด้วย key เดิมได้ปลอดภัย — API ตอบบิลเดิมถ้าบันทึกไปแล้ว
     retry: (count, error) => error instanceof ApiError && (error.status === 0 || error.status >= 500) && count < 2,
   });
+  const saving = save.isPending;
 
   // ---------- ผล quote ----------
 
@@ -178,9 +184,18 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
     return errorFor(errors, field)?.message;
   }
 
+  /** ช่องกรอกแถวที่พิมพ์ไว้แต่ยังไม่ได้กด Enter เพิ่มเข้ารายการ — บันทึกไปตอนนี้จะทำข้อความนั้นหายเงียบ ๆ */
+  function unsavedEntryTarget(): "weight" | "paymentAmount" | null {
+    const le = state.lineEntry;
+    if (le.weight_g.trim() !== "" || le.amount.trim() !== "") return "weight";
+    const pe = state.paymentEntry;
+    if (pe.bank.trim() !== "" || pe.amount.trim() !== "") return "paymentAmount";
+    return null;
+  }
+
   /** เหตุที่ยังบันทึกไม่ได้ + ช่องที่ต้องไปแก้ — null = บันทึกได้ */
   function computeSaveBlock(): SaveBlock | null {
-    if (save.isPending) return { message: t("save.saving"), target: null };
+    if (saving) return { message: t("save.saving"), target: null };
     if (noBranch) return { message: t("access.noBranchTitle"), target: null };
     const bd = backdateIssue(state.backdate);
     if (bd) {
@@ -189,6 +204,8 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
         target: bd.field === "date" ? "backdateDate" : "backdateTime",
       };
     }
+    const unsaved = unsavedEntryTarget();
+    if (unsaved) return { message: t("save.unsavedEntry"), target: unsaved };
     if (quoteProblem instanceof ApiError) {
       if (quoteProblem.status === 0 || quoteProblem.status >= 500) return { message: t("save.offline"), target: null };
       const target = quoteProblem.field ? focusTargetForField(quoteProblem.field, customer !== null) : null;
@@ -222,6 +239,28 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
     flushSync(() => dispatch(action));
     if (then) focusOn(then);
   }
+
+  /**
+   * จองโฟกัสไว้ก่อน — ใช้แทน focusOn() ตรง ๆ ตอนบันทึกล้มเหลว: ช่องเป้าหมายยังอยู่ใต้ `<fieldset disabled={saving}>`
+   * ที่ React ยังไม่ทันเอา disabled ออกในจังหวะเดียวกับที่ catch ของ mutation ทำงาน (.focus() บน element
+   * ที่ถูก disable ไว้ไม่ทำอะไรเลย เงียบ ๆ) — เอฟเฟกต์ด้านล่างค่อยย้ายโฟกัสจริงเมื่อ saving กลับเป็น false
+   */
+  function queueFocus(name: FocusName | null) {
+    if (name) pendingFocus.current = name;
+  }
+
+  const applyPendingFocus = useEffectEvent(() => {
+    const name = pendingFocus.current;
+    if (!name) return;
+    pendingFocus.current = null;
+    focusOn(name);
+  });
+  // ไม่มี deps array โดยตั้งใจ — รันทุกครั้งที่ render (ราคาถูก: ปกติ pendingFocus.current เป็น null แล้ว return ทันที)
+  // เพราะ mutation ที่ตอบเร็วมาก (เช่น mock ในเทสต์) อาจไม่มี render ที่ saving เป็น true เลยสักครั้ง — useEffect([saving])
+  // จะไม่ทำงานซ้ำเมื่อ saving คงที่เป็น false ตลอด ทั้งที่ยังมี render ใหม่เกิดขึ้นจริงหลัง onSaveError เรียก queueFocus
+  useEffect(() => {
+    if (!saving) applyPendingFocus();
+  });
 
   // ---------- ลูกค้า ----------
 
@@ -293,13 +332,25 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
 
   // ---------- รายการ ----------
 
+  /**
+   * บิลย้อนหลังยังพิมพ์/ยืนยันไม่เสร็จ — buildQuoteBody คืน null ตอนนี้ ทำให้เพิ่มแถว/การชำระผ่านได้โดยไม่ผ่าน
+   * API เลย (ข้ามการตรวจแถวไปดื้อ ๆ) จึงกันไว้ตรงนี้แทนที่จะปล่อยให้เพิ่มแบบไม่มีใครตรวจ
+   */
+  function blockOnBackdate(): boolean {
+    const bd = backdateIssue(state.backdate);
+    if (!bd) return false;
+    toast.error(t(`backdate.errors.${bd.error}`));
+    focusOn(bd.field === "date" ? "backdateDate" : "backdateTime");
+    return true;
+  }
+
   function lineError(error: EntryError<LineEntryField>) {
     act({ type: "lineErrorSet", error }, LINE_FOCUS[error.field]);
   }
 
   /** เพิ่มแถวเมื่อ API ตรวจแถวใหม่ผ่าน (quote ของบิลที่มีแถวนั้น) — ผลค้างใน cache จึงเห็นราคา/กรัมทันที */
   async function addLine() {
-    if (busy.current.line) return;
+    if (busy.current.line || blockOnBackdate()) return;
     const entry = state.lineEntry;
     const weight = normalizeDecimalInput(entry.weight_g);
     const amount = normalizeDecimalInput(entry.amount);
@@ -343,7 +394,7 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
 
   /** เพิ่มการชำระเมื่อ API ตรวจผ่าน และไม่ทำให้จ่ายเกินยอด (R4) — ยอดพอดีแล้วไปที่ปุ่มบันทึก */
   async function addPayment() {
-    if (busy.current.payment) return;
+    if (busy.current.payment || blockOnBackdate()) return;
     const entry = state.paymentEntry;
     const picked = paymentMethodEntry();
     if (!picked) return;
@@ -409,7 +460,7 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
     if (!(e instanceof ApiError) || e.status === 0 || e.status >= 500) {
       // ไม่รู้ว่าบันทึกไปหรือยัง — key เดิมยังอยู่ กดอีกครั้งได้บิลเดิม (ไม่ซ้ำ)
       toast.error(t("save.network"));
-      focusOn("save");
+      queueFocus("save");
       return;
     }
     if (e.status === 401) return;
@@ -421,7 +472,7 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
       }
       idempotencyKey.current = null;
       toast.error(t("save.keyChanged"));
-      focusOn("save");
+      queueFocus("save");
       return;
     }
     if (e.status === 403) {
@@ -441,7 +492,8 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
       setSaveIssue({ field: e.field, message: errorMessage(e) });
     }
     toast.error(t("save.failed", { error: errorMessage(e) }));
-    focusOn((e.field && focusTargetForField(e.field, customer !== null)) || "save");
+    // จองไว้ก่อน แทนที่จะ focusOn() ตรง ๆ — ช่องเป้าหมายอาจยังอยู่ใต้ fieldset ที่ยังไม่ทันเลิก disabled
+    queueFocus((e.field && focusTargetForField(e.field, customer !== null)) || "save");
   }
 
   async function submit() {
@@ -506,7 +558,7 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
     customerBlock,
     cardStatus,
     saveBlock,
-    saving: save.isPending,
+    saving,
     conflict,
     actions: {
       focusOn,

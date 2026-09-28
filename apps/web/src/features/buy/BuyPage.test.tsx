@@ -20,8 +20,8 @@ interface Options {
   role?: Role;
   me?: Me;
   customers?: FakeCustomer[];
-  /** แทนคำตอบของ POST /api/buy (ค่าเริ่มต้น 201 + SAVED) */
-  save?: (body: SaveBody, attempt: number) => Response;
+  /** แทนคำตอบของ POST /api/buy (ค่าเริ่มต้น 201 + SAVED) — คืน Promise ได้เพื่อคุมเวลาตอบเอง (ดู defer()) */
+  save?: (body: SaveBody, attempt: number) => Response | Promise<Response>;
 }
 
 function setup({ role = "staff", me, customers = [CUSTOMER_OK, CUSTOMER_EXPIRED], save }: Options = {}) {
@@ -58,6 +58,15 @@ async function insertCard(user: ReturnType<typeof userEvent.setup>, nationalId: 
 async function addLine(user: ReturnType<typeof userEvent.setup>, w: string, a: string) {
   await user.click(weight());
   await user.keyboard(`${w}{Enter}${a}{Enter}`);
+}
+
+/** promise ที่คุมเวลาตอบเอง — ใช้จำลองช่วงที่ POST /api/buy ยัง pending จริง (fieldset ปิดค้างอยู่จริง ไม่ใช่ผ่านไปเร็วจนไม่มีใครเห็น) */
+function defer<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 describe("/buy", () => {
@@ -382,5 +391,83 @@ describe("/buy", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("blocks save while a typed line or payment entry has not been added yet (S1)", async () => {
+    const { api, user } = setup();
+    await insertCard(user, CUSTOMER_OK.national_id);
+    await waitFor(() => expect(weight()).toHaveFocus());
+    await addLine(user, "5.86", "20030");
+    await user.click(await screen.findByRole("button", { name: t("payments.payFull") }));
+    await screen.findByText(t("payments.balanced"));
+    expect(saveButton()).toHaveAttribute("aria-disabled", "false");
+
+    // พิมพ์ปริมาณของแถวใหม่ไว้แต่ยังไม่ได้กด Enter เพิ่มเข้ารายการ
+    await user.click(weight());
+    await user.keyboard("1");
+    expect(saveButton()).toHaveAttribute("aria-disabled", "true");
+    expect(saveButton()).toHaveAccessibleDescription(t("save.unsavedEntry"));
+    const before = saves(api).length;
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    expect(weight()).toHaveFocus();
+    expect(saves(api)).toHaveLength(before);
+
+    await user.clear(weight());
+    expect(saveButton()).toHaveAttribute("aria-disabled", "false");
+
+    // ช่องชำระเงินก็เช่นกัน
+    await user.click(payAmount());
+    await user.keyboard("5");
+    expect(saveButton()).toHaveAttribute("aria-disabled", "true");
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    expect(payAmount()).toHaveFocus();
+    expect(saves(api)).toHaveLength(before);
+  });
+
+  it("returns focus to Save once the fieldset re-enables, not while it is still disabled (S2)", async () => {
+    const pending = defer<Response>();
+    const { user } = setup({ save: () => pending.promise });
+    await insertCard(user, CUSTOMER_OK.national_id);
+    await waitFor(() => expect(weight()).toHaveFocus());
+    await addLine(user, "5.86", "20030");
+    await user.click(await screen.findByRole("button", { name: t("payments.payFull") }));
+    await screen.findByText(t("payments.balanced"));
+
+    // จับ element ไว้ก่อนกด — ข้อความในปุ่มเปลี่ยนเป็น "กำลังบันทึก…" ระหว่างรอ ทำให้ query ด้วยชื่อ "บันทึก" หาไม่เจอ
+    const save = saveButton();
+    await user.click(save);
+    // ปุ่มบันทึกมีโฟกัสจากการคลิกอยู่แล้ว — ย้ายโฟกัสออกไปนอก fieldset ก่อน (เมนูข้างที่ไม่ได้อยู่ใต้ fieldset ที่ปิด)
+    // แล้วค่อยลองย้ายกลับมาที่ปุ่ม เพื่อพิสูจน์ว่า .focus() ตรง ๆ ระหว่างรอคำตอบใช้ไม่ได้จริง (ไม่ใช่แค่ปุ่มยังมีโฟกัสเดิมค้างอยู่)
+    const homeLink = screen.getByRole("link", { name: "หน้าแรก" });
+    homeLink.focus();
+    expect(homeLink).toHaveFocus();
+    save.focus();
+    expect(save).not.toHaveFocus();
+
+    // ตอบ 409 แบบไม่มี existing (key ชนแต่ parse ไม่ออก) → คืน key ใหม่ + โฟกัสปุ่มบันทึกอีกครั้ง
+    pending.resolve(json({ error: "idempotency_key นี้ถูกใช้แล้ว", field: "idempotency_key" }, 409));
+    await waitFor(() => expect(save).toHaveFocus());
+  });
+
+  it("returns focus to the payment amount once the fieldset re-enables, after a 409 on payments (S2)", async () => {
+    const pending = defer<Response>();
+    const { user } = setup({ save: () => pending.promise });
+    await insertCard(user, CUSTOMER_OK.national_id);
+    await waitFor(() => expect(weight()).toHaveFocus());
+    await addLine(user, "5.86", "20030");
+    await user.click(await screen.findByRole("button", { name: t("payments.payFull") }));
+    await screen.findByText(t("payments.balanced"));
+
+    await user.click(saveButton());
+    // เช่นเดียวกับเทสต์ข้างบน — ระหว่างรอคำตอบ .focus() ตรง ๆ บนช่องจำนวนเงินทำอะไรไม่ได้เพราะ fieldset ปิดอยู่
+    payAmount().focus();
+    expect(payAmount()).not.toHaveFocus();
+
+    const q = fakeQuote(
+      { customer_id: CUSTOMER_OK.id, lines: [{ metal_id: "m-gold", weight_g: "5.86", amount: "20030" }], payments: [] },
+      [CUSTOMER_OK],
+    );
+    pending.resolve(json({ error: "ยอดชำระไม่ตรงกับยอดบิล", field: "payments", ...q }, 409));
+    await waitFor(() => expect(payAmount()).toHaveFocus());
   });
 });

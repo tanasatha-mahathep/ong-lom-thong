@@ -143,6 +143,7 @@ export default {
     balance: "คงเหลือ",
     baht: "บาท",
     calculating: "กำลังคำนวณ…",
+    unsavedEntry: "มีรายการที่ยังไม่ได้เพิ่ม — กด Enter หรือ Esc",
     offline: "เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — กำลังลองใหม่",
     saved: "บันทึกแล้ว เลขที่ {{docNo}}",
     failed: "บันทึกไม่สำเร็จ: {{error}}",
