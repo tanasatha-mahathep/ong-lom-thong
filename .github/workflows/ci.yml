@@ -20,6 +20,19 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # เทสต์ของ apps/api ใช้ Postgres จริง (สร้าง database ต่อไฟล์เทสต์) — รุ่นเดียวกับ Railway
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ong
+          POSTGRES_PASSWORD: ong
+          POSTGRES_DB: ong
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ong" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://ong:ong@localhost:5432/postgres
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
