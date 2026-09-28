@@ -7,6 +7,17 @@ import type { Env } from "./env";
 /** กะทำงานหน้าร้าน — session หมดอายุใน 12 ชม. และต่ออายุเมื่อใช้งานทุกชั่วโมง */
 const SESSION_SECONDS = 60 * 60 * 12;
 
+/**
+ * IP ของ client สำหรับ rate limit (sign-in 5 ครั้ง/นาที ต่อ IP) และ session.ipAddress — เชื่อ X-Real-IP อย่างเดียว
+ * Railway edge เขียน X-Real-IP เป็น IP จริงของ client ค่าเดียว ทับค่าที่ client ส่งมาเสมอ (ทดสอบกับ edge sin1 แล้ว)
+ * ไม่ใช้ X-Forwarded-For: Railway ส่ง "<client>, <IP ของ edge>" 2 ค่า → better-auth ไม่เชื่อค่าหลายตัว = ทั้งร้านรวมถังเดียว
+ * และ IP ของ edge เปลี่ยนตาม POP (trustedProxies ต้องไล่ตาม) · Forwarded / CF-Connecting-IP / True-Client-IP
+ * ผ่าน edge ไปตรง ๆ = client ปลอมได้ ห้ามเพิ่ม
+ * ไม่มี X-Real-IP: dev/test = 127.0.0.1 · production = ถังรวมถังเดียว + warn ใน log (ไม่เดา IP จาก header อื่น)
+ * ถ้าย้ายไปหลัง proxy อื่น (เช่น nginx) ต้องตั้ง X-Real-IP = IP ของ client ทับค่าเดิมทุก request
+ */
+export const CLIENT_IP_HEADERS = ["x-real-ip"];
+
 export function createAuth(db: Db, env: Env) {
   return betterAuth({
     appName: "ONG หลอมทอง",
@@ -60,6 +71,7 @@ export function createAuth(db: Db, env: Env) {
     },
     advanced: {
       useSecureCookies: env.NODE_ENV === "production",
+      ipAddress: { ipAddressHeaders: CLIENT_IP_HEADERS },
     },
   });
 }
