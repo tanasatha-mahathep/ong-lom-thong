@@ -14,7 +14,8 @@ WITH_ENV  := set -a && . ./.env && set +a &&
 
 .PHONY: help setup install dev infra-up infra-down infra-reset logs \
 	db-migrate db-seed db-generate db-psql \
-	check lint lint-fix format format-check typecheck test test-watch build docker-api \
+	check lint lint-fix format format-check typecheck test test-coverage test-watch build bundle-budget docker-api \
+	scan ci-lint secret-scan sast sca security smoke e2e-up e2e e2e-down ci-full testsprite-probe testsprite-doctor \
 	railway-link railway-plan railway-apply railway-logs railway-status \
 	branch pr merge promote sync clean
 
@@ -64,7 +65,7 @@ db-psql: ## psql เข้า DB local
 	docker compose exec postgres psql -U ong -d ong
 
 ##@ ตรวจคุณภาพ — ชุดเดียวกับ CI
-check: lint format-check typecheck test build ## ทุกอย่างที่ CI ตรวจ (ต้องผ่านก่อน commit)
+check: lint format-check typecheck test test-coverage build bundle-budget ## ทุกอย่างที่ job check ใน CI ตรวจ (ต้องผ่านก่อน commit)
 
 lint: ## eslint
 	pnpm lint
@@ -81,8 +82,12 @@ format-check: ## prettier --check
 typecheck: ## tsc ทุกแพ็กเกจ + .railway
 	pnpm typecheck
 
-test: ## vitest ทุกแพ็กเกจ (เทสต์ api ต้องมี postgres — make infra-up)
+test: ## vitest ทุก project + เทสต์ตัวห่อ TestSprite (เทสต์ api ต้องมี postgres — make infra-up)
 	pnpm test
+	pnpm --filter @ong/testsprite test
+
+test-coverage: ## ด่าน coverage 100% ต่อไฟล์ของ packages/core จากเทสต์หน่วย (รายงาน coverage/)
+	pnpm test:coverage
 
 test-watch: ## vitest โหมด watch
 	pnpm test:watch
@@ -90,8 +95,54 @@ test-watch: ## vitest โหมด watch
 build: ## build web + api
 	pnpm build
 
+bundle-budget: build ## ขนาด gzip ของ JS/CSS ใน apps/web/dist เทียบ scripts/ci/bundle-budget.json
+	node scripts/ci/bundle-budget.js
+
 docker-api: ## build image ของ api แบบเดียวกับ Railway
 	docker build -f apps/api/Dockerfile -t $(API_IMAGE) .
+
+##@ ความปลอดภัย — scanner ใน container ปัก digest · คำสั่งเดียวกับ CI (ต้องมี docker + jq)
+scan: ci-lint secret-scan sast ## ทุกอย่างที่ job scan ใน CI ตรวจ
+
+ci-lint: ## actionlint · zizmor · shellcheck (.github + scripts/ci)
+	scripts/ci/ci-lint.sh
+
+secret-scan: ## gitleaks: ไฟล์ที่ commit ได้ + ประวัติทั้งหมด · กัน .env ถูก track
+	scripts/ci/secret-scan.sh
+
+sast: ## semgrep CE บน apps/ packages/ (fail เมื่อเจอ ERROR)
+	scripts/ci/sast.sh
+
+sca: ## osv-scanner บน pnpm-lock.yaml (fail เมื่อ HIGH/CRITICAL · ignore ต้องมีเหตุผล + วันหมดอายุ)
+	scripts/ci/sca.sh
+
+security: ## สแกนทั้ง 4 ตัว — รันครบทุกตัวแม้ตัวก่อนหน้า fail แล้วสรุปทีเดียว
+	@rc=0; for s in ci-lint secret-scan sast sca; do scripts/ci/$$s.sh || rc=1; done; exit $$rc
+
+##@ ring 1 — image · e2e (Docker · build ทีละตัว ดิสก์ของ Docker VM จำกัด)
+smoke: ## build image ของ api แบบเดียวกับ Railway แล้ว smoke (SKIP_BUILD=1 IMAGE=<tag> = ใช้ image ที่มีอยู่)
+	scripts/ci/image-smoke.sh
+
+e2e-up: ## เปิด stack e2e (compose ong-e2e · api :28787 · gotenberg :23000) · secrets ใหม่ทุกรอบ (API_IMAGE=<tag> = ใช้ image ที่มีแล้ว)
+	bash tests/e2e/stack/stack.sh up
+
+e2e: ## Playwright ทุก project กับ stack ที่เปิดอยู่ (ARGS="--project=api" เลือกได้)
+	pnpm --filter @ong/e2e exec playwright test $(ARGS)
+
+e2e-down: ## ปิด stack e2e พร้อมลบ container · volume · secrets
+	bash tests/e2e/stack/stack.sh down
+
+ci-full: ## สั่ง ci.yml ครบทุกวงแหวน (image · e2e · sca) บน branch นี้ก่อน merge (REF=<branch>)
+	@ref="$(REF)"; [ -n "$$ref" ] || ref=$$(git branch --show-current); \
+	gh workflow run ci.yml --ref "$$ref" && echo "สั่ง ci.yml บน $$ref แล้ว — ติดตาม: gh run watch"
+
+##@ TestSprite (advisory · tests/testsprite/README.md)
+testsprite-probe: ## backend probes ด้วย pytest ของเรา (URL=https://…|http://localhost:<port> · production ต้อง CONFIRM=yes)
+	@test -n "$(URL)" || { echo "ต้องระบุ URL=https://… หรือ http://localhost:<port>" >&2; exit 1; }
+	CONFIRM="$(CONFIRM)" pnpm --filter @ong/testsprite run probe "$(URL)"
+
+testsprite-doctor: ## ตรวจ config TestSprite (env: TESTSPRITE_API_KEY · _PROJECT_ID · _PROJECT_NAME · _TARGET_URL)
+	pnpm --filter @ong/testsprite run doctor
 
 ##@ Railway (ENV=staging|production · SERVICE=Office|"PDF (Gotenberg)"|Postgres)
 railway-link: ## ผูก directory นี้กับ environment
