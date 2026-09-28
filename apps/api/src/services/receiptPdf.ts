@@ -318,7 +318,7 @@ export function createReceiptPdfService(deps: ReceiptPdfDeps): ReceiptPdfService
   }
 
   const invalid = (reason: string, detail: string): Outcome => {
-    log.error(`[pdf] !!! ${detail} — marked invalid, nothing overwritten`);
+    log.error(`[pdf] !!! ${reason}: ${detail} — marked invalid, nothing overwritten`);
     return { ok: false, permanent: true, reason };
   };
 

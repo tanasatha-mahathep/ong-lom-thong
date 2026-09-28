@@ -1,11 +1,13 @@
 import { maskNationalId } from "@ong/core";
 import { auditLog, branch, buyLine, buyReceipt, customer, goldPrice, metal, stockMovement } from "@ong/db";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createManualTasks } from "../lib/background";
 import { type HtmlToPdfInput, type PdfRenderer, createGotenbergClient } from "../lib/gotenberg";
 import { idcardPdfKey, receiptPdfKey, sha256Hex } from "../lib/pdfArchive";
+import type { Storage } from "../lib/storage";
 import {
+  backoffMs,
   companyFromEnv,
   createReceiptPdfService,
   loadPdfFonts,
@@ -65,7 +67,14 @@ async function seed(t: TestApp) {
     cookies[a.who] = await t.login(`${a.who}@ong.test`, PW);
   }
   const metals = Object.fromEntries((await t.db.select().from(metal)).map((m) => [m.code, m.id]));
-  await t.db.insert(goldPrice).values({ date: TODAY, barSell: "67850", barBuy: "67650", jewelryBuy: "64268" });
+  await t.db.insert(goldPrice).values([
+    { date: TODAY, barSell: "67850", barBuy: "67650", jewelryBuy: "64268" },
+    { date: "2026-09-30", barSell: "67000", barBuy: "66800", jewelryBuy: "63460" },
+  ]);
+  // เปิดบิลได้เฉพาะสาขาที่ตั้งรหัสสาขาสรรพากรแล้ว (#53) — seed ตั้งให้สำนักงานใหญ่เท่านั้น
+  for (const code of ["00001", "00002"]) {
+    await t.db.update(branch).set({ taxBranchCode: code }).where(eq(branch.code, code));
+  }
   await t.storage.put(PHOTO_KEY, PNG_1X1, "image/png");
   const [a, c] = await t.db
     .insert(customer)
@@ -97,9 +106,10 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
     t = await startTestApp({ now: () => NOW, pdfTasks: "auto" });
     s = await seed(t);
     rawPut = t.storage.putImmutable.bind(t.storage);
-    t.storage.putImmutable = (key, body, type, metadata) => {
+    // นับเฉพาะการเขียนที่สำเร็จ (ครั้งที่ถูกปฏิเสธเพราะมีไฟล์อยู่แล้วไม่นับ)
+    t.storage.putImmutable = async (key, body, type, metadata) => {
+      await rawPut(key, body, type, metadata);
       puts.push(key);
-      return rawPut(key, body, type, metadata);
     };
   });
   afterAll(async () => {
@@ -253,7 +263,7 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
     // จำลองบั๊กตอน map: Σรายการไม่เท่ายอดบิล — renderReceiptHtml ต้องไม่ยอมพิมพ์
     await t.db.update(buyLine).set({ amount: "1.00" }).where(eq(buyLine.receiptId, bill.id));
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    const result = await t.pdf.archive(bill.id);
+    const result = await t.pdf.archive(bill.id, { manual: true });
     log.mockRestore();
     expect(result).toMatchObject({ pdf_status: "invalid", busy: false });
     expect(await t.storage.get(key)).toBeNull();
@@ -264,34 +274,72 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
     expect(await t.pdf.archive(bill.id, { manual: true })).toMatchObject({ pdf_status: "ready" });
   });
 
-  it("retry เบื้องหลัง: เก็บใบที่ค้าง pending/failed · ใบที่เพิ่งสร้าง (< 2 นาที) ยังไม่แตะ", async () => {
+  it("retry เบื้องหลัง: ล้มแล้ว backoff · ใบที่เพิ่งสร้าง (< 2 นาที) ยังไม่แตะ · พ้นแล้วเข้าคิวเดียวกัน", async () => {
+    expect([1, 2, 3, 6, 10].map(backoffMs)).toEqual([120_000, 240_000, 480_000, 3_600_000, 3_600_000]);
     t.fake.failNext(2);
     const bill = await save();
     await t.tasks.idle();
-    expect((await row(bill.id)).pdfStatus).toBe("failed");
+    const failed = await row(bill.id);
+    expect(failed).toMatchObject({ pdfStatus: "failed", idcardStatus: "failed", pdfAttempts: 1, pdfLeaseToken: null });
+    expect(failed.pdfRetryAfter).not.toBeNull();
+    expect(await t.pdf.retryDue({ olderThanMs: 0 })).toBe(0); // ยังไม่พ้น backoff
 
-    // เพิ่งสร้างตามนาฬิกาของแอป — งานของ POST อาจยังวิ่งอยู่ จึงยังไม่ retry
-    await t.db.update(buyReceipt).set({ createdAt: NOW }).where(eq(buyReceipt.id, bill.id));
-    expect(await t.pdf.retryDue()).toBe(0);
-    expect((await row(bill.id)).pdfStatus).toBe("failed");
-
+    const past = new Date(Date.now() - 1000);
+    await t.db.update(buyReceipt).set({ pdfRetryAfter: past, createdAt: NOW }).where(eq(buyReceipt.id, bill.id));
+    expect(await t.pdf.retryDue()).toBe(0); // เพิ่งสร้างตามนาฬิกาของแอป — งานของ POST อาจยังวิ่ง
     expect(await t.pdf.retryDue({ olderThanMs: 0 })).toBe(1);
-    expect(await row(bill.id)).toMatchObject({ pdfStatus: "ready", idcardStatus: "ready" });
+    await t.tasks.idle();
+    expect(await row(bill.id)).toMatchObject({
+      pdfStatus: "ready",
+      idcardStatus: "ready",
+      pdfAttempts: 0,
+      pdfRetryAfter: null,
+    });
   });
 
-  it("ผู้เขียนคนเดียวต่อบิล: งานซ้อนกัน render ครั้งเดียว · โหมดไม่รอ = busy", async () => {
+  it("ผู้เขียนคนเดียวต่อบิล (lease): งานอื่น = busy · ไม่มี transaction ค้างระหว่าง render (B2)", async () => {
     const release = t.fake.hold();
     const bill = await save({ customer_id: s.custC });
-    // งานของ POST ถือล็อกอยู่ (ค้างใน Gotenberg)
     await vi.waitFor(() => expect(t.fake.calls.some((c) => c.trace === bill.doc_no)).toBe(true));
+    expect((await row(bill.id)).pdfLeaseToken).not.toBeNull();
+    // ระหว่างรอ Gotenberg ไม่มี connection ไหนค้าง "idle in transaction" — pool ว่างให้การขาย
+    const [stuck] = await t.db.execute<{ n: number }>(
+      sql`select count(*)::int as n from pg_stat_activity
+          where datname = current_database() and state = 'idle in transaction'`,
+    );
+    expect(stuck?.n).toBe(0);
     expect(await t.pdf.archive(bill.id)).toMatchObject({ busy: true, pdf_status: "pending" });
-    const second = t.pdf.archive(bill.id); // รอคิวจนตัวแรกจบ แล้วเห็นว่าไม่มีอะไรต้องทำ
+    expect(await t.pdf.archive(bill.id, { manual: true })).toMatchObject({ busy: true });
     release();
     await t.tasks.idle();
-    expect(await second).toMatchObject({ busy: false, pdf_status: "ready" });
+    expect(await row(bill.id)).toMatchObject({ pdfStatus: "ready", pdfLeaseToken: null, pdfLeaseUntil: null });
     expect(t.fake.calls.filter((c) => c.trace === bill.doc_no)).toHaveLength(1);
     const { pdfKey } = await row(bill.id);
     expect(puts.filter((k) => k === pdfKey)).toHaveLength(1);
+  });
+
+  it("lease หมดอายุ (ผู้ถือค้าง) → ผู้เขียนใหม่ทำต่อ · ผู้ถือเดิมบันทึกผลไม่ได้ · ไฟล์เขียนครั้งเดียว", async () => {
+    const release = t.fake.hold();
+    const bill = await save({ customer_id: s.custC });
+    await vi.waitFor(() => expect(t.fake.calls.some((c) => c.trace === bill.doc_no)).toBe(true));
+    await t.db
+      .update(buyReceipt)
+      .set({ pdfLeaseUntil: new Date(Date.now() - 1000) })
+      .where(eq(buyReceipt.id, bill.id));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const takeover = t.pdf.archive(bill.id);
+    await vi.waitFor(() => expect(t.fake.calls.filter((c) => c.trace === bill.doc_no)).toHaveLength(2));
+    release();
+    await t.tasks.idle();
+    const result = await takeover;
+    const logged = log.mock.calls.flat().join(" ");
+    log.mockRestore();
+    expect(result).toMatchObject({ pdf_status: "ready" });
+    const r = await row(bill.id);
+    expect(r).toMatchObject({ pdfStatus: "ready", pdfLeaseToken: null });
+    expect(r.pdfSha256).toBe(sha256Hex((await stored(r.pdfKey)) ?? new Uint8Array()));
+    expect(puts.filter((k) => k === r.pdfKey)).toHaveLength(1);
+    expect(logged).toContain("lease expired before recording");
   });
 
   it("มีไฟล์อยู่แล้วใน bucket (รอบก่อนอัปโหลดแต่ DB ไม่ทัน) → รับไฟล์เดิม ไม่ render ทับ", async () => {
@@ -333,7 +381,7 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
       tasks: createManualTasks(),
       now: () => NOW,
     });
-    expect(await other.archive(bill.id)).toMatchObject({ pdf_status: "ready" });
+    expect(await other.archive(bill.id, { manual: true })).toMatchObject({ pdf_status: "ready" });
     expect(await row(bill.id)).toMatchObject({ pdfKey: key, pdfSha256: sha256Hex(winner) });
     expect(await stored(key)).toEqual(winner);
   });
@@ -381,7 +429,11 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
     const bill = await save({ customer_id: s.custC });
     await t.tasks.idle();
     const { pdfKey } = await row(bill.id);
-    await rawPut(pdfKey ?? "", enc("%PDF-1.4\n% tampered\n%%EOF\n"), "application/pdf", { "receipt-id": bill.id });
+    t.storage.replace(pdfKey ?? "", {
+      body: enc("%PDF-1.4\n% tampered\n%%EOF\n"),
+      contentType: "application/pdf",
+      metadata: { "receipt-id": bill.id },
+    });
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     expect((await get(`/${bill.id}/pdf`, "staff")).status).toBe(500);
     log.mockRestore();
@@ -446,6 +498,17 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
     expect(voided.headers.get("content-disposition")).toBe('inline; filename="RC6910-0001_void.pdf"');
     expect(await bytes(voided)).toEqual(await stored(after.voidPdfKey));
     expect(await bytes(await get(`/${billA.id}/pdf?version=original`, "staff"))).toEqual(original);
+
+    // S2: รายการและรายละเอียดบอกสถานะของฉบับยกเลิกที่ /pdf เสิร์ฟ
+    const listed = (await (await get("", "staff")).json()) as {
+      items: { id: string; status: string; void_pdf_status: string }[];
+    };
+    expect(listed.items.find((i) => i.id === billA.id)).toMatchObject({ status: "void", void_pdf_status: "ready" });
+    expect(await (await get(`/${billA.id}`, "staff")).json()).toMatchObject({
+      status: "void",
+      idcard_status: "ready",
+      void_pdf_status: "ready",
+    });
 
     const again = await post(`/${billA.id}/void`, "manager", { reason: "ซ้ำ" });
     expect(again.status).toBe(409);
@@ -532,27 +595,116 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
     }
   });
 
-  it("สาขาที่ยังไม่ตั้งรหัสสาขาสรรพากร → PDF invalid (ReceiptDataError) · loop ไม่ retry", async () => {
-    const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    const bill = await save({ customer_id: s.custC }, "staff2"); // สาขา 00002 ยังไม่มี tax_branch_code
+  it("บิลเก่าที่ snapshot ไม่มีรหัสสาขาสรรพากร → PDF invalid (ReceiptDataError) · loop ไม่ retry", async () => {
+    // บิลใหม่ถูกกันตั้งแต่ตอนขาย (#53) — จำลองแถวเก่าด้วยการลบรหัสใน snapshot
+    t.fake.failNext(1);
+    const bill = await save({ customer_id: s.custC });
     await t.tasks.idle();
+    await t.db
+      .update(buyReceipt)
+      .set({ companySnapshot: sql`jsonb_set(${buyReceipt.companySnapshot}, '{tax_branch_code}', 'null')` })
+      .where(eq(buyReceipt.id, bill.id));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await t.pdf.archive(bill.id, { manual: true });
     const logged = log.mock.calls.flat().join(" ");
     log.mockRestore();
-    expect(await row(bill.id)).toMatchObject({ pdfStatus: "invalid", pdfKey: null });
+    expect(result).toMatchObject({ pdf_status: "invalid" });
     expect(logged).toContain(`${bill.doc_no} receipt invalid`);
-    const res = await get(`/${bill.id}/pdf`, "staff2");
+    const res = await get(`/${bill.id}/pdf`, "staff");
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ pdf_status: "invalid" });
     expect(await t.pdf.retryDue({ olderThanMs: 0 })).toBe(0);
   });
 
-  it("ยกเลิก/retry ได้เฉพาะบิลของสาขาที่กำลังทำงาน (สาขาอื่นที่มีสิทธิ์อ่าน = 404)", async () => {
-    const bill = await save({ customer_id: s.custC }, "staff2");
+  it("ยกเลิกได้เฉพาะบิลของสาขาที่ทำงาน (อ่านได้แต่สาขาอื่น = 403 branch) · retry ได้ทุกบิลที่อ่านได้ (S5)", async () => {
+    t.fake.failNext(1);
+    const bill = await save({ customer_id: s.custC }, "staff2"); // สาขา 00002
     await t.tasks.idle();
     // admin เห็นทุกสาขาแต่กำลังทำงานที่ 00000
-    expect((await post(`/${bill.id}/void`, "admin", { reason: "x" })).status).toBe(404);
-    expect((await post(`/${bill.id}/pdf/retry`, "admin")).status).toBe(404);
+    const res = await post(`/${bill.id}/void`, "admin", { reason: "ทดสอบสาขา" });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ field: "branch" });
     expect((await row(bill.id)).status).toBe("active");
+    const retry = await post(`/${bill.id}/pdf/retry`, "admin");
+    expect(retry.status).toBe(200);
+    expect(await retry.json()).toMatchObject({ pdf_status: "ready" });
+    // manager ของ 00000 อ่านบิลสาขา 00002 ไม่ได้ = 404 (ไม่บอกว่ามี)
+    expect((await post(`/${bill.id}/void`, "manager", { reason: "ทดสอบสาขา" })).status).toBe(404);
+    expect((await post(`/${bill.id}/pdf/retry`, "manager")).status).toBe(404);
+  });
+
+  it("ยกเลิกบิลย้อนหลัง: กลับสต็อกลงวันที่ของบิล (ตรงกับรายงานยอดซื้อ) · ไฟล์ _void อยู่โฟลเดอร์เดือนของบิล (S1)", async () => {
+    const bill = await save(
+      { customer_id: s.custC, date: "2026-09-30", time: "16:30", backdate_reason: "คีย์ย้อนหลังจากใบเขียนมือ" },
+      "manager",
+    );
+    await t.tasks.idle();
+    expect((await post(`/${bill.id}/void`, "manager", { reason: "ลูกค้าขอคืนของ" })).status).toBe(200);
+    const moves = await t.db
+      .select({ grams: stockMovement.grams, date: stockMovement.date })
+      .from(stockMovement)
+      .where(eq(stockMovement.sourceReceiptId, bill.id))
+      .orderBy(asc(stockMovement.grams));
+    expect(moves).toEqual([
+      { grams: "-5.860", date: "2026-09-30" },
+      { grams: "5.860", date: "2026-09-30" },
+    ]);
+    const [audit] = await audits("buy.void", bill.id);
+    expect(audit?.diff).toMatchObject({ stock_reversed_on: "2026-09-30" });
+    await t.tasks.idle();
+    expect((await row(bill.id)).voidPdfKey).toBe(`receipts/00000/2026/09/${bill.doc_no}_void.pdf`);
+  });
+
+  it("S4: object ใน bucket ไม่ตรงกับที่เพิ่งเขียน (ผู้เขียนอื่นทับ) → invalid ไม่บันทึก sha ที่ไม่ใช่ไฟล์จริง", async () => {
+    t.fake.failNext(1);
+    const bill = await save({ customer_id: s.custC });
+    await t.tasks.idle();
+    const written = new Set<string>();
+    const liar: Storage = {
+      put: (k, b, c) => t.storage.put(k, b, c),
+      get: (k) => t.storage.get(k),
+      putImmutable: async (k, b, c, m) => {
+        written.add(k);
+        await t.storage.putImmutable(k, b, c, m);
+      },
+      exists: async (k) => {
+        const head = await t.storage.exists(k);
+        return head && written.has(k) ? { ...head, metadata: { ...head.metadata, sha256: "0".repeat(64) } } : head;
+      },
+    };
+    const svc = createReceiptPdfService({
+      db: t.db,
+      storage: liar,
+      renderer: t.fake.renderer,
+      company: companyFromEnv(t.env),
+      fonts: await loadPdfFonts(TEST_FONT_DIR),
+      tasks: createManualTasks(),
+      now: () => NOW,
+    });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await svc.archive(bill.id, { manual: true });
+    const logged = log.mock.calls.flat().join(" ");
+    log.mockRestore();
+    expect(result).toMatchObject({ pdf_status: "invalid" });
+    expect(logged).toContain("changed right after upload");
+    expect(await row(bill.id)).toMatchObject({ pdfStatus: "invalid", pdfKey: null, pdfSha256: null });
+  });
+
+  it("S4: รับไฟล์เดิมมาใช้เฉพาะเมื่อ byte ตรงกับ sha256 ใน metadata", async () => {
+    t.fake.failNext(1);
+    const bill = await save({ customer_id: s.custC });
+    await t.tasks.idle();
+    const key = receiptPdfKey({ branchCode: "00000", date: TODAY, docNo: bill.doc_no });
+    await rawPut(key, enc("%PDF-1.4\n% bytes changed after upload\n%%EOF\n"), "application/pdf", {
+      "receipt-id": bill.id,
+      kind: "receipt",
+      sha256: sha256Hex(enc("the bytes that were uploaded")),
+    });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await post(`/${bill.id}/pdf/retry`, "manager");
+    log.mockRestore();
+    expect(await res.json()).toMatchObject({ pdf_status: "invalid" });
+    expect(await row(bill.id)).toMatchObject({ pdfKey: null, pdfSha256: null });
   });
 
   it("ลายน้ำระบบทดสอบ (RECEIPT_WATERMARK) ลงทั้งใบรับซื้อและสำเนาบัตร", async () => {
@@ -577,7 +729,10 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
       now: () => NOW,
       watermark: "ตัวอย่าง — ระบบทดสอบ ไม่ใช่ใบรับซื้อจริง",
     });
-    expect(await staging.archive(bill.id)).toMatchObject({ pdf_status: "ready", idcard_status: "ready" });
+    expect(await staging.archive(bill.id, { manual: true })).toMatchObject({
+      pdf_status: "ready",
+      idcard_status: "ready",
+    });
     expect(seen).toHaveLength(2);
     for (const input of seen) expect(input.html).toContain("ตัวอย่าง — ระบบทดสอบ ไม่ใช่ใบรับซื้อจริง");
   });
