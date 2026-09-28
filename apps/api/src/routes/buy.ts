@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { z } from "zod";
-import { type AppEnv, apiError, requireAnyBranch, requireRole, requireSession } from "../lib/context";
-import { forUser } from "../lib/scope";
+import { type AppEnv, apiError, requireAnyHistoryBranch, requireRole, requireSession } from "../lib/context";
+import { forUserHistory } from "../lib/scope";
 import {
   BuyError,
   ListQuery,
@@ -39,11 +39,12 @@ const filledOnly = (query: Record<string, string>) =>
  * เขียนได้เฉพาะสาขาที่กำลังทำงาน · อ่านเฉพาะสาขาที่มีสิทธิ์ (fail-closed · 404 ไม่บอกว่ามีอยู่)
  */
 export const buyRoutes = new Hono<AppEnv>()
-  .use(requireSession, requireAnyBranch)
+  // อ่าน = forUserHistory (accounting/admin เห็นสาขาที่ปิดแล้ว) · เขียน = prepareBuy ตรวจสาขาที่ทำงานที่ยังเปิดอยู่
+  .use(requireSession, requireAnyHistoryBranch)
   .get("/", async (c) => {
     const query = ListQuery.safeParse(filledOnly(c.req.query()));
     if (!query.success) return c.json(invalid(query.error), 400);
-    const readable = await forUser(c.var.db, c.var.viewer);
+    const readable = await forUserHistory(c.var.db, c.var.viewer);
     const { items, hasMore, totals } = await listBuys(c.var.db, readable, query.data);
     c.header("Cache-Control", "no-store");
     return c.json({ items, page: query.data.page, has_more: hasMore, totals });
@@ -73,7 +74,7 @@ export const buyRoutes = new Hono<AppEnv>()
     }
   })
   .get("/:id", async (c) => {
-    const readable = await forUser(c.var.db, c.var.viewer);
+    const readable = await forUserHistory(c.var.db, c.var.viewer);
     const bill = await getBuy(c.var.db, readable, c.req.param("id"));
     if (!bill) return c.json(apiError("not found"), 404);
     c.header("Cache-Control", "no-store");

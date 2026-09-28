@@ -125,6 +125,9 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       { who: "acct", branch: "00000", role: "accounting" as const },
       { who: "mgr", branch: "00000", role: "manager" as const }, // บิลย้อนหลังได้เฉพาะผู้จัดการขึ้นไป
       { who: "boss", role: "admin" as const, viewAll: true }, // เห็นทุกสาขา แต่ยังไม่ได้เลือกสาขาที่ทำงาน
+      { who: "mgrall", role: "manager" as const, viewAll: true }, // เห็นทุกสาขาที่เปิดอยู่ (ไม่ใช่ role อ่านย้อนหลัง)
+      { who: "acct2", branch: "00002", role: "accounting" as const },
+      { who: "mgr2", branch: "00002", role: "manager" as const },
       { who: "nobranch" },
     ];
     for (const a of accounts) {
@@ -191,6 +194,18 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     const res = await get(qs ? `?${qs}` : "", who);
     expect(res.status).toBe(200);
     return (await res.json()) as ListRes;
+  };
+  /** ยอดที่ควรได้ คิดจากแถวใน DB ด้วย decimal.js — เฉพาะบิลที่ยังไม่ยกเลิก */
+  const expectedTotals = async (where?: SQL): Promise<Totals> => {
+    const rows = await t.db
+      .select({ weight: buyReceipt.totalWeight, amount: buyReceipt.totalAmount })
+      .from(buyReceipt)
+      .where(and(where, eq(buyReceipt.status, "active")));
+    return {
+      count: String(rows.length),
+      total_weight: fmtWeight(rows.reduce((sum, r) => sum.plus(r.weight), ZERO)),
+      total_amount: fmtMoney(rows.reduce((sum, r) => sum.plus(r.amount), ZERO)),
+    };
   };
   const receiptCount = async () => (await t.db.select({ id: buyReceipt.id }).from(buyReceipt)).length;
   /** เลขที่ของสาขาในงวด เรียงจากน้อยไปมาก */
@@ -897,24 +912,65 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     expect((await get(`/${firstId}`, "acct")).status).toBe(200);
   });
 
-  it("can_view_all เห็นทุกสาขา · กรองสาขาได้ · สาขาที่ถูกปิดหายจากทั้งรายการและหน้าบิล", async () => {
+  it("can_view_all เห็นทุกสาขา · กรองสาขาได้ · สาขาที่ถูกปิดหายจากรายการและหน้าบิลของ role ทั่วไป", async () => {
     const res = await save(bill(), "staff2");
     expect(res.status).toBe(201); // ราคากลางใช้ได้ทุกสาขา
     const closedId = ((await res.json()) as SavedRes).id;
 
-    const all = await list("", "boss");
+    const all = await list("", "mgrall");
     expect(new Set(all.items.map((i) => i.branch.code))).toEqual(new Set(["00000", "00001", "00002"]));
-    expect((await list(`branch_id=${t.branches["00001"]}`, "boss")).items.map((i) => i.branch.code)).toEqual(["00001"]);
-    expect((await get(`/${closedId}`, "boss")).status).toBe(200);
+    expect((await list(`branch_id=${t.branches["00001"]}`, "mgrall")).items.map((i) => i.branch.code)).toEqual([
+      "00001",
+    ]);
+    expect((await get(`/${closedId}`, "mgrall")).status).toBe(200);
 
     await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
     try {
-      expect((await list("", "boss")).items.some((i) => i.branch.code === "00002")).toBe(false);
-      expect((await get(`/${closedId}`, "boss")).status).toBe(404);
-      expect((await get("", "staff2")).status).toBe(403);
-      expect((await save(bill(), "staff2")).status).toBe(403);
+      expect((await list("", "mgrall")).items.some((i) => i.branch.code === "00002")).toBe(false);
+      expect((await get(`/${closedId}`, "mgrall")).status).toBe(404);
+      for (const who of ["staff2", "mgr2"]) {
+        expect((await get("", who)).status).toBe(403);
+        expect((await get(`/${closedId}`, who)).status).toBe(403);
+        expect((await save(bill(), who)).status).toBe(403);
+      }
     } finally {
       await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
+    }
+  });
+
+  it("สาขาที่ถูกปิด: accounting/admin ยังอ่านบิลเดิมได้ (อ่านอย่างเดียว) · ไม่มีใครเปิดบิลที่นั่นได้", async () => {
+    const b2 = t.branches["00002"] ?? "";
+    const [old] = await t.db.select().from(buyReceipt).where(eq(buyReceipt.branchId, b2)).limit(1);
+    const closedId = old?.id ?? "";
+    // admin กำลังทำงานที่สาขา 00002 อยู่ตอนสาขาถูกปิด
+    expect((await t.request("/api/me/branch", { cookie: cookies.boss, body: { branch_id: b2 } })).status).toBe(200);
+    await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
+    try {
+      for (const who of ["acct2", "boss"]) {
+        const l = await list(`branch_id=${b2}`, who);
+        expect(l.items.map((i) => i.id)).toContain(closedId);
+        expect(l.items.every((i) => i.branch.code === "00002")).toBe(true);
+        expect(l.totals).toEqual(await expectedTotals(eq(buyReceipt.branchId, b2)));
+        const d = await get(`/${closedId}`, who);
+        expect(d.status).toBe(200);
+        expect(((await d.json()) as DetailRes).branch.code).toBe("00002");
+      }
+      // เขียนไม่ได้: สาขาที่ทำงานต้องยังเปิดอยู่ · เลือกสาขาที่ปิดเป็นสาขาที่ทำงานไม่ได้
+      for (const who of ["acct2", "boss"]) {
+        const q = await quote(bill(), who);
+        expect(q.status).toBe(403);
+        expect(await q.json()).toEqual({ error: "ยังไม่ได้เลือกสาขาที่ทำงาน", field: "branch" });
+      }
+      expect((await save(bill(), "boss")).status).toBe(403);
+      expect((await save(bill(), "acct2")).status).toBe(403); // accounting อ่านอย่างเดียว
+      expect((await t.request("/api/me/branch", { cookie: cookies.boss, body: { branch_id: b2 } })).status).toBe(404);
+      expect(await t.db.select().from(buyReceipt).where(eq(buyReceipt.branchId, b2))).toHaveLength(1);
+    } finally {
+      await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
+      await t.db
+        .update(session)
+        .set({ currentBranchId: null })
+        .where(eq(session.userId, userIds.boss ?? ""));
     }
   });
 
@@ -1020,19 +1076,6 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
 
   // ---------- totals (การ์ด "ยอดซื้อวันนี้" · หน้าค้นบิล) ----------
 
-  /** ยอดที่ควรได้ คิดจากแถวใน DB ด้วย decimal.js — เฉพาะบิลที่ยังไม่ยกเลิก */
-  const expectedTotals = async (where?: SQL): Promise<Totals> => {
-    const rows = await t.db
-      .select({ weight: buyReceipt.totalWeight, amount: buyReceipt.totalAmount })
-      .from(buyReceipt)
-      .where(and(where, eq(buyReceipt.status, "active")));
-    return {
-      count: String(rows.length),
-      total_weight: fmtWeight(rows.reduce((sum, r) => sum.plus(r.weight), ZERO)),
-      total_amount: fmtMoney(rows.reduce((sum, r) => sum.plus(r.amount), ZERO)),
-    };
-  };
-
   it("totals = ผลรวมของบิลทุกหน้าตามตัวกรองเดียวกับรายการ (ตรงกับ DB และกับผลรวมของรายการ)", async () => {
     const own = await expectedTotals(eq(buyReceipt.branchId, t.branches["00000"] ?? ""));
     const p1 = await list();
@@ -1077,7 +1120,7 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     expect((await list(qs)).totals).toEqual(ONE_BILL);
   });
 
-  it("totals ตามสิทธิ์สาขา: สาขาอื่นไม่ถูกนับ · branch_id ที่ไม่มีสิทธิ์ = ศูนย์ · สาขาที่ปิดไม่นับ", async () => {
+  it("totals ตามสิทธิ์สาขา: สาขาอื่นไม่ถูกนับ · branch_id ที่ไม่มีสิทธิ์ = ศูนย์ · สาขาที่ปิดไม่นับ (role ทั่วไป)", async () => {
     const b1 = t.branches["00001"] ?? "";
     expect((await list("", "staff1")).totals).toEqual(ONE_BILL);
     expect((await list(`branch_id=${t.branches["00000"]}`, "staff1")).totals).toEqual(ZERO_TOTALS);
@@ -1087,9 +1130,11 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
 
     await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
     try {
-      expect((await list("", "boss")).totals).toEqual(
+      expect((await list("", "mgrall")).totals).toEqual(
         await expectedTotals(ne(buyReceipt.branchId, t.branches["00002"] ?? "")),
       );
+      // admin อ่านย้อนหลังได้ → ยอดรวมยังนับสาขาที่ปิด
+      expect((await list("", "boss")).totals).toEqual(await expectedTotals());
     } finally {
       await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
     }
