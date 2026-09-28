@@ -236,6 +236,12 @@ export interface CustomerSnapshot {
   photo_key: string | null;
 }
 
+/**
+ * สถานะไฟล์ PDF เก็บถาวร (text ไม่มี constraint ใน DB — เพิ่มค่าได้ไม่ต้อง migrate)
+ * failed = ล้มชั่วคราว (Gotenberg/bucket) retry เองทุก 5 นาที · invalid = ข้อมูลบิลพิมพ์ไม่ได้ ต้องแก้แล้วกด retry เอง
+ */
+export const PDF_STATUSES = ["pending", "ready", "failed", "invalid"] as const;
+
 export const buyReceipt = pgTable(
   "buy_receipt",
   {
@@ -263,13 +269,11 @@ export const buyReceipt = pgTable(
       .default("active"),
     pdfKey: text("pdf_key"),
     pdfSha256: text("pdf_sha256"),
-    pdfStatus: text("pdf_status", { enum: ["pending", "ready", "failed"] })
-      .notNull()
-      .default("pending"),
+    pdfStatus: text("pdf_status", { enum: PDF_STATUSES }).notNull().default("pending"),
     pdfGeneratedAt: tz("pdf_generated_at"),
     idcardPdfKey: text("idcard_pdf_key"),
     idcardSha256: text("idcard_sha256"),
-    idcardStatus: text("idcard_status", { enum: ["none", "pending", "ready", "failed"] })
+    idcardStatus: text("idcard_status", { enum: ["none", ...PDF_STATUSES] })
       .notNull()
       .default("none"),
     createdBy: text("created_by")
@@ -279,6 +283,19 @@ export const buyReceipt = pgTable(
     voidedBy: text("voided_by").references(() => user.id),
     voidedAt: tz("voided_at"),
     voidReason: text("void_reason"),
+    // PDF ฉบับยกเลิก (…_void.pdf) เป็นไฟล์ใหม่ — ฉบับเดิมและ sha256 ของมันใน pdf_* ไม่ถูกแตะ (R15)
+    voidPdfKey: text("void_pdf_key"),
+    voidPdfSha256: text("void_pdf_sha256"),
+    voidPdfStatus: text("void_pdf_status", { enum: ["none", ...PDF_STATUSES] })
+      .notNull()
+      .default("none"),
+    voidPdfGeneratedAt: tz("void_pdf_generated_at"),
+    // งานสร้าง PDF ของบิลนี้: lease = ผู้เขียนคนเดียว (จองสั้น ๆ ไม่ถือ transaction ระหว่าง Gotenberg/bucket)
+    // หมดอายุเองถ้าผู้ถือค้าง/ตาย · retry_after = backoff ของงานที่ล้มชั่วคราว (2 นาที ×2 … สูงสุด 1 ชม.)
+    pdfLeaseUntil: tz("pdf_lease_until"),
+    pdfLeaseToken: uuid("pdf_lease_token"),
+    pdfAttempts: integer("pdf_attempts").notNull().default(0),
+    pdfRetryAfter: tz("pdf_retry_after"),
     idempotencyKey: text("idempotency_key").notNull().unique(),
   },
   (t) => [

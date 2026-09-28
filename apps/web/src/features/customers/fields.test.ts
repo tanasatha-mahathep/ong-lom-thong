@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { CARD_FIELDS, SIAM_ID_FIELDS, TEXT_FIELDS, fieldElementId, isFieldName } from "./fields";
+import th from "./locales/th";
 
 /**
  * สำเนาตรงตัวจาก Work_2026-09-27/03-customer-member.md (ลำดับที่ Siam ID พิมพ์) — ห้าม import จากโค้ด
- * ถ้ามีคนสลับลำดับใน fields.ts เทสต์นี้ต้องแดง (CLAUDE.md กฎ 6)
+ * ถ้ามีคนสลับลำดับใน fields.ts หรือแก้ป้ายใน locales/th.ts เทสต์นี้ต้องแดง (CLAUDE.md กฎ 6)
  */
 const SIAM_ID_ORDER_FROM_03 = [
   ["national_id", "เลขประจำตัวประชาชน"],
@@ -20,8 +21,13 @@ const SIAM_ID_ORDER_FROM_03 = [
 ];
 
 describe("ลำดับช่อง Siam ID", () => {
-  it("11 ช่อง ชื่อและป้ายตรงกับ 03 ตามลำดับ", () => {
-    expect(SIAM_ID_FIELDS.map((f) => [f.name, f.label])).toEqual(SIAM_ID_ORDER_FROM_03);
+  it("11 ช่อง ชื่อและป้ายภาษาไทย (locales/th.ts) ตรงกับ 03 ตามลำดับ", () => {
+    expect(SIAM_ID_FIELDS.map((f) => [f.name, th.fields[f.name].label])).toEqual(SIAM_ID_ORDER_FROM_03);
+  });
+
+  it("placeholder ตามระบบเดิม (cust_add.html) — ช่องวันเกิดมีตัวอย่างรูปแบบ", () => {
+    expect(th.fields.national_id.placeholder).toBe("เลขบัตร 13 หลัก");
+    expect(th.fields.birthday_text.placeholder).toBe("ตัวอย่าง 1 มกราคม 2540");
   });
 
   it("id ของ element เรียง siam-1 … siam-11", () => {
