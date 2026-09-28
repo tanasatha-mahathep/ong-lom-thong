@@ -14,7 +14,7 @@ const FULL = { lines: 100, branches: 100, functions: 100, statements: 100 };
 const MEASURED: Record<string, typeof FULL> = {
   // L73 `named[2] ?? ""` — กลุ่มที่ 2 ของ DAY_MONTH_YEAR ไม่ใช่ optional: regex match แล้วต้องมีค่าเสมอ
   "packages/core/src/card.ts": { ...FULL, branches: -1 },
-  // L43–44 `dot === -1 ? …` — groupThousands เป็น private รับแต่ผล toFixed(2) / toFixed(3) ซึ่งมีจุดทศนิยมเสมอ
+  // L60–61 `dot === -1 ? …` — groupThousands เป็น private รับแต่ผล toFixed(2) / toFixed(3) ซึ่งมีจุดทศนิยมเสมอ
   "packages/core/src/money.ts": { ...FULL, branches: -2 },
   // L26 `DIGIT[d] ?? ""` · `PLACE[pos] ?? ""` · L110 `MONTH[m - 1] ?? ""` · L116 `MONTH_ABBR[m - 1] ?? ""` —
   // หลักมาจาก toFixed ของ Decimal ที่ตรวจแล้ว · กลุ่มละไม่เกิน 6 หลัก · เดือนผ่านการตรวจ 1–12 มาก่อน
