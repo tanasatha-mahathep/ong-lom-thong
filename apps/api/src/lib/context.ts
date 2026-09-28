@@ -3,12 +3,14 @@ import { createMiddleware } from "hono/factory";
 import type { Auth } from "../auth";
 import type { Env } from "../env";
 import type { Viewer } from "./scope";
+import type { Storage } from "./storage";
 
 export interface AppEnv {
   Variables: {
     db: Db;
     auth: Auth;
     env: Env;
+    storage: Storage;
     viewer: Viewer;
     /** นาฬิกา — ฉีดเข้ามาได้เพื่อให้เทสต์กำหนดวันเวลาเอง */
     now: () => Date;

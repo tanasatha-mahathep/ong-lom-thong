@@ -5,6 +5,7 @@ import postgres from "postgres";
 import { createApp } from "../app";
 import { createAuth } from "../auth";
 import { loadEnv } from "../env";
+import { createMemoryStorage } from "../lib/storage";
 
 const BASE_URL = process.env.TEST_DATABASE_URL ?? "postgres://ong:ong@localhost:5432/postgres";
 const MIGRATIONS = fileURLToPath(new URL("../../../../packages/db/migrations", import.meta.url));
@@ -52,9 +53,16 @@ export async function startTestApp(options: { now?: () => Date } = {}) {
     DATABASE_URL: url.toString(),
     BETTER_AUTH_SECRET: "test-only-secret-0123456789abcdefghij",
     BETTER_AUTH_URL: ORIGIN,
+    // เทสต์ใช้ storage ในหน่วยความจำ — ค่าพวกนี้แค่ให้ผ่าน schema
+    S3_ENDPOINT: "http://storage.invalid",
+    S3_REGION: "test",
+    S3_BUCKET: "test",
+    S3_ACCESS_KEY: "test",
+    S3_SECRET_KEY: "test",
   });
   const auth = createAuth(db, env);
-  const app = createApp({ db, auth, env, now: options.now });
+  const storage = createMemoryStorage();
+  const app = createApp({ db, auth, env, storage, now: options.now });
   const branches = Object.fromEntries((await db.select().from(branch)).map((b) => [b.code, b.id]));
 
   async function createUser(u: TestUser) {
@@ -82,14 +90,16 @@ export async function startTestApp(options: { now?: () => Date } = {}) {
   }
 
   /** request ผ่าน app โดยตรง — ใส่ Origin ให้ผ่าน CSRF check ของ better-auth */
+  /** body เป็น FormData = multipart (browser ใส่ boundary เอง) · อย่างอื่น = JSON */
   function request(path: string, init: { method?: string; body?: unknown; cookie?: string; origin?: string } = {}) {
     const headers: Record<string, string> = { origin: init.origin ?? ORIGIN };
-    if (init.body !== undefined) headers["content-type"] = "application/json";
+    const multipart = init.body instanceof FormData;
+    if (init.body !== undefined && !multipart) headers["content-type"] = "application/json";
     if (init.cookie) headers.cookie = init.cookie;
     return app.request(path, {
       method: init.method ?? (init.body === undefined ? "GET" : "POST"),
       headers,
-      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      body: init.body === undefined ? undefined : multipart ? (init.body as FormData) : JSON.stringify(init.body),
     });
   }
 
@@ -109,7 +119,7 @@ export async function startTestApp(options: { now?: () => Date } = {}) {
     await admin.end({ timeout: 1 });
   }
 
-  return { app, db, auth, env, branches, createUser, request, login, close };
+  return { app, db, auth, env, storage, branches, createUser, request, login, close };
 }
 
 export type TestApp = Awaited<ReturnType<typeof startTestApp>>;
