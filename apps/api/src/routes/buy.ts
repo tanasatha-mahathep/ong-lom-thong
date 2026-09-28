@@ -45,9 +45,9 @@ export const buyRoutes = new Hono<AppEnv>()
     const query = ListQuery.safeParse(filledOnly(c.req.query()));
     if (!query.success) return c.json(invalid(query.error), 400);
     const readable = await forUser(c.var.db, c.var.viewer);
-    const { items, hasMore } = await listBuys(c.var.db, readable, query.data);
+    const { items, hasMore, totals } = await listBuys(c.var.db, readable, query.data);
     c.header("Cache-Control", "no-store");
-    return c.json({ items, page: query.data.page, has_more: hasMore });
+    return c.json({ items, page: query.data.page, has_more: hasMore, totals });
   })
   // live preview — ตอบ 200 เสมอเมื่อ payload ถูกรูป (ok=false พร้อม errors ต่อช่อง)
   .post("/quote", jsonLimit, async (c) => {
