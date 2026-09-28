@@ -118,10 +118,15 @@ describe("quoteBuy — ตรวจตัวเลขต่อแถว (R3)", (
   });
   it.each([
     ["0", BUY_MSG.weightPositive],
-    ["-1", BUY_MSG.weightPositive],
+    ["-1", BUY_MSG.badNumber], // ไม่รับเครื่องหมาย
     ["1.2345", BUY_MSG.weightScale],
     ["abc", BUY_MSG.badNumber],
     ["", BUY_MSG.badNumber],
+    ["0x10", BUY_MSG.badNumber],
+    ["1e3", BUY_MSG.badNumber],
+    ["5,86", BUY_MSG.weightComma], // คอมมาแทนจุดทศนิยม — ไม่เดา
+    ["5,860", BUY_MSG.weightComma], // เคยถูกอ่านเป็น 5,860 กรัม (ราคา/กรัม 3.42)
+    ["1,250.500", BUY_MSG.weightComma], // น้ำหนักไม่คั่นหลักพัน
   ])("น้ำหนัก %j → %s", (w, msg) => {
     const r = quoteBuy(base({ lines: [{ metalId: GOLD, weightG: w, amount: "100" }] }));
     expect(messages(r)).toContain(msg);
@@ -131,10 +136,23 @@ describe("quoteBuy — ตรวจตัวเลขต่อแถว (R3)", (
     ["0", BUY_MSG.amountPositive],
     ["100.123", BUY_MSG.amountScale],
     ["x", BUY_MSG.badNumber],
+    ["20,03", BUY_MSG.badNumber],
+    ["-20030", BUY_MSG.badNumber],
   ])("ราคา %j → %s", (a, msg) => {
     const r = quoteBuy(base({ lines: [{ metalId: GOLD, weightG: "1", amount: a }] }));
     expect(messages(r)).toContain(msg);
   });
+  it("เงินคั่นหลักพันได้ (ราคา 20,030 · ชำระ 20,030) · น้ำหนักเป็นตัวเลขล้วน 1250.500", () => {
+    const r = quoteBuy(
+      base({
+        lines: [{ metalId: GOLD, weightG: "1250.500", amount: "20,030" }],
+        payments: [{ method: "cash", amount: "20,030" }],
+      }),
+    );
+    expect(r.ok).toBe(true);
+    expect(r.lines[0]).toMatchObject({ weightG: "1250.500", amount: "20030.00" });
+  });
+
   it("แถวที่ผิดไม่ถูกนับรวมยอด แต่แถวที่ถูกยังนับ", () => {
     const r = quoteBuy(
       base({
@@ -207,6 +225,27 @@ describe("quoteBuy — index · ราคาเฉลี่ย/กรัม · �
 });
 
 describe("quoteBuy — วิธีชำระ", () => {
+  it.each([
+    [{ method: "transfer", amount: "20030" }, BUY_MSG.bankRequired],
+    [{ method: "transfer", bank: "   ", amount: "20030" }, BUY_MSG.bankRequired],
+    [{ method: "cash", bank: "KBANK", amount: "20030" }, BUY_MSG.cashNoBank],
+  ])("ธนาคารไม่เข้ากับวิธี %j → %s · ไม่นับยอด", (p, message) => {
+    const r = quoteBuy(base({ payments: [p] }));
+    expect(r.errors[0]).toEqual({ field: "payments.0.bank", message });
+    expect(r.paid).toBe("0.00");
+    expect(r.ok).toBe(false);
+  });
+  it("โอนระบุธนาคาร · เงินสดไม่ระบุ → ผ่าน", () => {
+    const r = quoteBuy(
+      base({
+        payments: [
+          { method: "transfer", bank: "SCB", amount: "20000" },
+          { method: "cash", bank: null, amount: "30" },
+        ],
+      }),
+    );
+    expect(r.ok).toBe(true);
+  });
   it("วิธีที่ไม่รู้จัก → กรุณาเลือกประเภทเงินที่ชำระ (ข้อความระบบเดิม) ไม่นับยอด", () => {
     const r = quoteBuy(base({ payments: [{ method: "cheque", amount: "20030" }] }));
     expect(r.ok).toBe(false);

@@ -1,6 +1,6 @@
 import type Decimal from "decimal.js";
 import { CARD_STATUS_MESSAGE, type CardStatus } from "./card";
-import { D, type Numeric, ZERO, fmtMoney, fmtWeight, halfUp, parseDecimal } from "./money";
+import { D, type Numeric, ZERO, fmtMoney, fmtWeight, halfUp, parseDecimal, parsePlainDecimal } from "./money";
 
 /** วิธีชำระที่รับได้ — ระบบเดิมตั้งไว้แค่เงินสด · โอนเงินเผื่อไว้ (spec §12 ข้อ 6) · key เก็บลง payment.method */
 export const PAYMENT_METHODS = { cash: "เงินสด", transfer: "โอนเงิน" } as const;
@@ -84,11 +84,14 @@ export const BUY_MSG = {
   badNumber: "ตัวเลขไม่ถูกต้อง",
   weightPositive: "น้ำหนักต้องมากกว่า 0",
   weightScale: "น้ำหนักทศนิยมไม่เกิน 3 ตำแหน่ง",
+  weightComma: "น้ำหนักห้ามใส่จุลภาค — เช่น 5.860 หรือ 1250.500",
   weightMax: "น้ำหนักเกิน 999,999.999 กรัม — ตรวจตัวเลขอีกครั้ง",
   amountPositive: "ราคาต้องมากกว่า 0",
   amountScale: "จำนวนเงินทศนิยมไม่เกิน 2 ตำแหน่ง",
   amountMax: "ราคาเกิน 99,999,999.99 บาท — ตรวจตัวเลขอีกครั้ง",
   paymentMethod: "กรุณาเลือกประเภทเงินที่ชำระ",
+  bankRequired: "กรุณาเลือกธนาคาร",
+  cashNoBank: "เงินสดไม่ต้องระบุธนาคาร",
   paymentAmount: "กรุณากรอกจำนวนเงิน",
   paymentDup: "มีวิธีการชำระนี้อยู่แล้ว",
   overpaid: "เกินยอดที่ต้องชำระ",
@@ -132,11 +135,13 @@ export function quoteBuy(input: QuoteBuyInput): QuoteBuyResult {
 
   if (input.lines.length === 0) errors.push({ field: "lines", message: BUY_MSG.noLines });
   input.lines.forEach((line, i) => {
-    const w = parseDecimal(line.weightG);
+    // น้ำหนักเป็นตัวเลขล้วนเท่านั้น (ไม่คั่นหลักพัน) · เงินคั่นหลักพันได้ "20,030"
+    const w = parsePlainDecimal(line.weightG);
     const a = parseDecimal(line.amount);
     let bad = false;
     if (!w) {
-      errors.push({ field: `lines.${i}.weight_g`, message: BUY_MSG.badNumber });
+      const comma = typeof line.weightG === "string" && line.weightG.includes(",");
+      errors.push({ field: `lines.${i}.weight_g`, message: comma ? BUY_MSG.weightComma : BUY_MSG.badNumber });
       bad = true;
     } else if (w.lte(0)) {
       errors.push({ field: `lines.${i}.weight_g`, message: BUY_MSG.weightPositive });
@@ -179,8 +184,16 @@ export function quoteBuy(input: QuoteBuyInput): QuoteBuyResult {
   input.payments.forEach((p, i) => {
     let bad = false;
     const method = isPaymentMethod(p.method) ? p.method : null;
+    const bank = p.bank?.trim() || null;
     if (!method) {
       errors.push({ field: `payments.${i}.method`, message: BUY_MSG.paymentMethod });
+      bad = true;
+    } else if (method === "transfer" && !bank) {
+      // เจ้าของกำหนด 28 ก.ย.: โอนต้องระบุธนาคาร · เงินสดไม่มีธนาคาร (วิธี+ธนาคาร ใช้ตรวจแถวซ้ำ)
+      errors.push({ field: `payments.${i}.bank`, message: BUY_MSG.bankRequired });
+      bad = true;
+    } else if (method === "cash" && bank) {
+      errors.push({ field: `payments.${i}.bank`, message: BUY_MSG.cashNoBank });
       bad = true;
     }
     const a = parseDecimal(p.amount);
@@ -192,7 +205,6 @@ export function quoteBuy(input: QuoteBuyInput): QuoteBuyResult {
       bad = true;
     }
     if (bad || !method || !a) return;
-    const bank = p.bank?.trim() || null;
     const key = `${method}|${bank ?? ""}`;
     if (seen.has(key)) {
       errors.push({ field: `payments.${i}.method`, message: BUY_MSG.paymentDup });

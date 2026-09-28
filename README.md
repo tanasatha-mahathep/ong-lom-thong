@@ -11,6 +11,7 @@ TypeScript ล้วน · Vite + TanStack (web) · Hono (api) · Drizzle + Post
 ```bash
 make setup               # install · .env · postgres/gotenberg/s3 (RustFS) · migrate · seed
 make dev                 # web http://localhost:5173 (proxy /api → api :8787)
+WEB_PORT=5181 API_PORT=8791 make dev   # หลายชุดพร้อมกัน (เช่น worktree) — ตั้ง PORT=8791 · BETTER_AUTH_URL=http://localhost:5181 ใน .env
 make check               # lint · format · typecheck · test · build — ชุดเดียวกับ CI
 ```
 

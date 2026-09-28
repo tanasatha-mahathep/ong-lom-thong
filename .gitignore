@@ -2,6 +2,10 @@ node_modules/
 .pnpm-store/
 dist/
 coverage/
+# Playwright (apps/web e2e)
+test-results/
+playwright-report/
+blob-report/
 *.log
 .DS_Store
 

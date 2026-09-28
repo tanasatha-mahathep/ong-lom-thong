@@ -5,6 +5,7 @@ import { and, desc, eq, ilike, like, ne, or, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import { MAX_PHOTO_BYTES, sniffImage } from "../lib/image";
 import type { Storage } from "../lib/storage";
+import { UNUSABLE_CHARS_MSG, isCleanText } from "../lib/text";
 
 export class CustomerInputError extends Error {
   constructor(
@@ -22,6 +23,7 @@ const optionalText = (max: number) =>
     .string()
     .trim()
     .max(max, `ยาวเกิน ${max} ตัวอักษร`)
+    .refine(isCleanText, UNUSABLE_CHARS_MSG)
     .optional()
     .transform((v) => (v ? v : null));
 
@@ -31,7 +33,12 @@ export const CustomerInput = z.object({
     .string({ error: "กรุณากรอกเลขบัตรประชาชน" })
     .transform(normalizeNationalId)
     .refine(isValidNationalId, "เลขบัตรประชาชนไม่ถูกต้อง (13 หลัก · ตรวจหลักสุดท้ายไม่ผ่าน)"),
-  name_th: z.string({ error: "กรุณากรอกชื่อ-นามสกุล" }).trim().min(1, "กรุณากรอกชื่อ-นามสกุล").max(200),
+  name_th: z
+    .string({ error: "กรุณากรอกชื่อ-นามสกุล" })
+    .trim()
+    .min(1, "กรุณากรอกชื่อ-นามสกุล")
+    .max(200)
+    .refine(isCleanText, UNUSABLE_CHARS_MSG),
   name_en: optionalText(200),
   birthday_text: optionalText(50),
   religion: optionalText(50),
@@ -74,6 +81,15 @@ export function toDetail(row: CustomerRow, today: string) {
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
   };
+}
+
+/**
+ * รูปเดียวกับ toDetail แต่เลขบัตรมาสก์ — ใช้กับ response ของ PUT (spec §5: เลขเต็มเฉพาะ GET /:id และ PDF)
+ * หน้าเว็บที่ต้องใช้เลขเต็มโหลด GET /:id ใหม่เอง
+ */
+export function toMaskedDetail(row: CustomerRow, today: string) {
+  const { id, national_id, ...rest } = toDetail(row, today);
+  return { id, national_id_masked: maskNationalId(national_id), ...rest };
 }
 
 /** รายการ — เลขบัตรมาสก์เสมอ (R13) */
@@ -162,9 +178,9 @@ const columns = (input: CustomerInput) => ({
   phone2: input.phone2,
 });
 
-/** ค่าที่ลง audit — เลขบัตรมาสก์ (PDPA) · รูปบันทึกแค่ว่าเปลี่ยน */
-const auditView = (row: CustomerRow) => ({
-  national_id: maskNationalId(row.nationalId),
+/** ค่าดิบของช่องที่ลง audit — ใช้เทียบว่าช่องไหนเปลี่ยน (เทียบก่อนมาสก์ ไม่งั้นเลขบัตรใหม่ที่มาสก์ออกมาเหมือนเดิมหลุด audit) */
+const auditFields = (row: CustomerRow) => ({
+  national_id: row.nationalId,
   name_th: row.nameTh,
   name_en: row.nameEn,
   birthday_text: row.birthdayText,
@@ -174,8 +190,18 @@ const auditView = (row: CustomerRow) => ({
   card_expire_text: row.cardExpireText,
   mobile: row.mobile,
   phone2: row.phone2,
-  photo: row.photoKey ? "set" : null,
+  photo: row.photoKey,
 });
+type AuditField = keyof ReturnType<typeof auditFields>;
+
+/** ค่าที่ลง audit — เลขบัตรมาสก์ (PDPA) · รูปบันทึกแค่ว่ามี ไม่เก็บ key */
+const auditValue = (field: AuditField, value: string | null) =>
+  value === null ? null : field === "national_id" ? maskNationalId(value) : field === "photo" ? "set" : value;
+
+const auditView = (row: CustomerRow) => {
+  const raw = auditFields(row);
+  return Object.fromEntries((Object.keys(raw) as AuditField[]).map((k) => [k, auditValue(k, raw[k])]));
+};
 
 export async function createCustomer(db: Db, storage: Storage, input: CustomerInput, photo: unknown, userId: string) {
   await assertNationalIdFree(db, input.national_id);
@@ -221,12 +247,12 @@ export async function updateCustomer(
         .where(eq(customer.id, before.id))
         .returning();
       if (!row) throw new Error("update customer returned nothing");
-      const a = auditView(before);
-      const b = auditView(row);
+      const a = auditFields(before);
+      const b = auditFields(row);
       const changed = Object.fromEntries(
-        (Object.keys(b) as (keyof typeof b)[])
-          .filter((k) => a[k] !== b[k] || (k === "photo" && row.photoKey !== before.photoKey))
-          .map((k) => [k, { before: a[k], after: k === "photo" ? "replaced" : b[k] }]),
+        (Object.keys(b) as AuditField[])
+          .filter((k) => a[k] !== b[k])
+          .map((k) => [k, { before: auditValue(k, a[k]), after: k === "photo" ? "replaced" : auditValue(k, b[k]) }]),
       );
       if (Object.keys(changed).length) {
         await tx.insert(auditLog).values({
