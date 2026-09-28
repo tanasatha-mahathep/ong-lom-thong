@@ -174,6 +174,23 @@ function Sidebar({
             } as React.CSSProperties
           }
           side={side}
+          // เปิด: โฟกัสเมนูแรกในเนื้อหา (ไม่ใช่ลิงก์หัวหรือเมนูผู้ใช้) · ปิด: คืนโฟกัสให้ปุ่มเปิดเมนู
+          onOpenAutoFocus={(event) => {
+            const first = (event.currentTarget as HTMLElement | null)?.querySelector<HTMLElement>(
+              '[data-sidebar="content"] a[href], [data-sidebar="content"] button:not([disabled])',
+            );
+            if (!first) return;
+            event.preventDefault();
+            first.focus();
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            document.querySelector<HTMLElement>('[data-sidebar="trigger"]')?.focus();
+          }}
+          // กดลิงก์ในเมนู (เมาส์หรือ Enter) = ไปหน้าใหม่ → ปิด sheet
+          onClick={(event) => {
+            if (event.target instanceof Element && event.target.closest("a[href]")) setOpenMobile(false);
+          }}
         >
           <SheetHeader className="sr-only">
             <SheetTitle>เมนู</SheetTitle>

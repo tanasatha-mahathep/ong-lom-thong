@@ -38,10 +38,20 @@ describe("ชื่อหน้าจาก staticData", () => {
     await waitFor(() => expect(document.title).toBe("เพิ่มลูกค้า · โอเอ็นจี หลอมทอง"));
   });
 
-  it("URL ที่ไม่มีหน้า → หน้าไม่พบ ภาษาไทย", async () => {
-    fakeApi({ "GET /api/me": () => json(makeMe("staff")) });
-    renderApp("/no-such-page");
+  it.each([
+    ["ยังไม่ login", "/no-such-page", false],
+    ["login แล้ว", "/no-such-page", true],
+    ["login แล้ว · ใต้ route ที่มีจริง", "/customers/abc/def", true],
+  ])("URL ที่ไม่มีหน้า (%s: %s) → 404 ภาษาไทย มี main และ h1 เดียว", async (_, path, signedIn) => {
+    fakeApi({
+      "GET /api/me": () => (signedIn ? json(makeMe("staff")) : json({ error: "unauthorized" }, 401)),
+      "GET /api/gold-price/today": () => json(GOLD_PRICE),
+    });
+    renderApp(path);
 
     expect(await screen.findByRole("heading", { level: 1, name: "ไม่พบหน้านี้" })).toBeInTheDocument();
+    expect(screen.getAllByRole("main")).toHaveLength(1);
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "กลับหน้าแรก" })).toHaveAttribute("href", "/");
   });
 });

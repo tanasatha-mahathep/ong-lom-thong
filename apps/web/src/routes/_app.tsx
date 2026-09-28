@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/site-header";
 import { SkipLink } from "@/components/skip-link";
+import { NotFoundPage } from "@/components/status-page";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { ApiError } from "@/lib/api";
 import { meQueryOptions } from "@/lib/queries";
@@ -24,6 +25,8 @@ export const Route = createFileRoute("/_app")({
     }
   },
   component: AppLayout,
+  // หน้าไม่มีในแอป (login แล้ว) — แสดงใน <main> ของ shell
+  notFoundComponent: NotFoundPage,
 });
 
 /** โครงของ dashboard-01: sidebar แบบ inset + หัวหน้า + เนื้อหา */
