@@ -57,10 +57,21 @@ describe("หน้า login", () => {
     expect(router.state.location.pathname).toBe("/customers");
   });
 
-  it("?redirect= ไปเว็บอื่นไม่ได้ (กัน open redirect)", async () => {
-    signInServer(makeMe("staff"));
-    const router = renderApp("/login?redirect=%2F%2Fevil.example");
-    await submitCredentials();
+  it.each(["%2F%2Fevil.example", "%2F%09%2Fevil.example", "%2F.%2F%2Fevil.example", "%22%2F%5Ct%2Fevil.example%22"])(
+    "?redirect=%s ไปเว็บอื่นไม่ได้ (กัน open redirect) — ไปหน้าแรกแทน",
+    async (redirect) => {
+      signInServer(makeMe("staff"));
+      const router = renderApp(`/login?redirect=${redirect}`);
+      await submitCredentials();
+
+      expect(await screen.findByRole("heading", { level: 1, name: "หน้าแรก" })).toBeInTheDocument();
+      expect(router.state.location.href).toBe("/");
+    },
+  );
+
+  it("login อยู่แล้วแต่ ?redirect= มีอักขระควบคุม → ไปหน้าแรก ไม่ error", async () => {
+    fakeApi({ "GET /api/me": () => json(makeMe("staff")), "GET /api/gold-price/today": () => json(GOLD_PRICE) });
+    const router = renderApp("/login?redirect=%2F%0A%2Fevil.example");
 
     expect(await screen.findByRole("heading", { level: 1, name: "หน้าแรก" })).toBeInTheDocument();
     expect(router.state.location.href).toBe("/");

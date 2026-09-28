@@ -37,13 +37,44 @@ export function signInErrorMessage(e: unknown, origin: string): string {
   return "เข้าสู่ระบบไม่สำเร็จ ลองใหม่อีกครั้ง";
 }
 
+/** อักขระควบคุม (tab/ขึ้นบรรทัด ฯลฯ) และ backslash — browser ตัดทิ้งหรือแปลงเป็น "/" จน path กลายเป็นโดเมนอื่นได้ */
+function hasUnsafeChar(value: string): boolean {
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (code < 0x20 || code === 0x7f || char === "\\") return true;
+  }
+  return false;
+}
+
+function decode(value: string): string | undefined {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * ปลายทางหลัง login (?redirect=) ต้องเป็น path ในแอปเท่านั้น — กัน open redirect ไปเว็บอื่น
- * ไม่ผ่าน = undefined (ไปหน้าแรก)
+ * ปลายทางหลัง login (?redirect=) ต้องเป็นหน้าในแอปเท่านั้น — กัน open redirect ไปเว็บอื่น
+ * แปลงด้วย URL จริงเทียบกับ origin ของแอป แล้วคืนแค่ path + search + hash · ไม่ผ่าน = undefined (ไปหน้าแรก)
  */
-export function safeRedirect(value: unknown): string | undefined {
+export function safeRedirect(value: unknown, origin: string = window.location.origin): string | undefined {
   if (typeof value !== "string" || !value.startsWith("/")) return undefined;
-  // "//host" และ "/\host" browser ตีความเป็นโดเมนอื่น · วนกลับมาหน้า login ไม่มีประโยชน์
-  if (value.startsWith("//") || value.startsWith("/\\") || value.startsWith("/login")) return undefined;
-  return value;
+  const decoded = decode(value);
+  // ตรวจทั้งก่อนและหลัง decode — "%09" / "%5C" กลายเป็นอักขระอันตรายหลัง decode
+  if (decoded === undefined || hasUnsafeChar(value) || hasUnsafeChar(decoded)) return undefined;
+
+  let url: URL;
+  try {
+    url = new URL(value, origin);
+  } catch {
+    return undefined;
+  }
+  if (url.origin !== origin) return undefined;
+  // "/.//host" → pathname "//host" · "/%2F%2Fhost" decode แล้วเป็น "///host" — คือ URL ไม่มี scheme ไปโดเมนอื่น
+  const path = decode(url.pathname);
+  if (path === undefined || path.startsWith("//") || decoded.startsWith("//")) return undefined;
+  // วนกลับมาหน้า login ไม่มีประโยชน์
+  if (url.pathname === "/login") return undefined;
+  return `${url.pathname}${url.search}${url.hash}`;
 }
