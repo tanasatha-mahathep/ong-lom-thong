@@ -223,6 +223,27 @@ describe("quoteBuy — index · ราคาเฉลี่ย/กรัม · �
 });
 
 describe("quoteBuy — วิธีชำระ", () => {
+  it.each([
+    [{ method: "transfer", amount: "20030" }, BUY_MSG.bankRequired],
+    [{ method: "transfer", bank: "   ", amount: "20030" }, BUY_MSG.bankRequired],
+    [{ method: "cash", bank: "KBANK", amount: "20030" }, BUY_MSG.cashNoBank],
+  ])("ธนาคารไม่เข้ากับวิธี %j → %s · ไม่นับยอด", (p, message) => {
+    const r = quoteBuy(base({ payments: [p] }));
+    expect(r.errors[0]).toEqual({ field: "payments.0.bank", message });
+    expect(r.paid).toBe("0.00");
+    expect(r.ok).toBe(false);
+  });
+  it("โอนระบุธนาคาร · เงินสดไม่ระบุ → ผ่าน", () => {
+    const r = quoteBuy(
+      base({
+        payments: [
+          { method: "transfer", bank: "SCB", amount: "20000" },
+          { method: "cash", bank: null, amount: "30" },
+        ],
+      }),
+    );
+    expect(r.ok).toBe(true);
+  });
   it("วิธีที่ไม่รู้จัก → กรุณาเลือกประเภทเงินที่ชำระ (ข้อความระบบเดิม) ไม่นับยอด", () => {
     const r = quoteBuy(base({ payments: [{ method: "cheque", amount: "20030" }] }));
     expect(r.ok).toBe(false);

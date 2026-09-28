@@ -80,6 +80,8 @@ export const BUY_MSG = {
   amountScale: "จำนวนเงินทศนิยมไม่เกิน 2 ตำแหน่ง",
   amountMax: "ราคาเกิน 99,999,999.99 บาท — ตรวจตัวเลขอีกครั้ง",
   paymentMethod: "กรุณาเลือกประเภทเงินที่ชำระ",
+  bankRequired: "กรุณาเลือกธนาคาร",
+  cashNoBank: "เงินสดไม่ต้องระบุธนาคาร",
   paymentAmount: "กรุณากรอกจำนวนเงิน",
   paymentDup: "มีวิธีการชำระนี้อยู่แล้ว",
   overpaid: "เกินยอดที่ต้องชำระ",
@@ -169,8 +171,16 @@ export function quoteBuy(input: QuoteBuyInput): QuoteBuyResult {
   input.payments.forEach((p, i) => {
     let bad = false;
     const method = isPaymentMethod(p.method) ? p.method : null;
+    const bank = p.bank?.trim() || null;
     if (!method) {
       errors.push({ field: `payments.${i}.method`, message: BUY_MSG.paymentMethod });
+      bad = true;
+    } else if (method === "transfer" && !bank) {
+      // เจ้าของกำหนด 28 ก.ย.: โอนต้องระบุธนาคาร · เงินสดไม่มีธนาคาร (วิธี+ธนาคาร ใช้ตรวจแถวซ้ำ)
+      errors.push({ field: `payments.${i}.bank`, message: BUY_MSG.bankRequired });
+      bad = true;
+    } else if (method === "cash" && bank) {
+      errors.push({ field: `payments.${i}.bank`, message: BUY_MSG.cashNoBank });
       bad = true;
     }
     const a = parseDecimal(p.amount);
@@ -182,7 +192,6 @@ export function quoteBuy(input: QuoteBuyInput): QuoteBuyResult {
       bad = true;
     }
     if (bad || !method || !a) return;
-    const bank = p.bank?.trim() || null;
     const key = `${method}|${bank ?? ""}`;
     if (seen.has(key)) {
       errors.push({ field: `payments.${i}.method`, message: BUY_MSG.paymentDup });

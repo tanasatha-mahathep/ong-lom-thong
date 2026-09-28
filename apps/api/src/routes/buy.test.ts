@@ -448,6 +448,18 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       "กรุณาเลือกประเภทเงินที่ชำระ",
     ],
     [
+      "โอนเงินไม่ระบุธนาคาร",
+      () => ({ payments: [{ method: "transfer", bank: "", amount: "20030" }] }),
+      "payments.0.bank",
+      "กรุณาเลือกธนาคาร",
+    ],
+    [
+      "เงินสดระบุธนาคาร",
+      () => ({ payments: [{ method: "cash", bank: "KBANK", amount: "20030" }] }),
+      "payments.0.bank",
+      "เงินสดไม่ต้องระบุธนาคาร",
+    ],
+    [
       "โลหะที่ไม่รู้จัก",
       () => ({ lines: [{ metal_id: NO_UUID, weight_g: "5.860", amount: "20030" }] }),
       "lines.0.metal_id",
