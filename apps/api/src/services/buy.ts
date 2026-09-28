@@ -240,6 +240,13 @@ export const quoteJson = (p: PreparedBuy) => ({
     amount: l.amount,
     price_per_g: l.pricePerG,
   })),
+  // แถวชำระรูปมาตรฐาน (ตัดคอมมา · ปัด 2 ตำแหน่ง) — จอใช้แทนค่าที่พิมพ์เอง (เช่น "20,030" → "20030.00")
+  payments: p.quote.payments.map((x) => ({
+    index: x.index,
+    method: x.method,
+    bank: x.bank,
+    amount: x.amount,
+  })),
   total_weight: p.quote.totalWeight,
   total_amount: p.quote.totalAmount,
   avg_price_per_g: p.quote.avgPricePerG,

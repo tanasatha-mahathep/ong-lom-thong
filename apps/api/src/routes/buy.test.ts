@@ -38,6 +38,7 @@ interface QuoteRes {
   branch: { id: string; code: string; name: string };
   gold_price_snapshot: string | null;
   lines: { index: number; metal_id: string; weight_g: string; amount: string; price_per_g: string }[];
+  payments: { index: number; method: string; bank: string | null; amount: string }[];
   total_weight: string;
   total_amount: string;
   avg_price_per_g: string;
@@ -376,6 +377,7 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       branch: { id: t.branches["00000"], code: "00000", name: "สำนักงานใหญ่ (สาขา 1)" },
       gold_price_snapshot: "67850.00",
       lines: [{ index: 0, metal_id: metals.gold, weight_g: "5.860", amount: "20030.00", price_per_g: "3418.09" }],
+      payments: [{ index: 0, method: "cash", bank: null, amount: "20030.00" }],
       total_weight: "5.860",
       total_amount: "20030.00",
       avg_price_per_g: "3418.09",
@@ -642,6 +644,11 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     const q = (await (await quote(body)).json()) as QuoteRes;
     expect(q).toMatchObject({ ok: true, total_weight: "269.033", total_amount: "64787.50", avg_price_per_g: "240.82" });
     expect(q.lines.map((l) => l.price_per_g)).toEqual(["3421.09", "2333.33", "20.00"]);
+    // payments รูปมาตรฐาน (คอมมาถูกตัด · ธนาคารตัดช่องว่าง) ตามลำดับที่กรอก — จอใช้แทนค่าที่พิมพ์เอง
+    expect(q.payments).toEqual([
+      { index: 0, method: "transfer", bank: "KBANK", amount: "50000.00" },
+      { index: 1, method: "cash", bank: null, amount: "14787.50" },
+    ]);
 
     const res = await save({ ...body, time: "09:15", detail: "  สร้อยขาด 1 เส้น แหวนเงิน  ", full_tax: true });
     expect(res.status).toBe(201);
