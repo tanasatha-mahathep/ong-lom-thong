@@ -10,3 +10,7 @@ trim_trailing_whitespace = true
 
 [*.md]
 trim_trailing_whitespace = false
+
+# recipe ของ make ต้องย่อหน้าด้วย tab
+[Makefile]
+indent_style = tab
