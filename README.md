@@ -6,20 +6,20 @@ TypeScript ล้วน · Vite + TanStack (web) · Hono (api) · Drizzle + Post
 
 ## รันบนเครื่อง
 
+`make` (หรือ `make help`) แสดงคำสั่งทั้งหมด — ห่อ pnpm · docker compose · railway · gh ไว้ที่เดียว และโหลด `.env` ให้คำสั่งที่ต้องใช้
+
 ```bash
-pnpm install
-cp .env.example .env
-pnpm infra:up            # postgres 18 · gotenberg (+ฟอนต์ Sarabun) · minio (S3 local)
-pnpm db:migrate && pnpm db:seed
-pnpm dev                 # web http://localhost:5173 (proxy /api → api :8787)
+make setup               # install · .env · postgres/gotenberg/minio · migrate · seed
+make dev                 # web http://localhost:5173 (proxy /api → api :8787)
+make check               # lint · format · typecheck · test · build — ชุดเดียวกับ CI
 ```
 
 ```bash
-pnpm test                # vitest ทุกแพ็กเกจ (projects) — ตรรกะเงินใน packages/core ต้องเขียวเสมอ
-pnpm typecheck
-pnpm lint                # eslint (type-checked) · lint:fix
-pnpm format              # prettier · format:check
-pnpm build               # web → apps/web/dist · api → apps/api/dist
+make branch NAME=feat/xxx   # feature branch จาก dev
+make pr                     # push + เปิด PR เข้า dev
+make merge PR=12            # รอ CI แล้ว merge แบบ rebase
+make promote TO=testing     # dev → testing → staging → main (main ต้อง CONFIRM=yes)
+make railway-plan ENV=staging
 ```
 
 ## Commit / release
