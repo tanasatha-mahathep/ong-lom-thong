@@ -181,12 +181,17 @@ hdr() { # file name — value of a header in a saved header file ("" when absent
 lower() { tr '[:upper:]' '[:lower:]'; }
 
 csp_sources() { # policy directive — that directive's sources, lower-cased ("" when absent)
-  printf '%s\n' "$1" | tr ';' '\n' | awk -v d="$2" '{ $1 = $1 } tolower($1) == d { $1 = ""; sub(/^ /, ""); print tolower($0); exit }'
+  printf '%s\n' "$1" | tr ';' '\n' |
+    awk -v d="$2" '{ $1 = $1 } !found && tolower($1) == d { found = 1; $1 = ""; sub(/^ /, ""); print tolower($0) }'
 }
 
 max_age() { sed -nE 's/.*max-age=([0-9]+).*/\1/p' <<<"$1"; }
 
 # Required on every response (kind: html | asset | api | other); one problem per output line.
+# HSTS ≥ 1 year with includeSubDomains (ASVS 5.0 3.4.1 L2) · CSP object-src, base-uri and frame-ancestors
+# 'none' with no unsafe script sources (3.4.3, 3.4.6) · nosniff (3.4.4) · referrer policy (3.4.5) ·
+# HTML documents: Permissions-Policy turning off camera, microphone, geolocation and payment (OWASP Secure
+# Headers Project; the policy only governs documents) and COOP same-origin (3.4.8) · /api no-store (14.3.2)
 # Behind Railway's TLS edge the app only ever speaks plain HTTP, so it sends HSTS on every response and
 # the browser honours it over HTTPS only (RFC 6797 §8.1) — the smoke checks exactly what the app sends.
 header_problems() { # file kind
@@ -195,8 +200,9 @@ header_problems() { # file kind
   age="$(max_age "$v")"
   if [ -z "$v" ]; then
     echo "no strict-transport-security"
-  elif [ -z "$age" ] || [ "$age" -lt 31536000 ]; then
-    echo "HSTS max-age under 1 year (${v})"
+  else
+    if [ -z "$age" ] || [ "$age" -lt 31536000 ]; then echo "HSTS max-age under 1 year (${v})"; fi
+    case ";$(tr -d ' ' <<<"$v");" in *";includesubdomains;"*) ;; *) echo "HSTS without includeSubDomains" ;; esac
   fi
   csp="$(hdr "$f" content-security-policy)"
   if [ -z "$csp" ]; then
@@ -204,7 +210,7 @@ header_problems() { # file kind
   else
     [ "$(csp_sources "$csp" object-src)" = "'none'" ] || echo "CSP object-src is not 'none'"
     [ "$(csp_sources "$csp" frame-ancestors)" = "'none'" ] || echo "CSP frame-ancestors is not 'none'"
-    case "$(csp_sources "$csp" base-uri)" in "'none'" | "'self'") ;; *) echo "CSP base-uri is not 'none' or 'self'" ;; esac
+    [ "$(csp_sources "$csp" base-uri)" = "'none'" ] || echo "CSP base-uri is not 'none'"
     script="$(csp_sources "$csp" script-src)"
     [ -n "$script" ] || script="$(csp_sources "$csp" default-src)"
     if [ -z "$script" ]; then
@@ -226,6 +232,14 @@ header_problems() { # file kind
   case "$(hdr "$f" server)" in *[0-9]*) echo "server header discloses a version" ;; esac
   case "$kind" in
     html)
+      v="$(hdr "$f" permissions-policy | lower | tr -d ' ')"
+      if [ -z "$v" ]; then
+        echo "no permissions-policy"
+      else
+        for feature in camera microphone geolocation payment; do
+          case ",${v}," in *",${feature}=(),"*) ;; *) echo "permissions-policy does not disable ${feature}" ;; esac
+        done
+      fi
       case "$(hdr "$f" cross-origin-opener-policy | lower)" in
         same-origin | same-origin-allow-popups) ;;
         *) echo "cross-origin-opener-policy is not same-origin" ;;
@@ -245,17 +259,6 @@ header_problems() { # file kind
       if [ -z "$age" ] || [ "$age" -lt 31536000 ]; then echo "hashed asset max-age under 1 year"; fi
       ;;
   esac
-}
-
-recommended_gaps() { # file — stricter than required; reported as WARN on the HTML document
-  local f=$1 csp
-  case "$(hdr "$f" strict-transport-security | lower)" in
-    *includesubdomains*) ;;
-    *) echo "HSTS without includeSubDomains (ASVS 5.0 3.4.1 at L2)" ;;
-  esac
-  csp="$(hdr "$f" content-security-policy)"
-  [ "$(csp_sources "$csp" base-uri)" = "'none'" ] || echo "CSP base-uri is not 'none' (ASVS 5.0 3.4.3)"
-  [ -n "$(hdr "$f" permissions-policy)" ] || echo "no permissions-policy (OWASP Secure Headers Project)"
 }
 
 expect() { # check expected_status [jq filter that must be true]
@@ -589,14 +592,13 @@ for response in ${RESPONSES[@]+"${RESPONSES[@]}"}; do
   fi
 done
 if [ "$header_failures" -eq 0 ]; then
-  record PASS "security headers on every response" "${#RESPONSES[@]} responses: HSTS ≥ 1 y, CSP (object-src and \
-frame-ancestors 'none', no unsafe script sources), nosniff, XFO DENY, strict referrer policy, COOP and \
-no-cache on HTML, no-store on /api, immutable assets"
+  record PASS "security headers on every response" "${#RESPONSES[@]} responses: HSTS ≥ 1 y + includeSubDomains, \
+CSP (object-src, base-uri and frame-ancestors 'none', no unsafe script sources), nosniff, XFO DENY, strict \
+referrer policy; HTML: Permissions-Policy (camera, microphone, geolocation, payment off), COOP, no-cache; \
+no-store on /api; immutable assets"
 fi
 html_headers="$(headers_file "/")" || die "no saved headers for /"
 api_headers="$(headers_file "/api/healthz")" || die "no saved headers for /api/healthz"
-gaps="$(recommended_gaps "$html_headers")"
-[ -z "$gaps" ] || record WARN "stricter header settings" "$(tr '\n' ';' <<<"$gaps" | sed -e 's/;$//' -e 's/;/; /g')"
 
 for name in strict-transport-security content-security-policy x-content-type-options x-frame-options \
   referrer-policy cross-origin-opener-policy cross-origin-resource-policy permissions-policy cache-control; do
