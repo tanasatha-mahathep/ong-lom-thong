@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    # dev → testing → staging → main (promote แบบ fast-forward) · release ออกจาก main เท่านั้น
+    # dev → testing → staging → main (promote ทีละขั้นด้วย merge commit ผ่าน PR promotion) · release ออกจาก main เท่านั้น
     branches: [main, staging, testing, dev]
   pull_request:
   # ขั้น sync หลัง release สั่งรันบน branch ที่ขยับ (push ด้วย GITHUB_TOKEN ไม่ trigger ci เอง) · รันซ้ำเองได้
@@ -115,7 +115,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # release commit (CHANGELOG.md) อยู่บน main แล้ว — ไล่ตามลำดับ promotion: staging ← main · testing ← staging · dev ← testing
-      # fast-forward ถ้าได้ ไม่งั้น merge ต่อสายกัน → main ⊂ staging ⊂ testing ⊂ dev จึง promote แบบ fast-forward ต่อได้เสมอ
+      # merge --no-ff เสมอ (ข้ามถ้า merge เข้าไปแล้ว) → ได้ merge commit เป็นขั้น ๆ ไม่ fast-forward
       # push ด้วย GITHUB_TOKEN ไม่ trigger ci → สั่ง ci เองบน branch ที่ขยับ
       - name: sync branches with main
         env:
@@ -132,9 +132,10 @@ jobs:
               continue
             fi
             git checkout -q -B "$branch" "origin/$branch"
-            before=$(git rev-parse HEAD)
-            git merge --no-edit "$upstream"
-            if [ "$(git rev-parse HEAD)" != "$before" ]; then
+            if git merge-base --is-ancestor "$upstream" HEAD; then
+              echo "skip $branch ($upstream อยู่ใน $branch แล้ว)"
+            else
+              git merge --no-ff --no-edit "$upstream"
               git push "$remote" "HEAD:$branch"
               gh workflow run ci.yml --ref "$branch"
             fi
