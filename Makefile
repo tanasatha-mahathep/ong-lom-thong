@@ -35,7 +35,7 @@ install: ## ติดตั้ง dependency (เวอร์ชัน pnpm ต�
 dev: .env ## web :5173 + api :8787 (โหลด .env)
 	$(WITH_ENV) pnpm dev
 
-infra-up: ## เปิด postgres · gotenberg · minio แล้วรอ postgres พร้อม
+infra-up: ## เปิด postgres · gotenberg · s3 (RustFS) แล้วรอ postgres พร้อม
 	docker compose up -d
 	@for i in $$(seq 1 30); do docker compose exec -T postgres pg_isready -U ong >/dev/null 2>&1 && exit 0; sleep 1; done; \
 	echo "postgres ยังไม่พร้อม — ดู make logs SVC=postgres" >&2; exit 1
@@ -47,7 +47,7 @@ infra-reset: ## ลบ infra พร้อมข้อมูล local ทั้�
 	@test "$(CONFIRM)" = yes || { echo "ลบข้อมูล local ทั้งหมด — รันซ้ำด้วย CONFIRM=yes" >&2; exit 1; }
 	docker compose down -v
 
-logs: ## log ของ infra (SVC=postgres|gotenberg|minio)
+logs: ## log ของ infra (SVC=postgres|gotenberg|s3|s3-init)
 	docker compose logs -f $(SVC)
 
 ##@ ฐานข้อมูล (local)
