@@ -10,7 +10,8 @@
 #   scripts/ci/db-verify-selftest.sh drift when   only the named controls
 #
 # Needs what db-verify needs (TEST_DATABASE_URL, full history + tags). Exit 0 = every control
-# behaved as expected.
+# behaved as expected. The baseline must pass on the subject: when HEAD itself fails db-verify (a real
+# finding), test the tool on another commit with DB_VERIFY_SELFTEST_REF=<commit>.
 set -euo pipefail
 
 cd "$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
@@ -27,7 +28,10 @@ BASE_SHA=$(git rev-parse --verify --quiet "${BASE_REF}^{commit}") || {
   echo "db-verify-selftest: BASE_REF '$BASE_REF' not found" >&2
   exit 2
 }
-HEAD_SHA=$(git rev-parse HEAD)
+HEAD_SHA=$(git rev-parse --verify --quiet "${DB_VERIFY_SELFTEST_REF:-HEAD}^{commit}") || {
+  echo "db-verify-selftest: DB_VERIFY_SELFTEST_REF '${DB_VERIFY_SELFTEST_REF:-}' not found" >&2
+  exit 2
+}
 export BASE_REF
 # deterministic: the committed migrations count as deployed (in CI origin/dev holds them), so each
 # control's own change is what is new; controls that need other deployed tips add them below
