@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { type AppEnv, apiError, requireSession } from "../lib/context";
-import { currentBranch, forUser } from "../lib/scope";
+import { currentBranch, currentBranchClosed, forUser } from "../lib/scope";
 
 const SwitchBranch = z.object({ branch_id: z.uuid() });
 
@@ -16,6 +16,8 @@ export const me = new Hono<AppEnv>()
       user: { id: v.userId, name: v.name, email: v.email },
       role: v.role,
       branch: currentBranch(v, branches),
+      // ไม่ null เฉพาะตอน currentBranchId ชี้สาขาที่ปิดไปแล้ว (แยกจาก "ยังไม่ได้เลือก") · fail-closed เหมือน branch
+      branch_closed: await currentBranchClosed(c.var.db, v),
       branches,
       can_view_all: v.canViewAll,
     });
