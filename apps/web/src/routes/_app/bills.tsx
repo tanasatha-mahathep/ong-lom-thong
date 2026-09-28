@@ -1,7 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { PagePlaceholder } from "@/components/page-placeholder";
+import { BillsPage } from "@/features/bills/BillsPage";
+import { billsSearchSchema } from "@/features/bills/search";
 
 export const Route = createFileRoute("/_app/bills")({
   staticData: { title: "bills" },
-  component: PagePlaceholder,
+  validateSearch: billsSearchSchema,
+  component: BillsPage,
 });

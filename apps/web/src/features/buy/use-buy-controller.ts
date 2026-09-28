@@ -42,6 +42,7 @@ import {
   randomKey,
 } from "./model";
 import { buyKeys, buyQuoteQuery } from "./queries";
+import { autoPrintEnabled } from "./receipt/auto-print";
 import { type Metal, type QuoteBody, type QuoteError, QuoteSchema, type SaveBody, SavedBuySchema } from "./types";
 import { useBuyHotkeys } from "./use-buy-hotkeys";
 
@@ -195,7 +196,7 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
 
   /** เหตุที่ยังบันทึกไม่ได้ + ช่องที่ต้องไปแก้ — null = บันทึกได้ */
   function computeSaveBlock(): SaveBlock | null {
-    if (saving) return { message: t("save.saving"), target: null };
+    if (saving) return { message: t("saving", { ns: "common" }), target: null };
     if (noBranch) {
       const closed = me.branch_closed;
       const message = closed ? t("access.branchClosedTitle") : t("access.noBranchTitle");
@@ -516,7 +517,8 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
       idempotencyKey.current = null;
       void qc.invalidateQueries({ queryKey: buyKeys.lists() });
       toast.success(t("save.saved", { docNo: saved.doc_no }));
-      await navigate({ to: "/buy/$id", params: { id: saved.id } });
+      // ใบรับซื้อพิมพ์เองหลังบันทึก ถ้าเครื่องนี้ตั้งไว้ (ค่าเริ่มต้นเปิด) — ปิดได้ที่หน้าบิล
+      await navigate({ to: "/buy/$id", params: { id: saved.id }, search: autoPrintEnabled() ? { print: true } : {} });
     } catch (e) {
       onSaveError(e, quoteBody);
     }

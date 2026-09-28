@@ -49,7 +49,7 @@ export function SaveBar({ c }: { c: BuyController }) {
             onClick={() => void actions.submit()}
           >
             {saving ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
-            {saving ? t("save.saving") : t("save.button")}
+            {saving ? t("saving", { ns: "common" }) : t("save.button")}
             <KbdGroup className="max-sm:hidden">
               <Kbd>{t("keys.ctrl")}</Kbd>
               <Kbd>{t("keys.enter")}</Kbd>
@@ -101,7 +101,7 @@ function Total({ label, value, strong }: { label: string; value: string | undefi
       <dt className="text-sm text-muted-foreground">{label}</dt>
       <dd className={cn("tabular-nums", strong ? "text-lg font-bold" : "font-semibold")}>
         {formatMoney(value)}
-        <span className="ml-1 text-sm font-normal text-muted-foreground">{t("save.baht")}</span>
+        <span className="ml-1 text-sm font-normal text-muted-foreground">{t("baht", { ns: "common" })}</span>
       </dd>
     </div>
   );
