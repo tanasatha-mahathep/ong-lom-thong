@@ -470,4 +470,26 @@ describe("/buy", () => {
     pending.resolve(json({ error: "ยอดชำระไม่ตรงกับยอดบิล", field: "payments", ...q }, 409));
     await waitFor(() => expect(payAmount()).toHaveFocus());
   });
+
+  it("removes a line or payment row with the keyboard, not just the mouse (S3)", async () => {
+    const { user } = setup();
+    await insertCard(user, CUSTOMER_OK.national_id);
+    await waitFor(() => expect(weight()).toHaveFocus());
+    await addLine(user, "5.86", "20030");
+    await within(linesTable()).findAllByText("3,418.09");
+    const removeLine = screen.getByRole("button", { name: t("lines.remove", { n: 1 }) });
+    removeLine.focus();
+    expect(removeLine).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(within(linesTable()).getByText(t("lines.empty"))).toBeInTheDocument();
+
+    await addLine(user, "5.86", "20030");
+    await user.click(await screen.findByRole("button", { name: t("payments.payFull") }));
+    await screen.findByText(t("payments.balanced"));
+    const removePayment = screen.getByRole("button", { name: t("payments.remove", { n: 1 }) });
+    removePayment.focus();
+    expect(removePayment).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByText(t("payments.empty"))).toBeInTheDocument();
+  });
 });
