@@ -14,8 +14,8 @@ const CI = !!process.env.CI;
  *   smoke  read-only — also runs against deployed environments (deploy-smoke.yml): never writes
  *   api    black-box journeys through the real container: cookies, CSRF, S3 — writes, local stack only
  *   pdf    golden checks of Gotenberg's Thai A4 output (structure + text, no pixel diffs)
- *   ui     Chromium: the SPA, console, axe-core WCAG 2.x AA
- * `setup` creates this run's accounts on the local stack; only `api` depends on it.
+ *   ui     Chromium: login → home in the production build — console, CSP, axe-core WCAG 2.x AA
+ * `setup` creates this run's accounts on the local stack; `api` and `ui` depend on it.
  */
 export default defineConfig({
   testDir: "./specs",
@@ -42,6 +42,7 @@ export default defineConfig({
     { name: "smoke", testDir: "./specs/smoke" },
     { name: "api", testDir: "./specs/api", dependencies: ["setup"] },
     { name: "pdf", testDir: "./specs/pdf" },
-    { name: "ui", testDir: "./specs/ui", use: { ...devices["Desktop Chrome"] } },
+    // signs in through the real form — needs this run's accounts, so the local stack only (like api)
+    { name: "ui", testDir: "./specs/ui", dependencies: ["setup"], use: { ...devices["Desktop Chrome"] } },
   ],
 });
