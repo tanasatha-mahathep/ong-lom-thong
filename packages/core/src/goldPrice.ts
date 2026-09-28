@@ -30,8 +30,14 @@ export interface GoldPriceQuote {
 export function deriveGoldPrice(barSell: Numeric, setting: GoldPriceSetting = DEFAULT_GOLD_SETTING): GoldPriceQuote {
   const sell = parseDecimal(barSell);
   if (!sell || sell.lte(0)) throw new RangeError("ราคาทองแท่งขายออกต้องเป็นตัวเลขมากกว่า 0");
-  const barBuy = sell.minus(D(setting.diff));
-  const jewelryBuy = halfUp(barBuy.times(D(setting.jewelryDiscount)), 0);
+  const diff = D(setting.diff);
+  const discount = D(setting.jewelryDiscount);
+  // ค่าตั้งมาจาก DB (numeric รับ 'NaN'/'Infinity' ได้) — ค่าผิดต้องหยุด ไม่ใช่ได้ราคาเพี้ยน
+  if (!diff.isFinite() || diff.lt(0) || !discount.isFinite() || discount.lte(0) || discount.gt(1)) {
+    throw new RangeError("ค่าตั้งราคาทองไม่ถูกต้อง (ส่วนต่าง / ส่วนลดทองรูปพรรณ)");
+  }
+  const barBuy = sell.minus(diff);
+  const jewelryBuy = halfUp(barBuy.times(discount), 0);
   return { barSell: sell, barBuy, jewelryBuy };
 }
 

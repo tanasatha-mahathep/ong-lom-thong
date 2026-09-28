@@ -1,3 +1,5 @@
+// zod แบบไม่ใช้ eval เหมือนในแอป (main.tsx import เป็นบรรทัดแรก)
+import "@/lib/zod-config";
 import "@testing-library/jest-dom/vitest";
 // i18n ตัวเดียวกับแอป (ภาษาไทย) — component ที่ใช้ useTranslation ได้ข้อความจริงแม้ render เดี่ยว ๆ
 import "@/i18n";

@@ -15,7 +15,16 @@ function StatusPage({ title, description, action }: { title: string; description
   );
 }
 
-/** URL ที่ไม่มีหน้า */
+/** 404 ระดับ root (นอกโครงแอป เช่น ยังไม่ login) — มี <main> ของตัวเองเพราะไม่มี shell รอบ ๆ */
+export function RootNotFoundPage() {
+  return (
+    <main id="main" tabIndex={-1} className="flex min-h-svh flex-col bg-background">
+      <NotFoundPage />
+    </main>
+  );
+}
+
+/** URL ที่ไม่มีหน้า — ในโครงแอปแสดงใน <main> ของ shell */
 export function NotFoundPage() {
   const { t } = useTranslation();
   return (
