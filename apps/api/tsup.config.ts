@@ -5,6 +5,7 @@ export default defineConfig({
     index: "src/index.ts",
     migrate: "src/scripts/migrate.ts",
     seed: "src/scripts/seed.ts",
+    "create-user": "src/scripts/create-user.ts",
   },
   format: ["esm"],
   platform: "node",
