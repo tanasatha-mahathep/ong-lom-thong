@@ -88,9 +88,10 @@ export function BillsPage() {
   );
 
   // replace: ปุ่มย้อนกลับของ browser ออกจากหน้านี้ ไม่ไล่ย้อนตัวกรองทีละขั้น
-  // ตัวกรองทางปกติทุกตัวรวมถึงคำค้นที่ไม่ใช่เลขบัตร ทับคำค้นที่พิมพ์เข้ามาก่อนหน้าเสมอ
+  // เฉพาะคำค้นปกติ (patch มี q — รวมถึงล้างช่องว่าง) ที่ทับเลขบัตรที่ค้างในหน้านี้ · ตัวกรองอื่น (วันที่ · โลหะ · สาขา)
+  // ต้องคงเลขบัตรไว้ ไม่งั้นช่องยังโชว์เลขบัตรอยู่แต่ผลกลายเป็นของลูกค้าทุกคนโดยไม่แจ้ง
   const applyFilters = (patch: FilterPatch) => {
-    setSensitiveQuery(undefined);
+    if ("q" in patch) setSensitiveQuery(undefined);
     void navigate({ search: (prev) => withFilters(prev, patch), replace: true });
   };
   const clearFilters = () => {

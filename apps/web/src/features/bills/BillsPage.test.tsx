@@ -205,6 +205,45 @@ describe("หน้าค้นบิล — ช่องค้นหา", { tim
     expect(router.state.location.search).toEqual({});
   });
 
+  it("ตัวกรองอื่นหลังค้นด้วยเลขบัตร: เลขบัตรยังใช้อยู่ · มีแต่คำค้นปกติที่ทับ", async () => {
+    const { api, user, router } = openBills();
+    await waitForRows();
+    await user.type(searchBox(), "1103700123458{Enter}");
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: "1103700123458" }));
+
+    // โลหะ · ช่วงวันที่สำเร็จรูป: ต้องไปพร้อมเลขบัตร ไม่ใช่ตกไปเป็นผลของลูกค้าทุกคนขณะที่ช่องยังโชว์เลขบัตร
+    await screen.findByRole("option", { name: "ทอง" });
+    await user.selectOptions(screen.getByRole("combobox", { name: t("filters.metal") }), "ทอง");
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: "1103700123458", metal: "gold" }));
+    expect(router.state.location.search).toEqual({ metal: "gold" });
+    expect(searchBox()).toHaveValue("1103700123458");
+
+    await user.click(screen.getByRole("button", { name: t("presets.allDates") }));
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: "1103700123458", metal: "gold" }));
+    expect(router.state.location.search).toEqual({ metal: "gold" });
+
+    // คำค้นปกติทับเลขบัตร (โลหะที่เลือกไว้อยู่ต่อ)
+    await user.clear(searchBox());
+    await user.type(searchBox(), "สมชาย{Enter}");
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: "สมชาย", metal: "gold" }));
+    expect(router.state.location.search).toEqual({ q: "สมชาย", metal: "gold" });
+  });
+
+  it("ล้างตัวกรองล้างเลขบัตรที่ค้างในหน้านี้ด้วย", async () => {
+    const { user, router } = openBills({
+      list: ({ path }) => (path.includes("q=") ? buyList([BILL]) : buyList([BILL, VOID_BILL])),
+    });
+    await waitForRows();
+    await user.type(searchBox(), "1103700123458{Enter}");
+    await waitFor(() => expect(screen.queryByRole("link", { name: VOID_BILL.doc_no })).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: t("filters.clear") }));
+
+    expect(await screen.findByRole("link", { name: VOID_BILL.doc_no })).toBeInTheDocument();
+    expect(searchBox()).toHaveValue("");
+    expect(router.state.location.search).toEqual({});
+  });
+
   it("เบอร์โทร 10 หลักและเลขที่บิลไม่ใช่เลขบัตร: ลงใน URL ตามเดิม", async () => {
     const { user, router } = openBills();
     await waitForRows();
