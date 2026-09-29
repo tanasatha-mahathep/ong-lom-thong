@@ -35,7 +35,13 @@ export function PageHeader({
   const meta = usePageMeta();
   const heading = title ?? (meta.title && t(`routes.${meta.title}`));
   return (
-    <div data-slot="page-header" className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3 border-b pb-4">
+    // เส้นใต้แถบวิ่งเต็มความกว้างพื้นที่เนื้อหา (ชิดขอบ sidebar ถึงขอบขวา) เหมือนเส้นของหัวหน้า — วาดด้วย ::after
+    // กว้าง 100cqw + padding ของ <main> (@container/main · --main-px ใน _app.tsx) แบบเดียวกับแถบบันทึกของ /buy
+    // ชื่อ/ปุ่มยังตรงแนวเนื้อหา · หน้าอยู่ในกล่อง mx-auto (max-w-5xl) ก็ยังชิดขอบ
+    <div
+      data-slot="page-header"
+      className="relative flex flex-wrap items-end justify-between gap-x-4 gap-y-3 pb-4 after:pointer-events-none after:absolute after:bottom-0 after:left-[calc((100%_-_100cqw)/2_-_var(--main-px,1rem))] after:h-px after:w-[calc(100cqw_+_2*var(--main-px,1rem))] after:bg-border"
+    >
       <div className="flex min-w-0 items-start gap-3">
         {back && <BackButton to={back} label={t(BACK_LABEL[back])} />}
         <div className="min-w-0 space-y-1">

@@ -32,5 +32,6 @@ promote ทีละขั้นด้วย **merge commit** (`make promote` �
 
 ## ข้อห้ามของ repo
 
+- ruleset บังคับ PR + check · scan · db-verify · backup-image บน dev/testing/staging/main — job `release` push ผ่าน SSH ด้วย deploy key (`RELEASE_DEPLOY_KEY`) ที่ bypass ได้ · ห้ามกลับไปใช้ `GITHUB_TOKEN` push (ถูกปฏิเสธ) และห้ามเพิ่ม deploy key สิทธิ์เขียนตัวอื่น
 - ห้ามเปิด "Automatically delete head branches" · PR promotion merge ด้วย merge commit เท่านั้น ห้าม `--delete-branch` ห้าม rebase/squash/fast-forward
 - Bash tool ของเครื่องนี้คือ zsh — ใส่ `${var}` เสมอก่อน `:` ตอนลองคำสั่งใน tool (script ใน `scripts/ci/` รันด้วย bash ไม่โดน)

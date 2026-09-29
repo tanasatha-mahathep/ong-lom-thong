@@ -24,7 +24,14 @@ async function pageHeader() {
   const heading = await screen.findByRole("heading", { level: 1 }, { timeout: 10_000 });
   const bar = heading.closest<HTMLElement>('[data-slot="page-header"]');
   expect(bar).not.toBeNull();
-  expect(bar).toHaveClass("border-b");
+  // เส้นใต้แถบเต็มความกว้างพื้นที่เนื้อหา (ยกเลิก padding ของ main) — ไม่ใช่ border-b ที่เยื้องตาม padding
+  expect(bar).toHaveClass(
+    "after:bg-border",
+    "after:h-px",
+    "after:w-[calc(100cqw_+_2*var(--main-px,1rem))]",
+    "after:left-[calc((100%_-_100cqw)/2_-_var(--main-px,1rem))]",
+  );
+  expect(bar).not.toHaveClass("border-b");
   expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
   return { heading, bar: bar as HTMLElement };
 }
