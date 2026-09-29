@@ -317,6 +317,10 @@ describe("โลโก้ร้านที่หัว sidebar", () => {
     setup();
     const trigger = await switcher();
     expect(logoIn(trigger)).toHaveAttribute("aria-hidden", "true");
+    // โลโก้คือช่อง 32px ทั้งช่อง (ไม่ใช่ svg ลูกตรงของปุ่มที่ถูกบีบเหลือ 16px)
+    expect(logoIn(trigger)).toHaveClass("size-8");
+    expect(logoIn(trigger)?.parentElement).toHaveAttribute("data-slot", "branch-tile");
+    expect(logoIn(trigger)?.parentElement).toHaveClass("size-8");
     expect(trigger.querySelector("svg.lucide-store")).toBeNull();
   });
 
@@ -325,7 +329,8 @@ describe("โลโก้ร้านที่หัว sidebar", () => {
     setup({ role: "staff", branches: [BRANCH_HQ] });
     const header = await screen.findByRole("link", { name: /^สาขาปัจจุบัน/ });
     expect(document.querySelector('[data-slot="sidebar"]')).toHaveAttribute("data-state", "collapsed");
-    expect(logoIn(header)).not.toBeNull();
+    expect(logoIn(header)).toHaveClass("size-8");
+    expect(logoIn(header)?.parentElement).toHaveClass("size-8", "shrink-0");
   });
 });
 
