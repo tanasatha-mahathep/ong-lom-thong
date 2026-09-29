@@ -81,6 +81,28 @@ describe.skipIf(!available)("auth + /api/me — สาขา fail-closed", () =>
     expect((await me(cookie)).body.branch?.code).toBe("00000");
   });
 
+  it("F12: content-type text/plain ตอนสลับสาขาถูกปฏิเสธ (415) — สาขาปัจจุบันไม่เปลี่ยน", async () => {
+    const cookie = await t.login("multi@ong.test", PW);
+    const res = await t.app.request("/api/me/branch", {
+      method: "POST",
+      headers: { cookie, origin: "http://localhost:8787", "content-type": "text/plain" },
+      body: JSON.stringify({ branch_id: t.branches["00001"] }),
+    });
+    expect(res.status).toBe(415);
+    expect(await res.json()).toEqual({ error: "ต้องส่งเป็น application/json" });
+    expect((await me(cookie)).body.branch?.code).toBe("00000");
+  });
+
+  it("sign-in / sign-out ของ better-auth ยังทำงานปกติ (ยกเว้นจาก content-type gate)", async () => {
+    const cookie = await t.login("staff@ong.test", PW);
+    expect((await t.request("/api/me", { cookie })).status).toBe(200);
+    const out = await t.request("/api/auth/sign-out", { cookie, body: {} });
+    expect(out.status).toBe(200);
+    expect(await out.json()).toMatchObject({ success: true });
+    // cookie เดิมใช้ต่อไม่ได้แล้วหลัง sign-out
+    expect((await t.request("/api/me", { cookie })).status).toBe(401);
+  });
+
   it("บัญชีที่ถูกปิด login ไม่ได้", async () => {
     await expect(t.login("off@ong.test", PW)).rejects.toThrow(/login off@ong.test failed/);
   });

@@ -371,6 +371,36 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     expect(await receiptCount()).toBe(0);
   });
 
+  it("F12: content-type text/plain ถูกปฏิเสธ (415) ทั้ง quote และบันทึก — ไม่มีอะไรถูกบันทึก · JSON ปกติยังทำงาน", async () => {
+    const raw = async (path: string, body: unknown) =>
+      t.app.request(path, {
+        method: "POST",
+        headers: { cookie: cookies.staff ?? "", origin: "http://localhost:8787", "content-type": "text/plain" },
+        body: JSON.stringify(body),
+      });
+    const q = await raw("/api/buy/quote", bill());
+    expect(q.status).toBe(415);
+    expect(await q.json()).toEqual({ error: "ต้องส่งเป็น application/json" });
+
+    const s = await raw("/api/buy", { ...bill(), idempotency_key: newKey() });
+    expect(s.status).toBe(415);
+    expect(await receiptCount()).toBe(0);
+
+    // multipart ก็ไม่ได้ — endpoint นี้ไม่มีไฟล์แนบ (multipart อนุญาตเฉพาะฟอร์มลูกค้า)
+    const form = new FormData();
+    form.set("customer_id", custA);
+    const multipart = await t.app.request("/api/buy", {
+      method: "POST",
+      headers: { cookie: cookies.staff ?? "", origin: "http://localhost:8787" },
+      body: form,
+    });
+    expect(multipart.status).toBe(415);
+    expect(await receiptCount()).toBe(0);
+    // JSON ปกติยัง quote ได้เหมือนเดิม (gate ไม่ได้บล็อกของถูก) — ไม่บันทึกจริงที่นี่ เพราะเลขที่บิลใบแรกผูกกับ
+    // เทสต์ "บันทึกใบแรก → RC6910-0001" ด้านล่าง (ต้องเป็นบิลที่หนึ่งของงวดจริง ๆ)
+    expect((await quote(bill())).status).toBe(200);
+  });
+
   // ---------- quote ----------
 
   it("quote ใบจริง: 5.860 กรัม รับซื้อ 20,030 → 3,418.09/กรัม · snapshot ราคาทองของวันนี้", async () => {

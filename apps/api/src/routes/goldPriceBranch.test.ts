@@ -150,6 +150,13 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
     expect(await res.json()).toEqual({ error, field: "bar_sell" });
   });
 
+  it("F5: confirm_typo ผิดชนิด → 400 ชี้ confirm_typo ไม่ใช่ bar_sell (เดียวกับ PUT ราคากลาง)", async () => {
+    const res = await put("mgr1", b1, { bar_sell: "70100", confirm_typo: "yes" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "confirm_typo ต้องเป็นจริงหรือเท็จ", field: "confirm_typo" });
+    expect(await overrides()).toHaveLength(1); // ไม่มีอะไรถูกเขียน (ยังเป็นราคากลางของวันนี้จากการ seed)
+  });
+
   it("ตั้งราคาเฉพาะสาขา: สาขานั้นเห็นราคาของตัวเอง · สาขาอื่นยังเห็นราคากลาง · ราคากลางไม่ถูกแตะ", async () => {
     const res = await put("mgr1", b1, { bar_sell: "70100" });
     expect(res.status).toBe(200);
