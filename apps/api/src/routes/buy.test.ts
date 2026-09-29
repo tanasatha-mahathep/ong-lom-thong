@@ -1395,6 +1395,8 @@ describe.skipIf(!available)("ซื้อเข้า — สัญญาที�
   const TODAY_BE = "2026-10-05"; // 10:00 น. เวลาไทย → งวด RC6910
   const BACKDATE = "2026-10-01";
   const NO_BRANCH = { error: BUY_API_MSG.noBranch, field: "branch" };
+  // สาขาปัจจุบันถูกปิด ≠ ยังไม่ได้เลือก (dev 59779b4) — ยังเป็น 403 ชี้ field branch และไม่เขียนอะไร
+  const BRANCH_CLOSED = { error: BUY_API_MSG.branchClosed, field: "branch" };
   let t: TestApp;
   const cookies: Record<string, string> = {};
   const ids: Record<string, string> = {};
@@ -1478,7 +1480,7 @@ describe.skipIf(!available)("ซื้อเข้า — สัญญาที�
         ["quote", await quote(bill(), cookie)],
         ["บันทึก", await save(bill(), cookie)],
       ] as const) {
-        expect(await expectApiError(res, 403, `${what} ตอนสาขาปิด`)).toEqual(NO_BRANCH);
+        expect(await expectApiError(res, 403, `${what} ตอนสาขาปิด`)).toEqual(BRANCH_CLOSED);
       }
     } finally {
       await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00001"));

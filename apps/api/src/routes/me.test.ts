@@ -411,7 +411,9 @@ describe.skipIf(!available)("/api/me — สัญญา API: 401 · สาข�
       branch: Record<string, unknown> | null;
       branches: Record<string, unknown>[];
     };
-    expect(Object.keys(body).sort()).toEqual(["branch", "branches", "can_view_all", "role", "user"]);
+    // branch_closed (dev 59779b4): สาขาที่เลือกไว้ถ้าถูกปิด ({id, code, name}) ไม่งั้น null — ไม่ใช่ข้อมูลส่วนบุคคล
+    expect(Object.keys(body).sort()).toEqual(["branch", "branch_closed", "branches", "can_view_all", "role", "user"]);
+    expect(body.branch_closed).toBeNull();
     expect(Object.keys(body.user).sort()).toEqual(["email", "id", "name"]);
     expect(body.user).toEqual({ id: multiId, name: "multi", email: "multi@ong.test" });
     expect(body.role).toBe("staff");
