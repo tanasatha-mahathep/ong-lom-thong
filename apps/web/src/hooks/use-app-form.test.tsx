@@ -18,9 +18,11 @@ interface Values {
 function DemoForm({
   submit,
   onSuccess,
+  submitOnEnter,
 }: {
   submit: (values: Values) => Promise<string>;
   onSuccess?: (result: string) => void;
+  submitOnEnter?: boolean;
 }) {
   const schema = useMemo(
     () =>
@@ -35,6 +37,7 @@ function DemoForm({
     schema,
     submit,
     onSuccess,
+    submitOnEnter,
     successMessage: (result) => `บันทึกแล้ว ${result}`,
   });
   return (
@@ -118,6 +121,20 @@ describe("useAppForm — ตรวจก่อนส่ง (U2)", () => {
     await user.keyboard("{Control>}{Enter}{/Control}");
     await waitFor(() => expect(mobile()).toHaveFocus());
     expect(submit).not.toHaveBeenCalled();
+  });
+});
+
+describe("useAppForm — Enter ของฟอร์ม Siam ID", () => {
+  it("submitOnEnter=false → Enter ในช่องไม่ส่ง · Ctrl+Enter ส่ง", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn(() => Promise.resolve("B-0002"));
+    render(<DemoForm submit={submit} submitOnEnter={false} />);
+    await user.type(name(), "สมชาย");
+    await user.type(mobile(), "0812345678{Enter}");
+    expect(submit).not.toHaveBeenCalled();
+
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
   });
 });
 

@@ -45,6 +45,11 @@ export interface UseAppFormOptions<TValues extends object, TResult> {
   fieldOfError?: (error: unknown) => string | undefined;
   /** error ที่ไม่ชี้ช่อง → โฟกัสช่องนี้แทนปุ่มบันทึก (เช่น login ผิด → ช่องรหัสผ่าน) */
   focusOnFormError?: string;
+  /**
+   * false = Enter ในช่อง input ไม่ส่งฟอร์ม (ฟอร์ม Siam ID — เครื่องอ่านบัตรส่ง Enter ท้ายข้อมูล) · บันทึกด้วยปุ่ม
+   * หรือ Ctrl+Enter เท่านั้น · ค่าเริ่มต้น true (Enter ส่งฟอร์มตามปกติของ browser)
+   */
+  submitOnEnter?: boolean;
 }
 
 /** ส่วนที่ `<AppForm>` / `<SubmitButton>` ใช้ */
@@ -210,14 +215,19 @@ export function useAppForm<TValues extends object, TResult = unknown>(options: U
     [submit],
   );
 
-  // Ctrl+Enter (⌘+Enter) = บันทึก จากช่องไหนก็ได้ (สเปก §3.1)
+  // Ctrl+Enter (⌘+Enter) = บันทึก จากช่องไหนก็ได้ (สเปก §3.1) · submitOnEnter=false: Enter ธรรมดาในช่อง input ไม่ส่ง
+  const submitOnEnter = options.submitOnEnter ?? true;
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLFormElement>) => {
-      if (event.key !== "Enter" || !(event.ctrlKey || event.metaKey) || event.nativeEvent.isComposing) return;
-      event.preventDefault();
-      submit();
+      if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        submit();
+      } else if (!submitOnEnter && event.target instanceof HTMLInputElement) {
+        event.preventDefault();
+      }
     },
-    [submit],
+    [submit, submitOnEnter],
   );
 
   /** error ที่แสดงของช่อง: ของ API ก่อน · ของ schema เมื่อออกจากช่องแล้ว หรือเคยกดบันทึก */
