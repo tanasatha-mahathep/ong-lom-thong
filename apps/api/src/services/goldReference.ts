@@ -39,17 +39,68 @@ async function fetchText(fetchImpl: FetchLike, url: string, signal: AbortSignal,
 
 const ENTITIES: Record<string, string> = { nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'" };
 
-/** ข้อความภายใน element ที่มี id นี้ (ตัดแท็กลูก เช่น <b><font>) — ไม่มี/มีซ้ำ = null */
+/** ข้อความใน label ยาวเกินนี้ = ไม่ใช่ label ราคา/เวลาประกาศ (ของจริง < 100 ตัวอักษรรวมแท็ก <b><font>) */
+export const MAX_LABEL_HTML_LENGTH = 400;
+
+const isTagNameChar = (ch: string) => (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || (ch >= "0" && ch <= "9");
+
+/** ตัดแท็กออก (แทนด้วยช่องว่าง) — วนทีละตัวอักษร linear ไม่ใช้ regex */
+function stripTags(html: string): string {
+  let out = "";
+  let inTag = false;
+  for (const ch of html) {
+    if (inTag) {
+      if (ch === ">") inTag = false;
+    } else if (ch === "<") {
+      inTag = true;
+      out += " ";
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+/** ตำแหน่งทั้งหมดของ attribute id="…" / id='…' (ตัวพิมพ์ใหญ่/เล็กของ "id") ที่หน้าเป็นช่องว่าง — indexOf ล้วน */
+function idAttributePositions(html: string, id: string): number[] {
+  const found: number[] = [];
+  for (const attr of ["id", "ID", "Id", "iD"]) {
+    for (const quote of ['"', "'"]) {
+      const needle = `${attr}=${quote}${id}${quote}`;
+      for (let at = html.indexOf(needle); at !== -1; at = html.indexOf(needle, at + needle.length)) {
+        if (/\s/.test(html.charAt(at - 1))) found.push(at);
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * ข้อความภายใน element ที่มี id นี้ (ตัดแท็กลูก เช่น <b><font>) — ไม่มี/มีซ้ำ/ยาวผิดปกติ = null
+ * indexOf/slice ล้วน (linear · ไม่มี regex กับหน้า HTML ทั้งหน้า — CodeQL js/polynomial-redos)
+ * รูปที่รับ: `<tag … id="ID" …>ข้อความ</tag>` · id เขียนแบบมีช่องว่างรอบ "=" ไม่รับ (หน้า ASP.NET ไม่เขียนแบบนั้น)
+ */
 export function textById(html: string, id: string): string | null {
-  const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`<([a-z][a-z0-9]*)\\b[^>]*\\bid\\s*=\\s*["']${escaped}["'][^>]*>([\\s\\S]*?)</\\1\\s*>`, "gi");
-  const matches = [...html.matchAll(re)];
-  if (matches.length !== 1) return null;
-  return (matches[0]?.[2] ?? "")
-    .replace(/<[^>]*>/g, " ")
+  const positions = idAttributePositions(html, id);
+  if (positions.length !== 1) return null;
+  const at = positions[0] as number;
+  const tagStart = html.lastIndexOf("<", at);
+  const openEnd = html.indexOf(">", at);
+  if (tagStart === -1 || openEnd === -1) return null;
+  let nameEnd = tagStart + 1;
+  while (nameEnd < at && isTagNameChar(html.charAt(nameEnd))) nameEnd++;
+  const name = html.slice(tagStart + 1, nameEnd).toLowerCase();
+  if (name === "" || html.slice(nameEnd, at).includes(">")) return null;
+  // ปิดแท็ก </name หรือ </NAME — หาในช่วงจำกัดความยาวเท่านั้น (ไม่ lowercase ทั้งช่วง: ความยาวของอักษรบางตัวเปลี่ยน)
+  const window = html.slice(openEnd + 1, openEnd + 1 + MAX_LABEL_HTML_LENGTH + name.length + 2);
+  const closes = [`</${name}`, `</${name.toUpperCase()}`].map((t) => window.indexOf(t)).filter((i) => i !== -1);
+  if (closes.length === 0) return null;
+  const close = Math.min(...closes);
+  return stripTags(window.slice(0, close))
     .replace(/&(nbsp|amp|lt|gt|quot|#39);/g, (_, e: string) => ENTITIES[e] ?? "")
-    .replace(/\s+/g, " ")
-    .trim();
+    .split(/\s+/)
+    .filter((part) => part !== "")
+    .join(" ");
 }
 
 /**

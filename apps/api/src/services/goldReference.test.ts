@@ -7,6 +7,7 @@ import {
   goldtradersHtmlProvider,
   parseGoldtradersHtml,
   parseThaiGoldApiJson,
+  MAX_LABEL_HTML_LENGTH,
   providerFromEnv,
   referenceAudit,
   textById,
@@ -29,6 +30,39 @@ describe("textById", () => {
     expect(textById(`<span id="x">a</span><span id="x">b</span>`, "x")).toBeNull();
     expect(textById(`<span id="x1">a</span>`, "x")).toBeNull();
     expect(textById(`<span id="a.b">ok</span><span id="aXb">no</span>`, "a.b")).toBe("ok");
+  });
+});
+
+describe("textById — ขอบเขตและเวลา (linear · ไม่ ReDoS)", () => {
+  it("data-id ไม่นับ · id ซ้ำต่างเครื่องหมายคำพูด = null · ไม่มีแท็กปิด = null", () => {
+    expect(textById(`<span data-id="x">a</span>`, "x")).toBeNull();
+    expect(textById(`<span id="x">a</span><b id='x'>b</b>`, "x")).toBeNull();
+    expect(textById(`<span id="x">a`, "x")).toBeNull();
+    expect(textById(`<span id="x"`, "x")).toBeNull();
+    expect(textById(`id="x">a</span>`, "x")).toBeNull();
+    expect(textById(`< id="x">a</span>`, "x")).toBeNull();
+  });
+
+  it("label ยาวเกินเพดาน = null (ราคาจริงสั้นกว่ามาก)", () => {
+    expect(textById(`<span id="x">${"1".repeat(MAX_LABEL_HTML_LENGTH + 1)}</span>`, "x")).toBeNull();
+    expect(textById(`<span id="x">${"1".repeat(MAX_LABEL_HTML_LENGTH)}</span>`, "x")).toHaveLength(
+      MAX_LABEL_HTML_LENGTH,
+    );
+  });
+
+  it("หน้า ~100k ตัวอักษรของ '<' / ช่องว่าง / id ซ้ำ ๆ → ตอบใน < 50 ms", () => {
+    const pages = [
+      `<span id="x">${"<".repeat(100_000)}`,
+      `${"<span ".repeat(10_000)} id="x">${" ".repeat(50_000)}</span>`,
+      `${'<i id="x">'.repeat(10_000)}`,
+      `<p>${" (".repeat(50_000)}</p>`,
+    ];
+    for (const html of pages) {
+      const started = performance.now();
+      textById(html, "x");
+      expect(() => parseGoldtradersHtml(html)).toThrow(GoldReferenceError);
+      expect(performance.now() - started).toBeLessThan(50);
+    }
   });
 });
 
