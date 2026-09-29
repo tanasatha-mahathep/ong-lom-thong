@@ -210,6 +210,43 @@ describe("/customers — รายการและค้นหา", () => {
     expect(listQueries(api).every((query) => query.q === undefined || query.q === NATIONAL_ID)).toBe(true);
   });
 
+  it.each([
+    ["13 หลักติดกัน", "1103700123458", "q=1103700123458"],
+    ["จัดกลุ่มแบบหน้าบัตร", "1 1037 00123 45 8", "q=1%201037%2000123%2045%208"],
+  ])("ลิงก์เก่าที่มีเลขบัตรใน ?q= (%s): ค้นตามนั้น แต่แทนที่ URL ด้วยฉบับที่ไม่มีเลขบัตร", async (_name, id, query) => {
+    const api = fakeApi({
+      ...shell,
+      "GET /api/customers": () => json({ items: [CUSTOMER_ROW], page: 2, has_more: false }),
+    });
+    const router = renderApp(`/customers?${query}&page=2`);
+
+    await waitFor(() => expect(router.state.location.search).toEqual({ page: 2 }));
+    await screen.findByRole("link", { name: CUSTOMER_ROW.name_th });
+    // แทนที่ entry เดิม ไม่ใช่เพิ่ม entry — ปุ่มย้อนกลับไม่พากลับไปหน้าที่มีเลขบัตร
+    expect(router.history.length).toBe(1);
+    expect(router.state.location.href).toBe("/customers?page=2");
+    expect(screen.getByLabelText("ค้นหาลูกค้า")).toHaveValue(id);
+    // ค้นด้วยเลขบัตรตั้งแต่แรก · แทนที่ URL แล้วคำขอเดิมยังใช้ต่อ (ไม่ถามซ้ำ ไม่หลุดไปเป็นรายชื่อทั้งหมด)
+    expect(listQueries(api)).toEqual([{ q: id, page: "2" }]);
+  });
+
+  it("URL ได้เลขบัตรระหว่างอยู่หน้ารายการ (ลิงก์ · ประวัติ): ค้นตามนั้นและล้างเลขออกจาก URL", async () => {
+    const api = fakeApi({
+      ...shell,
+      "GET /api/customers": () => json({ items: [CUSTOMER_ROW], page: 1, has_more: false }),
+    });
+    const router = renderApp("/customers?q=somchai");
+    const box = await screen.findByLabelText("ค้นหาลูกค้า");
+    await screen.findByRole("link", { name: CUSTOMER_ROW.name_th });
+
+    await act(() => router.navigate({ to: "/customers", search: { q: NATIONAL_ID, page: 1 } }));
+
+    await waitFor(() => expect(router.state.location.search).toEqual({}));
+    await waitFor(() => expect(box).toHaveValue(NATIONAL_ID));
+    expect(router.state.location.href).toBe("/customers");
+    expect(listQueries(api).at(-1)).toEqual({ q: NATIONAL_ID });
+  });
+
   it("URL ?q=ตัวเลขล้วน (พิมพ์เอง) ยังค้นได้ · Esc ล้างคำค้น · ไม่พบ → บอกคำค้นที่ใช้", async () => {
     fakeApi({
       ...shell,

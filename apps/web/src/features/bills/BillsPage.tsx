@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
-import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useEffectEvent, useId, useMemo, useRef, useState } from "react";
 import { DataTable } from "@/components/data-table";
 import { PageHeader } from "@/components/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -76,7 +76,20 @@ export function BillsPage() {
   const search = route.useSearch();
   const navigate = route.useNavigate();
   // เลขบัตรประชาชนเต็ม 13 หลักที่พิมพ์ค้น: ใช้ค้นได้แต่ไม่เก็บลง URL (ต่างจากตัวกรองอื่นที่อยู่ใน URL ทั้งหมด)
-  const [sensitiveQuery, setSensitiveQuery] = useState<string | undefined>(undefined);
+  // ลิงก์เก่า/บุ๊กมาร์กที่มีเลขบัตรอยู่ใน ?q= — ค้นตามนั้นต่อ (เก็บเป็น state) แล้ว effect ด้านล่างแทนที่ URL ด้วยฉบับที่ไม่มี q
+  const urlHoldsId = search.q !== undefined && looksLikeNationalId(search.q);
+  const [sensitiveQuery, setSensitiveQuery] = useState<string | undefined>(() => (urlHoldsId ? search.q : undefined));
+  const [seenQ, setSeenQ] = useState(search.q);
+  if (seenQ !== search.q) {
+    setSeenQ(search.q);
+    if (urlHoldsId) setSensitiveQuery(search.q);
+  }
+  const scrubLegacyLink = useEffectEvent(() => {
+    void navigate({ search: (prev) => ({ ...prev, q: undefined }), replace: true });
+  });
+  useEffect(() => {
+    if (urlHoldsId) scrubLegacyLink();
+  }, [urlHoldsId, search.q]);
   const effectiveSearch = sensitiveQuery === undefined ? search : { ...search, q: sensitiveQuery };
   // ค้างผลของตัวกรองก่อนหน้าไว้ระหว่างโหลด ตารางไม่กระพริบ — ยอดรวมขึ้น "กำลังค้นหา…" แทนยอดเก่า
   const list = useQuery({ ...buyListQuery(toListParams(effectiveSearch)), placeholderData: keepPreviousData });

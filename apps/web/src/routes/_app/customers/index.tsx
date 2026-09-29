@@ -50,7 +50,10 @@ function CustomersPage() {
   const navigate = Route.useNavigate();
   useCustomerSync();
 
-  const [held, setHeld] = useState<HeldQuery | undefined>(undefined);
+  // ลิงก์เก่า/บุ๊กมาร์กที่มีเลขบัตรอยู่ใน ?q= — ค้นตามนั้นต่อ (เก็บเป็น held) แล้ว effect ด้านล่างแทนที่ URL ด้วยฉบับที่ไม่มีเลขบัตร
+  const [held, setHeld] = useState<HeldQuery | undefined>(() =>
+    looksLikeNationalId(search.q) ? { q: search.q, page: search.page } : undefined,
+  );
   // URL เปลี่ยนจากภายนอก (ปุ่มย้อนกลับ/ไปข้างหน้าของ browser · ลิงก์) → คำค้นที่มากับ URL ชนะเลขบัตรที่ค้างอยู่
   // ไม่งั้นช่องกับผลยังเป็นเลขบัตรทั้งที่ URL บอกอย่างอื่น · ที่หน้านี้ทำเอง (ค้นด้วยเลขบัตร · เปลี่ยนหน้า)
   // URL จะมาด้วย q ว่างเสมอ จึงแค่ตามเลขหน้า · เทียบตอน URL "เปลี่ยน" เท่านั้น ไม่เทียบทุก render:
@@ -58,8 +61,15 @@ function CustomersPage() {
   const [seen, setSeen] = useState({ q: search.q, page: search.page });
   if (seen.q !== search.q || seen.page !== search.page) {
     setSeen({ q: search.q, page: search.page });
-    if (held) setHeld(search.q === "" ? { ...held, page: search.page } : undefined);
+    if (looksLikeNationalId(search.q)) setHeld({ q: search.q, page: search.page });
+    else if (held) setHeld(search.q === "" ? { ...held, page: search.page } : undefined);
   }
+  const scrubLegacyLink = useEffectEvent(() => {
+    void navigate({ search: { q: "", page: search.page }, replace: true });
+  });
+  useEffect(() => {
+    if (looksLikeNationalId(search.q)) scrubLegacyLink();
+  }, [search.q]);
   // q 1 ตัวอักษร (พิมพ์ URL เอง) API ตอบ 400 — แสดงทั้งหมดแทน
   const urlQ = search.q.length < MIN_QUERY_LENGTH ? "" : search.q;
   const q = held?.q ?? urlQ;

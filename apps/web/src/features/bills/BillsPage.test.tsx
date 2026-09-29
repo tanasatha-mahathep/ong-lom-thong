@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Me } from "@/lib/queries";
@@ -9,14 +9,18 @@ import { BILL, VOID_BILL, buyList, listRequests } from "./test-data";
 
 type ListHandler = Parameters<typeof fakeApi>[0][string];
 
-function openBills({ me = makeMe("staff"), list }: { me?: Me; list?: ListHandler } = {}) {
+function openBills({
+  me = makeMe("staff"),
+  list,
+  path = "/bills",
+}: { me?: Me; list?: ListHandler; path?: string } = {}) {
   const api = fakeApi({
     "GET /api/me": () => json(me),
     "GET /api/metals": () => json(METALS),
     "GET /api/buy": list ?? (() => buyList([BILL, VOID_BILL])),
   });
   const user = userEvent.setup();
-  const router = renderApp("/bills");
+  const router = renderApp(path);
   return { api, user, router };
 }
 
@@ -242,6 +246,34 @@ describe("หน้าค้นบิล — ช่องค้นหา", { tim
     expect(await screen.findByRole("link", { name: VOID_BILL.doc_no })).toBeInTheDocument();
     expect(searchBox()).toHaveValue("");
     expect(router.state.location.search).toEqual({});
+  });
+
+  it.each([
+    ["13 หลักติดกัน", "1103700123458", "?q=1103700123458"],
+    ["จัดกลุ่มแบบหน้าบัตร", "1 1037 00123 45 8", "?q=1%201037%2000123%2045%208"],
+  ])("ลิงก์เก่าที่มีเลขบัตรใน ?q= (%s): ค้นตามนั้น แต่แทนที่ URL ด้วยฉบับที่ไม่มีเลขบัตร", async (_name, id, query) => {
+    const { api, router } = openBills({ path: `/bills${query}&metal=gold` });
+
+    await waitFor(() => expect(router.state.location.search).toEqual({ metal: "gold" }));
+    await waitForRows();
+    // แทนที่ entry เดิม ไม่ใช่เพิ่ม entry — ปุ่มย้อนกลับไม่พากลับไปหน้าที่มีเลขบัตร
+    expect(router.history.length).toBe(1);
+    expect(router.state.location.href).toBe("/bills?metal=gold");
+    expect(searchBox()).toHaveValue(id);
+    // ค้นด้วยเลขบัตรตั้งแต่แรก · แทนที่ URL แล้วคำขอเดิมยังใช้ต่อ (ไม่ถามซ้ำ ไม่หลุดไปเป็นผลของทุกลูกค้า)
+    expect(listRequests(api)).toEqual([{ q: id, metal: "gold" }]);
+  });
+
+  it("URL ได้เลขบัตรระหว่างอยู่หน้าค้นบิล (ลิงก์ · ประวัติ): ค้นตามนั้นและล้างเลขออกจาก URL", async () => {
+    const { api, router } = openBills({ path: "/bills?q=somchai" });
+    await waitForRows();
+
+    await act(() => router.navigate({ to: "/bills", search: { q: "1103700123458" } }));
+
+    await waitFor(() => expect(router.state.location.search).toEqual({}));
+    await waitFor(() => expect(searchBox()).toHaveValue("1103700123458"));
+    expect(router.state.location.href).toBe("/bills");
+    expect(listRequests(api).at(-1)).toEqual({ q: "1103700123458" });
   });
 
   it("เบอร์โทร 10 หลักและเลขที่บิลไม่ใช่เลขบัตร: ลงใน URL ตามเดิม", async () => {
