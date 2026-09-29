@@ -15,7 +15,7 @@ WITH_ENV  := set -a && . ./.env && set +a &&
 .PHONY: help setup install dev infra-up infra-down infra-reset logs \
 	db-migrate db-seed db-generate db-psql db-verify db-verify-test \
 	check lint lint-fix format format-check typecheck test test-coverage test-watch build bundle-budget docker-api \
-	scan ci-lint secret-scan sast sca security smoke e2e-up e2e e2e-down ci-full testsprite-probe testsprite-doctor \
+	scan ci-lint secret-scan sast sca security smoke gotenberg-scan verify-image e2e-up e2e e2e-down ci-full testsprite-probe testsprite-doctor \
 	railway-link railway-plan railway-apply railway-logs railway-status \
 	branch pr merge promote sync clean
 
@@ -128,6 +128,13 @@ security: ## สแกนทั้ง 4 ตัว — รันครบทุ�
 ##@ ring 1 — image · e2e (Docker · build ทีละตัว ดิสก์ของ Docker VM จำกัด)
 smoke: ## build image ของ api แบบเดียวกับ Railway แล้ว smoke (SKIP_BUILD=1 IMAGE=<tag> = ใช้ image ที่มีอยู่)
 	scripts/ci/image-smoke.sh
+
+gotenberg-scan: ## build image Gotenberg แล้ว SBOM + Trivy (fail = CRITICAL ที่มี fix · HIGH รายงาน) — ชุดเดียวกับ ring 1 + security.yml
+	scripts/ci/gotenberg-scan.sh
+
+verify-image: ## ตรวจ provenance + SBOM attestation ของ image ใน GHCR ก่อน deploy (REF=<sha|tag|sha256:…> · IMAGES="api gotenberg")
+	@[ -n "$(REF)" ] || { echo "ใช้: make verify-image REF=<commit sha>" >&2; exit 2; }
+	scripts/ci/verify-image.sh "$(REF)" $(IMAGES)
 
 e2e-up: ## เปิด stack e2e (compose ong-e2e · api :28787 · gotenberg :23000) · secrets ใหม่ทุกรอบ (API_IMAGE=<tag> = ใช้ image ที่มีแล้ว)
 	bash tests/e2e/stack/stack.sh up

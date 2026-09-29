@@ -91,9 +91,30 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  # Chromium ใน Gotenberg มี CVE ใหม่แทบทุกสัปดาห์ — สแกน image ที่ Dockerfile บน branch นี้ build ได้ ณ วันนี้
+  gotenberg-image:
+    name: gotenberg image (trivy · CRITICAL with a fix fails · HIGH reported)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: scripts/ci/gotenberg-scan.sh
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gotenberg-image-report
+          path: |
+            ${{ runner.temp }}/ong-sec/gotenberg/sbom.cdx.json
+            ${{ runner.temp }}/ong-sec/gotenberg/trivy-report.json
+            ${{ runner.temp }}/ong-sec/gotenberg/gate.txt
+          retention-days: 14
+          if-no-files-found: ignore
+
   alert:
     name: open or update the tracking issue
-    needs: [ci-lint, sca, sast, secret-scan]
+    needs: [ci-lint, sca, sast, secret-scan, gotenberg-image]
     # timeout-minutes ทำให้ job เป็น cancelled ไม่ใช่ failure — นับทั้งสองแบบ
     if: always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled'))
     runs-on: ubuntu-latest
@@ -109,12 +130,12 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           BRANCH: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
-          RESULTS: "ci-lint: ${{ needs.ci-lint.result }} · sca: ${{ needs.sca.result }} · sast: ${{ needs.sast.result }} · secret-scan: ${{ needs.secret-scan.result }}"
+          RESULTS: "ci-lint: ${{ needs.ci-lint.result }} · sca: ${{ needs.sca.result }} · sast: ${{ needs.sast.result }} · secret-scan: ${{ needs.secret-scan.result }} · gotenberg-image: ${{ needs.gotenberg-image.result }}"
         run: |
           export TITLE="Security scan failing on $BRANCH"
           body=$(printf '%s\n\n- run: %s\n- commit: %s\n- jobs: %s\n\n%s\n' \
             "The scheduled/manual security scan failed." "$RUN_URL" "$SHA" "$RESULTS" \
-            "Reports: the run's step summary and artifacts (14 days). Fix or upgrade; ignore only with a reason and an expiry (osv-scanner.toml · .gitleaks.toml · .semgrepignore).")
+            "Reports: the run's step summary and artifacts (14 days). Fix or upgrade; ignore only with a reason and an expiry (osv-scanner.toml · .gitleaks.toml · .semgrepignore); Gotenberg: bump services/gotenberg/Dockerfile.")
           number=$(gh issue list --state open --search "\"$TITLE\" in:title" --json number,title \
             --jq 'map(select(.title == env.TITLE)) | .[0].number // empty')
           if [ -n "$number" ]; then
