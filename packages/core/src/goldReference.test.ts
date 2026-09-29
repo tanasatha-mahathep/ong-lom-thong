@@ -78,6 +78,28 @@ describe("parseGoldAnnouncement", () => {
     });
   });
 
+  it("ข้อความยาว/ช่องว่างและวงเล็บซ้ำ ๆ 100k ตัวอักษร → error ทันที (ไม่ ReDoS)", () => {
+    for (const evil of [
+      " ".repeat(100_000),
+      `02/02/2569 เวลา 17:23${" ".repeat(100_000)}x`,
+      `02/02/2569 เวลา 17:23 น. (${" (".repeat(50_000)}`,
+    ]) {
+      const started = performance.now();
+      expect(errorOf(() => parseGoldAnnouncement(evil))).toBe("รูปแบบเวลาประกาศไม่ถูกต้อง");
+      expect(performance.now() - started).toBeLessThan(50);
+    }
+    // ใต้เพดานความยาว — regex ใหม่ยังเร็ว
+    const started = performance.now();
+    expect(() => parseGoldAnnouncement(`02/02/2569 เวลา 17:23${" ".repeat(90)}(`)).toThrow(GoldReferenceError);
+    expect(performance.now() - started).toBeLessThan(50);
+  });
+
+  it("ราคายาวผิดปกติ (> 20 ตัว) = ไม่ใช่ตัวเลข โดยไม่ต้องเข้า regex", () => {
+    expect(errorOf(() => validateGoldReferencePrices({ ...SAMPLE, barSell: "1".repeat(100_000) }))).toBe(
+      "barSell: ไม่ใช่ตัวเลข",
+    );
+  });
+
   it("29 ก.พ. ปีอธิกสุรทิน (2567 = 2024) ผ่าน", () => {
     expect(parseGoldAnnouncement("29/02/2567 เวลา 23:59 น.").announcedAt).toBe("2024-02-29T23:59:00+07:00");
   });

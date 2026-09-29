@@ -42,7 +42,13 @@ export const GOLD_REFERENCE_MAX_SPREAD_PERCENT = "10";
 
 const PRICE_FIELDS = ["barBuy", "barSell", "ornamentBuy", "ornamentSell"] as const;
 
+/** ข้อความราคาจากแหล่งภายนอกยาวเกินนี้ = ไม่ใช่ราคา (เช่น "999,999.99" ยาว 10) — ตัดก่อนเข้า regex */
+export const GOLD_REFERENCE_MAX_PRICE_LENGTH = 20;
+/** ข้อความเวลาประกาศยาวเกินนี้ = ไม่ใช่ประกาศ (รูปเต็มยาว ~40) — ตัดก่อนเข้า regex (กัน ReDoS) */
+export const GOLD_REFERENCE_MAX_ANNOUNCEMENT_LENGTH = 120;
+
 function price(field: string, raw: string): Decimal {
+  if (raw.length > GOLD_REFERENCE_MAX_PRICE_LENGTH) throw new GoldReferenceError(`${field}: ไม่ใช่ตัวเลข`);
   const v = parseDecimal(raw);
   if (!v) throw new GoldReferenceError(`${field}: ไม่ใช่ตัวเลข`);
   if (v.decimalPlaces() > 2) throw new GoldReferenceError(`${field}: ทศนิยมเกิน 2 ตำแหน่ง`);
@@ -82,8 +88,26 @@ export function validateGoldReferencePrices(raw: Record<(typeof PRICE_FIELDS)[nu
 }
 
 // "02/02/2569 เวลา 17:23 น. (ครั้งที่ 69)" — วัน/เดือน/ปี พ.ศ. · เวลา 24 ชม. · ครั้งที่ (ถ้ามี)
+// ใช้กับข้อความที่ยุบช่องว่างเหลือช่องละหนึ่งแล้ว (collapseSpaces) — ช่องว่างเป็น " " / " ?" ตัวอักษรตรง ๆ
+// ไม่มี quantifier ติดกัน/ซ้อนทับกัน จึงไม่ backtrack แบบ polynomial (CodeQL js/polynomial-redos)
 const ANNOUNCEMENT =
-  /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(?:เวลา\s*)?(\d{1,2})[:.](\d{2})\s*(?:น\.?)?\s*(?:\(\s*ครั้งที่\s*(\d{1,3})\s*\))?$/;
+  /^(\d{1,2})\/(\d{1,2})\/(\d{4}) (?:เวลา ?)?(\d{1,2})[:.](\d{2})(?: ?น\.?)?(?: ?\( ?ครั้งที่ ?(\d{1,3}) ?\))?$/;
+
+/** ยุบ whitespace ทุกชนิดเป็นช่องว่างเดียว + ตัดหัวท้าย — วนทีละตัวอักษร (linear) ไม่ใช้ regex */
+function collapseSpaces(text: string): string {
+  let out = "";
+  let pendingSpace = false;
+  for (const ch of text) {
+    if (ch.trim() === "") {
+      pendingSpace = out !== "";
+      continue;
+    }
+    if (pendingSpace) out += " ";
+    pendingSpace = false;
+    out += ch;
+  }
+  return out;
+}
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -92,7 +116,8 @@ const pad = (n: number) => String(n).padStart(2, "0");
  * ปีต้องเป็น พ.ศ. (2500–2700) · วันต้องมีจริงในปฏิทิน · เวลา 00:00–23:59 · ครั้งที่ 1–999 — ผิดรูป = GoldReferenceError
  */
 export function parseGoldAnnouncement(text: string): GoldReferenceAnnouncement {
-  const m = ANNOUNCEMENT.exec(text.replace(/\s+/g, " ").trim());
+  if (text.length > GOLD_REFERENCE_MAX_ANNOUNCEMENT_LENGTH) throw new GoldReferenceError("รูปแบบเวลาประกาศไม่ถูกต้อง");
+  const m = ANNOUNCEMENT.exec(collapseSpaces(text));
   if (!m) throw new GoldReferenceError("รูปแบบเวลาประกาศไม่ถูกต้อง");
   const [day, month, yearBe, hour, minute] = m.slice(1, 6).map(Number) as [number, number, number, number, number];
   if (yearBe < 2500 || yearBe > 2700) throw new GoldReferenceError("ปีของประกาศต้องเป็น พ.ศ.");
