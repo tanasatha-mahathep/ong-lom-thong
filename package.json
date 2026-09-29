@@ -31,7 +31,7 @@
     "release": "semantic-release",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "pnpm -r typecheck && tsc -p .railway"
+    "typecheck": "pnpm -r typecheck && tsc -p .railway && tsc -p services/backup"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.3",
