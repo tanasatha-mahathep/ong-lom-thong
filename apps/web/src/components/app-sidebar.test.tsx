@@ -268,7 +268,7 @@ describe("เวอร์ชันใต้เมนูผู้ใช้", () =
     // อยู่ถัดจากเมนูผู้ใช้ (ท้าย sidebar)
     expect(userButton.compareDocumentPosition(version) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(version).toHaveClass("group-data-[collapsible=icon]:hidden");
-    // เล็ก จาง กึ่งกลาง (75% = ค่าต่ำสุดที่ผ่าน 3:1 ทั้งสองธีม)
-    expect(version).toHaveClass("text-center", "text-[11px]", "tabular-nums", "text-muted-foreground/75");
+    // เล็ก จาง กึ่งกลาง (80% = ค่าต่ำสุดที่ผ่าน 3:1 ทั้งสองธีม)
+    expect(version).toHaveClass("text-center", "text-[11px]", "tabular-nums", "text-muted-foreground/80");
   });
 });
