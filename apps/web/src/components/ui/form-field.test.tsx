@@ -1,7 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
-import { SelectField, TextField, TextareaField } from "./form-field";
+import { useState } from "react";
+import { describe, expect, it, vi } from "vitest";
+import { PasswordField, SelectField, TextField, TextareaField } from "./form-field";
 import { NativeSelectOption } from "./native-select";
 
 describe("ช่องกรอก — ป้ายเหนือช่อง (U0–U3)", () => {
@@ -116,5 +117,102 @@ describe("ช่องกรอก — ป้ายเหนือช่อง (
       />,
     );
     expect(screen.getByRole("combobox", { name: "ค้นหาลูกค้า" })).toBeInTheDocument();
+  });
+});
+
+/** ช่องรหัสผ่านแบบ controlled + ช่องถัดไป + ปุ่มล้าง */
+function PasswordDemo({ inputRef }: { inputRef?: (el: HTMLInputElement | null) => void }) {
+  const [value, setValue] = useState("");
+  return (
+    <form>
+      <PasswordField
+        ref={inputRef}
+        label="รหัสผ่าน"
+        placeholder="••••••••••"
+        autoComplete="new-password"
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+      />
+      <TextField label="ช่องถัดไป" placeholder="ตัวอย่าง" />
+      <button type="button" onClick={() => setValue("")}>
+        ล้าง
+      </button>
+    </form>
+  );
+}
+
+describe("ช่องรหัสผ่าน แสดง/ซ่อน (U7)", () => {
+  const password = () => screen.getByLabelText("รหัสผ่าน");
+  const toggle = () => screen.getByRole("button", { name: "แสดงรหัสผ่าน" });
+
+  it("เริ่มซ่อน · ปุ่มเป็น toggle (aria-pressed) ชื่อคงที่ · tooltip บอกการกระทำถัดไป + ปุ่มลัด · autocomplete คงเดิม", () => {
+    render(<PasswordDemo />);
+    expect(password()).toHaveAttribute("type", "password");
+    expect(password()).toHaveAttribute("autocomplete", "new-password");
+    expect(password()).toHaveAttribute("aria-keyshortcuts", "Alt+F8");
+    expect(toggle()).toHaveAttribute("type", "button");
+    expect(toggle()).toHaveAttribute("aria-pressed", "false");
+    expect(toggle()).toHaveAttribute("title", "แสดงรหัสผ่าน (Alt+F8)");
+    expect(toggle()).toHaveAttribute("aria-controls", password().id);
+  });
+
+  it("กดปุ่ม → แสดงเป็นข้อความ · aria-pressed/title เปลี่ยน · โฟกัสและเคอร์เซอร์อยู่ในช่องเดิม · กดอีกครั้งซ่อน", async () => {
+    const user = userEvent.setup();
+    render(<PasswordDemo />);
+    await user.click(password());
+    await user.keyboard("secret-123");
+    await user.keyboard("{ArrowLeft}{ArrowLeft}");
+    await user.click(toggle());
+
+    expect(password()).toHaveAttribute("type", "text");
+    expect(password()).toHaveValue("secret-123");
+    expect(toggle()).toHaveAttribute("aria-pressed", "true");
+    expect(toggle()).toHaveAttribute("title", "ซ่อนรหัสผ่าน (Alt+F8)");
+    expect(password()).toHaveFocus();
+    expect(password()).toHaveProperty("selectionStart", 8);
+    // พิมพ์ต่อได้ทันทีที่ตำแหน่งเดิม
+    await user.keyboard("X");
+    expect(password()).toHaveValue("secret-1X23");
+
+    await user.click(toggle());
+    expect(password()).toHaveAttribute("type", "password");
+    expect(toggle()).toHaveAttribute("aria-pressed", "false");
+    expect(password()).toHaveFocus();
+  });
+
+  it("คีย์บอร์ด: Alt+F8 ในช่องสลับ · Tab จากช่องไปช่องถัดไปเลย (ปุ่มไม่อยู่ในลำดับ Tab)", async () => {
+    const user = userEvent.setup();
+    render(<PasswordDemo />);
+    await user.click(password());
+    await user.keyboard("{Alt>}{F8}{/Alt}");
+    expect(password()).toHaveAttribute("type", "text");
+    expect(password()).toHaveFocus();
+    await user.keyboard("{Alt>}{F8}{/Alt}");
+    expect(password()).toHaveAttribute("type", "password");
+
+    await user.tab();
+    expect(screen.getByLabelText("ช่องถัดไป")).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(password()).toHaveFocus();
+    expect(toggle()).toHaveAttribute("tabindex", "-1");
+  });
+
+  it("ช่องถูกล้าง (reset) → กลับเป็นซ่อน · ref ส่งถึง input จริง", async () => {
+    const user = userEvent.setup();
+    const ref = vi.fn();
+    render(<PasswordDemo inputRef={ref} />);
+    expect(ref).toHaveBeenCalledWith(password());
+    await user.type(password(), "abc");
+    await user.click(toggle());
+    expect(password()).toHaveAttribute("type", "text");
+
+    await user.click(screen.getByRole("button", { name: "ล้าง" }));
+    expect(password()).toHaveAttribute("type", "password");
+    expect(toggle()).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("ข้อความไม่ลอดใต้ไอคอน — ช่องเว้นขวา", () => {
+    render(<PasswordDemo />);
+    expect(password()).toHaveClass("pr-10");
   });
 });

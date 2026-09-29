@@ -177,6 +177,33 @@ describe("หน้า login — กฎฟอร์ม U0–U6", () => {
     expect(screen.getByText("อีเมล", { selector: "label" })).toHaveAttribute("for", email.id);
   });
 
+  it("รหัสผ่าน: ปุ่มแสดง/ซ่อน · โฟกัสอยู่ในช่อง · Enter ยังส่งฟอร์ม · ส่งแล้วกลับเป็นซ่อน (U7)", async () => {
+    const api = signInServer(makeMe("staff"), () =>
+      json({ code: "INVALID_EMAIL_OR_PASSWORD", message: "Invalid" }, 401),
+    );
+    renderApp("/login");
+    const user = userEvent.setup();
+    await screen.findByLabelText("อีเมล");
+    await user.keyboard(CREDENTIALS.email);
+    await user.tab();
+    const password = screen.getByLabelText("รหัสผ่าน");
+    expect(password).toHaveFocus();
+    expect(password).toHaveAttribute("autocomplete", "current-password");
+    await user.keyboard(CREDENTIALS.password);
+
+    const toggle = screen.getByRole("button", { name: "แสดงรหัสผ่าน" });
+    await user.click(toggle);
+    expect(password).toHaveAttribute("type", "text");
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(password).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(api.callsTo("POST", "/api/auth/sign-in/email")).toHaveLength(1));
+    expect(api.callsTo("POST", "/api/auth/sign-in/email")[0]?.body).toEqual(CREDENTIALS);
+    expect(screen.getByLabelText("รหัสผ่าน")).toHaveAttribute("type", "password");
+    expect(screen.getByRole("button", { name: "แสดงรหัสผ่าน" })).toHaveAttribute("aria-pressed", "false");
+  });
+
   it("อีเมลผิดรูปแบบ → บอกตอนออกจากช่อง ไม่ใช่ระหว่างพิมพ์ · แก้แล้วหายทันที", async () => {
     signInServer(makeMe("staff"));
     renderApp("/login");

@@ -1,13 +1,16 @@
 import * as React from "react";
 import { cn } from "cn";
+import { EyeIcon, EyeOffIcon } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { FieldDescription, FieldError } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
+import { APP_FORM_SUBMIT_EVENT } from "@/lib/form-events";
 
 /**
- * ช่องกรอกมาตรฐานของทุกฟอร์ม (กฎ U0–U3) บน shadcn Label + Input / Textarea / NativeSelect
+ * ช่องกรอกมาตรฐานของทุกฟอร์ม (กฎ U0–U3 · U7) บน shadcn Label + Input / Textarea / NativeSelect
  *
  * - U0 ป้ายอยู่ **เหนือช่อง** ขนาดอ่านง่ายเสมอ (ไม่ลอย) · เป็น `<label for>` จริง · `required` = ดอกจันสีแดง
  *   (ประดับ `aria-hidden` — screen reader ได้ยินจาก `required` ของช่องแทน)
@@ -253,4 +256,118 @@ function SelectField({
   );
 }
 
-export { SelectField, TextareaField, TextField };
+/** ปุ่มลัดแสดง/ซ่อนรหัสผ่านจากในช่อง (ตรงกับปุ่มแสดงรหัสผ่านของ Edge บน Windows) */
+export const PASSWORD_TOGGLE_SHORTCUT = "Alt+F8";
+
+export type PasswordFieldProps = Omit<TextFieldProps, "type" | "trailing">;
+
+/**
+ * ช่องรหัสผ่าน + ปุ่มรูปตา แสดง/ซ่อน (U7) — ใช้กับรหัสผ่านทุกช่อง แทน `type="password"`
+ *
+ * - ปุ่มเป็น toggle: `aria-pressed` บอกสถานะ · ชื่อปุ่มคงที่ "แสดงรหัสผ่าน" (WAI-ARIA APG: ปุ่มที่ใช้ aria-pressed
+ *   ห้ามเปลี่ยนชื่อ — "ซ่อนรหัสผ่าน, กดอยู่" ฟังแล้วกลับความหมาย) · tooltip (`title`) บอกการกระทำถัดไป + ปุ่มลัด
+ * - ปุ่มไม่อยู่ในลำดับ Tab (`tabIndex=-1`) — Tab จากช่องไปช่องถัดไปตรง ๆ (ฟอร์มหน้าร้านใช้ Tab ไล่ช่อง)
+ *   คีย์บอร์ดสลับด้วย Alt+F8 ขณะอยู่ในช่อง (`aria-keyshortcuts` ที่ช่อง) · เมาส์/นิ้วกดปุ่มได้ตามปกติ
+ * - สลับแล้วโฟกัสและตำแหน่งเคอร์เซอร์อยู่ในช่องเดิม · ข้อความไม่ลอดใต้ไอคอน (เว้นขวา)
+ * - `autoComplete` (current-password / new-password) ส่งผ่านตามเดิม — password manager ใช้ได้
+ * - กลับเป็นซ่อนทุกครั้งที่ฟอร์ม (`useAppForm`) เริ่มส่ง — รวมหลังบันทึกสำเร็จ — และเมื่อช่องถูกล้างเป็นค่าว่าง
+ */
+function PasswordField({ id, ref, onKeyDown, className, value, ...props }: PasswordFieldProps) {
+  const { t } = useTranslation("common");
+  const autoId = React.useId();
+  const controlId = id ?? autoId;
+  const [visible, setVisible] = React.useState(false);
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const selection = React.useRef<[number | null, number | null] | null>(null);
+
+  const setRefs = React.useCallback(
+    (element: HTMLInputElement | null) => {
+      inputRef.current = element;
+      if (typeof ref === "function") ref(element);
+      else if (ref) ref.current = element;
+    },
+    [ref],
+  );
+
+  const toggle = () => {
+    const input = inputRef.current;
+    selection.current = input ? [input.selectionStart, input.selectionEnd] : null;
+    setVisible((v) => !v);
+  };
+
+  // เปลี่ยน type แล้ว browser บางตัวย้ายเคอร์เซอร์ไปต้นช่อง — คืนโฟกัส + ตำแหน่งเดิม
+  React.useLayoutEffect(() => {
+    const input = inputRef.current;
+    const saved = selection.current;
+    if (!input || !saved) return;
+    selection.current = null;
+    input.focus();
+    const [start, end] = saved;
+    if (start !== null && end !== null) input.setSelectionRange(start, end);
+  }, [visible]);
+
+  // ฟอร์มเริ่มส่ง = ซ่อนกลับ (หลังบันทึกสำเร็จ รหัสผ่านไม่ค้างบนจอ)
+  React.useEffect(() => {
+    const form = inputRef.current?.form;
+    if (!form) return;
+    const hide = () => setVisible(false);
+    form.addEventListener(APP_FORM_SUBMIT_EVENT, hide);
+    return () => form.removeEventListener(APP_FORM_SUBMIT_EVENT, hide);
+  }, []);
+
+  // ช่องถูกล้าง (reset ฟอร์ม) = ซ่อนกลับ
+  const [lastValue, setLastValue] = React.useState(value);
+  if (value !== lastValue) {
+    setLastValue(value);
+    if (value === "" && visible) setVisible(false);
+  }
+
+  return (
+    <TextField
+      {...props}
+      id={controlId}
+      value={value}
+      ref={setRefs}
+      type={visible ? "text" : "password"}
+      aria-keyshortcuts={PASSWORD_TOGGLE_SHORTCUT}
+      // แสดงเป็นข้อความแล้วไม่ส่งไปตรวจคำ/แก้ตัวพิมพ์
+      spellCheck={false}
+      autoCapitalize="off"
+      className={cn("pr-10", className)}
+      onKeyDown={(event) => {
+        onKeyDown?.(event);
+        if (event.defaultPrevented) return;
+        if (event.altKey && event.key === "F8") {
+          event.preventDefault();
+          toggle();
+        }
+      }}
+      trailing={
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={t("password.show")}
+          aria-pressed={visible}
+          aria-controls={controlId}
+          title={t("password.hint", {
+            action: visible ? t("password.hide") : t("password.show"),
+            shortcut: PASSWORD_TOGGLE_SHORTCUT,
+          })}
+          data-slot="password-toggle"
+          // เมาส์กดแล้วโฟกัสไม่ออกจากช่อง
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={toggle}
+          className="absolute top-1/2 right-1 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50"
+        >
+          {visible ? (
+            <EyeOffIcon className="size-4" aria-hidden="true" />
+          ) : (
+            <EyeIcon className="size-4" aria-hidden="true" />
+          )}
+        </button>
+      }
+    />
+  );
+}
+
+export { PasswordField, SelectField, TextareaField, TextField };
