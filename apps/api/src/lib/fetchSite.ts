@@ -22,9 +22,10 @@ const AUTH_PREFIX = "/api/auth/";
 
 const CROSS_SITE = apiError("เปิดไฟล์นี้จากเว็บอื่นไม่ได้ — เปิดจากหน้าระบบโดยตรง");
 
-/** "Same-Origin" → "same-origin" (เทียบตัวพิมพ์เล็ก เผื่อ proxy แก้รูปคำ) */
+/** "Same-Origin" → "same-origin" (เทียบตัวพิมพ์เล็ก เผื่อ proxy แก้รูปคำ) · ค่าว่างถือว่าไม่ได้ส่งมา */
 function fetchSite(header: string | undefined): string | undefined {
-  return header?.trim().toLowerCase();
+  const value = header?.trim().toLowerCase();
+  return value === undefined || value === "" ? undefined : value;
 }
 
 /**
@@ -42,6 +43,7 @@ function fetchSite(header: string | undefined): string | undefined {
  *
  * **ไม่มี header = ผ่าน** (browser เก่า · curl · เครื่องมือของร้าน) — header นี้ browser ตั้งเองเท่านั้น
  * ปลอมจาก JS ไม่ได้ ถ้า fail-closed กับ header ที่หายไปฝ่ายบัญชีจะดาวน์โหลดไม่ได้กลางวันทำงาน
+ * ค่าว่างนับเป็น "ไม่ได้ส่งมา" ด้วย (browser ไม่ส่งค่าว่าง — ถ้าเจอคือ proxy ระหว่างทางแก้ ไม่ใช่การโจมตี)
  * ค่าที่ไม่รู้จักถือว่าไม่ผ่าน (browser ส่งได้แค่ 4 ค่าตามสเปก)
  *
  * 403 ไม่ใช่ 400 — request ถูกรูปและ login มาแล้ว ที่ถูกปฏิเสธคือ "ที่มา" ของมัน (เท่ากับ sameOriginOnly)

@@ -72,6 +72,13 @@ describe("requireSameOriginFetch", () => {
     expect((await get(GUARDED[0], "CROSS-SITE")).status).toBe(403);
   });
 
+  // browser ไม่ส่งค่าว่าง — ถ้าเจอคือ proxy ระหว่างทางแก้ ไม่ใช่การโจมตี จึงนับเท่ากับไม่ได้ส่งมา
+  it("ค่าว่าง = เท่ากับไม่ได้ส่ง header (ผ่าน)", async () => {
+    for (const value of ["", "   "]) {
+      expect((await get(GUARDED[0], value)).status, JSON.stringify(value)).toBe(200);
+    }
+  });
+
   it.each(UNGUARDED)("endpoint อื่นไม่ได้รับผลกระทบ: cross-site เข้า %s ยังผ่าน", async (path) => {
     const res = await get(path, "cross-site");
     expect(res.status).toBe(200);
