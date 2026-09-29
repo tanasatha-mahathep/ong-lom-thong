@@ -1,6 +1,7 @@
 import type { Db } from "@ong/db";
 import { Hono } from "hono";
 import { accessLog } from "./lib/accessLog";
+import { requireJsonBody } from "./lib/contentType";
 import { noStoreByDefault, securityHeaders } from "./lib/httpHeaders";
 import type { Auth } from "./auth";
 import type { Env } from "./env";
@@ -49,6 +50,8 @@ export function createApp({ db, auth, env, storage, pdf, now = () => new Date() 
 
   const api = new Hono<AppEnv>();
   api.use(sameOriginOnly(env.BETTER_AUTH_URL));
+  // defence in depth (ASVS V13.2.5) — request ที่มี body ต้องเป็น application/json (F12 · F15 · F16)
+  api.use(requireJsonBody);
   api.get("/healthz", (c) => c.json(health()));
   // login / logout / session ของ better-auth
   api.on(["GET", "POST"], "/auth/*", (c) => auth.handler(c.req.raw));
