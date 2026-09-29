@@ -36,16 +36,18 @@ async function chooseTheme(name: string) {
 }
 
 describe("เมนูผู้ใช้ท้าย sidebar (NavUser ของ sidebar-07)", () => {
-  it("หัวเมนู = ชื่อ อีเมล role · มีธีม และออกจากระบบอยู่ท้ายสุด", async () => {
+  it("ปุ่มและหัวเมนู = ชื่อ + ตำแหน่ง (ไม่มีอีเมล) · มีธีม และออกจากระบบอยู่ท้ายสุด", async () => {
     setup();
     const user = userEvent.setup();
     const trigger = await screen.findByRole("button", { name: /ทดสอบ staff/ });
-    expect(trigger).toHaveTextContent("staff@ong.test");
+    expect(trigger).toHaveTextContent("ทดสอบ staffพนักงาน");
     await user.click(trigger);
 
     const menu = await screen.findByRole("menu");
     expect(menu).toHaveTextContent("ทดสอบ staff");
     expect(menu).toHaveTextContent("พนักงาน");
+    // อีเมลไม่แสดงที่ไหนเลย
+    expect(screen.queryByText(/staff@ong\.test/)).not.toBeInTheDocument();
     const items = within(menu).getAllByRole("menuitem");
     expect(items.map((item) => item.textContent)).toEqual(["ธีม", "ออกจากระบบ"]);
   });

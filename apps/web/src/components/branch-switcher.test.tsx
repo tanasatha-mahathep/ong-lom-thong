@@ -320,7 +320,7 @@ describe("ชื่อสาขาเมื่อ sidebar ย่อ", () => {
     (await switcher()).focus();
     expect(await screen.findByRole("tooltip", { name: BRANCH_HQ.name })).toBeInTheDocument();
     screen.getByRole("button", { name: /ทดสอบ manager/ }).focus();
-    expect(await screen.findByRole("tooltip", { name: "ทดสอบ manager" })).toBeInTheDocument();
+    expect(await screen.findByRole("tooltip", { name: "ทดสอบ manager · ผู้จัดการ" })).toBeInTheDocument();
   });
 
   it("ขยาย → หัวหน้าไม่มีป้ายสาขา (อยู่ใน sidebar แล้ว)", async () => {
