@@ -167,7 +167,82 @@ docker compose exec -T postgres dropdb -U ong restore_check
 docker compose exec -T postgres rm /tmp/restore.dump && rm ./restore.dump
 ```
 
-กู้จริง (database เสีย) — **ยังไม่ได้ซ้อมบน Railway**: หยุดรับบิลก่อน · dump สถานะปัจจุบันเก็บไว้ก่อนเสมอ (แม้จะเสีย) · restore ด้วยคำสั่งเดียวกันโดย `-d` เป็น `DATABASE_PUBLIC_URL` ของ `Postgres` และเพิ่ม `--clean --if-exists --single-transaction` · ตรวจแบบเดียวกับข้างบนก่อนเปิดรับบิล
+### กู้จริง (database เสีย)
+
+**ข้อมูลที่หาย (RPO):** บิลที่บันทึกหลัง dump คืนล่าสุดหายจาก database — ไม่เกิน ~24 ชั่วโมง (นานกว่านั้นถ้ารอบคืนก่อนล้ม) · PDF ใบรับซื้อของบิลเหล่านั้นยังอยู่ใน `Media` เป็นหลักฐานภาษี · บิลที่ยังไม่มี PDF ตอนเกิดเหตุ (งาน PDF ค้าง/ล้ม) ไม่มีร่องรอยใน `Media` — ต้องตรวจจากใบที่ออกให้ลูกค้าแล้วของแต่ละสาขา
+
+**เลขที่ใบรับซื้อต้องไม่ซ้ำ:** dump มีตัวนับ (`doc_sequence`) ของตอน dump — ถ้าเปิดรับบิลเลย บิลถัดไปได้เลขที่ออกไปแล้วหลัง dump (เช่น dump มีถึง RC6910-0031 แต่ออกไปถึง 0045 แล้ว → บิลใหม่ได้ 0032 ซ้ำ) · ขั้น 6 ยกตัวนับจาก PDF ใน `Media` ก่อนเปิดรับบิลเสมอ
+
+**ห้าม restore ทับ database เดิม** (`--clean` เหลือ object ที่ไม่อยู่ใน dump ไว้ และทำลายหลักฐาน) — restore ลง database ใหม่ แล้วสลับชื่อ · ซ้อมขั้นตอนนี้ครบแล้วบน Postgres 18 + RustFS ในเครื่อง (ตัวนับ 31 ใน dump → 45 จาก PDF · บิลถัดไป RC6910-0046) · **ยังไม่ได้ซ้อมบน Railway**
+
+1. หยุดรับบิลทุกสาขา · จดเวลา
+2. เตรียม shell (ค่าอยู่ใน shell เท่านั้น): URL จาก `railway variable list --service Postgres --kv` → `DATABASE_PUBLIC_URL` (TCP proxy แบบเดียวกับ `railway connect Postgres`) แล้วเปลี่ยนแค่ชื่อ database ท้าย URL · rclone ตาม "ตั้ง rclone บนเครื่อง" · รันจาก root ของ repo
+
+```bash
+export ADMIN_URL=".../postgres" BROKEN_URL=".../railway" RESTORE_URL=".../railway_restore"
+pg() { docker run --rm -i -v "$PWD:/w" -w /w postgres:18-alpine "$@"; }   # pg_dump/pg_restore/psql รุ่น 18
+```
+
+3. เก็บหลักฐาน — dump database ที่เสียไว้ก่อน (ส่วนที่อ่านไม่ได้ให้จดไว้ แล้วทำต่อ)
+
+```bash
+pg pg_dump -Fc --dbname="$BROKEN_URL" --file=/w/incident-<UTC>.dump
+```
+
+4. ตัดการเชื่อมต่อ database ที่เสีย แล้วสร้าง database ใหม่ — Office จะ error จนถึงขั้น 9 (ตั้งใจ) · งาน PDF ที่อ่าน database ไม่ได้จะหยุดเขียน `Media` ด้วย
+
+```bash
+pg psql -X -v ON_ERROR_STOP=1 "$ADMIN_URL" <<'SQL'
+ALTER DATABASE railway WITH ALLOW_CONNECTIONS false;
+SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'railway' AND pid <> pg_backend_pid();
+CREATE DATABASE railway_restore;
+SQL
+```
+
+5. restore dump คืนล่าสุด (เลือก/ดาวน์โหลดเป็น `./restore.dump` ตาม "กู้คืน database" ด้านบน) ลง database ใหม่
+
+```bash
+pg pg_restore --exit-on-error --no-owner --no-acl --dbname="$RESTORE_URL" /w/restore.dump
+```
+
+6. ยกตัวนับเลขที่เอกสารจากรายชื่อ PDF ใน `Media` — รอ 1–2 นาทีหลังขั้น 4 ให้ PDF ที่กำลังอัปโหลดเสร็จก่อน · สคริปต์อ่านรายชื่ออย่างเดียว ไม่แตะ `Media` · SQL ยกตัวนับอย่างเดียว (ไม่ลด) รันซ้ำได้ · key ที่อ่านไม่ออก หรือรหัสสาขาที่ไม่มีใน database = หยุดทั้งไฟล์ ไม่มีอะไรเปลี่ยน
+
+```bash
+rclone lsf -R --files-only "media:$S3_BUCKET" > media-keys.txt
+bash services/backup/restore-doc-counters.sh < media-keys.txt > raise-counters.sql
+pg psql -X -v ON_ERROR_STOP=1 "$RESTORE_URL" < raise-counters.sql
+```
+
+ผลที่พิมพ์: (1) `branch | period | media_max | counter` — counter ต้อง ≥ media_max ทุกแถว (ไม่งั้น SQL หยุดเอง) (2) `missing_from_database` — เลขที่มี PDF แต่ไม่มีใน database = บิลที่หาย → เก็บรายการไว้ส่งบัญชี
+`Media` หายด้วย → ใช้รายชื่อจากสำเนาแทน (`rclone lsf -R --files-only "backup:$BACKUP_S3_BUCKET/production/files"`) แต่สำเนาช้ากว่าได้ถึงหนึ่งคืน — ตัวนับอาจต่ำไป ต้องตรวจกับใบจริงตามขั้น 7
+
+7. ถามทุกสาขา: มีใบที่ออกให้ลูกค้าแล้วแต่เลขสูงกว่าที่ขั้น 6 เห็นไหม → ยกตัวนับเองทีละสาขา/งวด (ขึ้นอย่างเดียว) · ตัวอย่าง: สาขา 00000 งวด 6910 ออกถึงเลข 52 แล้ว
+
+```bash
+pg psql -X -v ON_ERROR_STOP=1 "$RESTORE_URL" <<'SQL'
+INSERT INTO doc_sequence AS s (branch_id, prefix, period, last_no)
+SELECT id, 'RC', '6910', 52 FROM branch WHERE code = '00000'
+ON CONFLICT (branch_id, prefix, period) DO UPDATE SET last_no = GREATEST(s.last_no, EXCLUDED.last_no);
+SQL
+```
+
+8. ตรวจ `railway_restore` แบบเดียวกับการซ้อม (migration · จำนวนบิล · บิลล่าสุด) และดูเลขถัดไปโดย**ไม่ใช้เลข** — ห้ามเรียก `next_doc_no()` ตรวจ (เรียกแล้วเลขถูกใช้ไปหนึ่งเลข)
+
+```bash
+pg psql -X "$RESTORE_URL" -c \
+  "SELECT b.code, s.period, s.last_no + 1 AS next_no FROM doc_sequence s JOIN branch b ON b.id = s.branch_id ORDER BY 1, 2"
+```
+
+9. สลับชื่อ — ไม่มีอะไรถูกลบ: database ที่เสียเก็บไว้เป็นหลักฐาน (ต่อไม่ได้จนกว่าจะ `ALLOW_CONNECTIONS true`) · `DATABASE_URL` ของ Office ไม่เปลี่ยน (ชื่อเดิม `railway`) · Office ต่อใหม่เอง — ถ้ายัง error ให้กด Redeploy ของ `Office` ใน dashboard · ต้องไม่มี session ใดค้างอยู่ใน `railway_restore`
+
+```bash
+pg psql -X -v ON_ERROR_STOP=1 "$ADMIN_URL" <<'SQL'
+ALTER DATABASE railway RENAME TO railway_broken_<yyyymmdd>;
+ALTER DATABASE railway_restore RENAME TO railway;
+SQL
+```
+
+10. เปิดรับบิล · **บิลที่หาย (รายการจากขั้น 6–7) ให้ฝ่ายบัญชีตัดสินว่าจะบันทึกอย่างไร** — ระบบนี้ไม่มีนโยบายให้ · ห้ามบันทึกซ้ำหรือแก้เลขเอง · PDF ของบิลเหล่านั้นใน `Media` ห้ามลบ (บิลใหม่ที่ชน key เดิม ระบบไม่เขียนทับและ mark PDF invalid — `apps/api/src/services/receiptPdf.ts`) · ลบไฟล์ dump/รายชื่อบนเครื่องเมื่อเสร็จ (มีเลขบัตรเต็ม)
 
 ### กู้คืนไฟล์
 
@@ -222,7 +297,8 @@ rclone move "backup:$BACKUP_S3_BUCKET/staging/postgres/" "backup:$BACKUP_S3_BUCK
 
 ### ทดสอบบนเครื่อง
 
-- `pnpm test` รวม `services/backup/backup.test.ts` — ชื่อไฟล์ การเลือก dump ที่ลบ และลำดับงานของ `backup.sh` กับคำสั่งปลอมใน PATH (ไม่ต้องมี Postgres/S3)
+- `pnpm test` รวม `services/backup/backup.test.ts` — ชื่อไฟล์ การเลือก dump ที่ลบ การตรวจขนาด และลำดับงานของ `backup.sh` กับคำสั่งปลอมใน PATH (ไม่ต้องมี Postgres/S3)
+- `services/backup/restore-doc-counters.test.ts` — อ่าน key และรัน SQL ที่ได้ด้วย `psql` กับ database ที่ migrate + seed จริง (ยกตัวนับ · ไม่ลด · รันซ้ำได้ · รหัสสาขาไม่รู้จัก = หยุด · `next_doc_no()` ต่อจากเลขสูงสุด) — ต้องมี `psql` + Postgres ของ compose · ไม่มีข้าม (CI ต้องมี)
 - end-to-end: build `services/backup` แล้วรันกับ Postgres 18 + RustFS ของ compose (ตั้ง `S3_*`/`BACKUP_S3_*` ชี้ `http://s3:9000` · `…_FORCE_PATH_STYLE=true` · สร้าง bucket ปลายทางก่อน · ต่อ network ของ compose)
 
 ## บัญชีพนักงาน
