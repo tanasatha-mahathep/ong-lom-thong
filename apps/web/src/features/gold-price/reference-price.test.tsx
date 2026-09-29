@@ -1,6 +1,7 @@
+import { focusManager } from "@tanstack/react-query";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Role } from "@/lib/queries";
 import { GOLD_PRICE, fakeApi, json, makeMe, renderApp } from "@/test/app";
 
@@ -19,6 +20,8 @@ const REFERENCE = {
 };
 const QUOTE_68250 = { bar_sell: "68250.00", bar_buy: "68050.00", jewelry_buy: "64648" };
 const SAVED = { ...GOLD_PRICE, ...QUOTE_68250 };
+/** ประกาศที่ส่งไปกับ PUT เมื่อเติมจากราคาสมาคม (คำอ้างของ client — เซิร์ฟเวอร์เทียบเอง) */
+const PREFILL = { announced_at: REFERENCE.announced_at, round: REFERENCE.round };
 const UNAVAILABLE = { error: "ดึงราคาอ้างอิงไม่ได้", reason: "unavailable" };
 
 function setup(role: Role, routes: Parameters<typeof fakeApi>[0] = {}) {
@@ -118,7 +121,7 @@ describe("ราคาสมาคม (อ้างอิง) — /settings/gold
 
     await user.keyboard("{Enter}");
     expect(await screen.findByText("บันทึกราคาทองวันนี้แล้ว")).toBeInTheDocument();
-    expect(putBodies(api)).toEqual([{ bar_sell: "68250.00", from_reference: true }]);
+    expect(putBodies(api)).toEqual([{ bar_sell: "68250.00", from_reference: PREFILL }]);
     expect(screen.queryByText(/ยังไม่ได้บันทึก/)).not.toBeInTheDocument();
   });
 
@@ -140,13 +143,73 @@ describe("ราคาสมาคม (อ้างอิง) — /settings/gold
     expect(putBodies(api)).toEqual([]);
   });
 
-  it("วันนี้ยังไม่มีราคา แต่ราคาสมาคม stale → ไม่เติมเอง (ปุ่มยังใช้ได้)", async () => {
+  it("ราคาสมาคม stale → ไม่เติมเอง และไม่มีปุ่มเติม (ต้องกรอกเองจากประกาศล่าสุด)", async () => {
     await open({
       "GET /api/gold-price/today": () => json({ error: "ยังไม่ได้ตั้งราคาทองของวันนี้" }, 404),
       "GET /api/gold-price/reference": () => json({ ...REFERENCE, stale: true }),
     });
-    expect(await screen.findByRole("button", { name: "ใช้ราคาสมาคมเป็นค่าเริ่มต้น" })).toBeInTheDocument();
+    const region = await referenceRegion();
+    await waitFor(() => expect(region).toHaveTextContent("เติมเป็นค่าเริ่มต้นไม่ได้"));
+    expect(screen.queryByRole("button", { name: "ใช้ราคาสมาคมเป็นค่าเริ่มต้น" })).not.toBeInTheDocument();
     expect(screen.getByLabelText(LABEL)).toHaveValue("");
+  });
+
+  describe("ประกาศใหม่มาหลังเติมค่า", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+      focusManager.setFocused(undefined);
+    });
+
+    /** ให้ query ราคาสมาคมเก่ากว่า staleTime (5 นาที) แล้วกลับมาที่หน้าต่าง → TanStack Query ดึงใหม่ */
+    function refetchReference() {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(Date.now() + 6 * 60_000);
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    }
+
+    it("ราคาใหม่ต่างจากค่าในช่อง → เตือน · บันทึกโดยไม่ส่ง from_reference", async () => {
+      let current = REFERENCE;
+      const { api, user } = await open({
+        "GET /api/gold-price/reference": () => json(current),
+        "PUT /api/gold-price/today": () => json(SAVED),
+      });
+      await user.click(await screen.findByRole("button", { name: "ใช้ราคาสมาคมเป็นค่าเริ่มต้น" }));
+      expect(screen.getByText(/ยังไม่ได้บันทึก/)).toBeInTheDocument();
+
+      current = {
+        ...REFERENCE,
+        announced_at: "2026-09-28T10:15:00+07:00",
+        round: 3,
+        bar_sell: "68400.00",
+        bar_buy: "68200.00",
+      };
+      refetchReference();
+      expect(await screen.findByText(/มีประกาศใหม่ของสมาคมหลังเติมค่า/)).toBeInTheDocument();
+      expect(screen.queryByText(/ยังไม่ได้บันทึก/)).not.toBeInTheDocument();
+
+      screen.getByLabelText(LABEL).focus();
+      await user.keyboard("{Enter}");
+      await screen.findByText("บันทึกราคาทองวันนี้แล้ว");
+      expect(putBodies(api)).toEqual([{ bar_sell: "68250.00" }]);
+    });
+
+    it("ประกาศใหม่แต่ราคาเท่าเดิม → ยังนับว่ามาจากราคาสมาคม (ประกาศที่เติมมา)", async () => {
+      let current = REFERENCE;
+      const { api, user } = await open({
+        "GET /api/gold-price/reference": () => json(current),
+        "PUT /api/gold-price/today": () => json(SAVED),
+      });
+      await user.click(await screen.findByRole("button", { name: "ใช้ราคาสมาคมเป็นค่าเริ่มต้น" }));
+      current = { ...REFERENCE, announced_at: "2026-09-28T10:15:00+07:00", round: 3 };
+      refetchReference();
+      await waitFor(() => expect(api.callsTo("GET", "/api/gold-price/reference")).toHaveLength(2));
+      expect(screen.getByText(/ยังไม่ได้บันทึก/)).toBeInTheDocument();
+      screen.getByLabelText(LABEL).focus();
+      await user.keyboard("{Enter}");
+      await screen.findByText("บันทึกราคาทองวันนี้แล้ว");
+      expect(putBodies(api)).toEqual([{ bar_sell: "68250.00", from_reference: PREFILL }]);
+    });
   });
 
   it("ดึงราคาสมาคมไม่ได้ → แจ้ง · ไม่มีปุ่มเติม · ฟอร์มกรอกเองได้ตามเดิม", async () => {
@@ -176,8 +239,8 @@ describe("ราคาสมาคม (อ้างอิง) — /settings/gold
     await user.click(within(dialog).getByRole("button", { name: "ยืนยันบันทึกราคานี้" }));
     await screen.findByText("บันทึกราคาทองวันนี้แล้ว");
     expect(putBodies(api)).toEqual([
-      { bar_sell: "68250.00", from_reference: true },
-      { bar_sell: "68250.00", confirm_typo: true, from_reference: true },
+      { bar_sell: "68250.00", from_reference: PREFILL },
+      { bar_sell: "68250.00", confirm_typo: true, from_reference: PREFILL },
     ]);
   });
 });

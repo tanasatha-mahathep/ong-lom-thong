@@ -71,8 +71,11 @@ function SetPriceCard() {
   const queryClient = useQueryClient();
   const today = useBusinessDate();
   const inputRef = useRef<HTMLInputElement>(null);
+  const { data: todayPrice } = useQuery(goldPriceTodayQueryOptions);
+  const { data: reference } = useQuery(goldReferenceQueryOptions);
   const form = usePriceForm({
     inputRef,
+    currentReference: reference ?? null,
     save: saveGoldPrice,
     onSaved: async (saved) => {
       toast.success(t("saved"), {
@@ -85,14 +88,12 @@ function SetPriceCard() {
   });
 
   // วันนี้ยังไม่ได้ตั้งราคา (null — ไม่ใช่ยังโหลด/โหลดล้ม) + มีราคาสมาคมของวันนี้ + ช่องยังว่าง → เติมให้ครั้งเดียว
-  const { data: todayPrice } = useQuery(goldPriceTodayQueryOptions);
-  const { data: reference } = useQuery(goldReferenceQueryOptions);
   const autoFilled = useRef(false);
   const { prefill, text } = form;
   useEffect(() => {
     if (autoFilled.current || todayPrice !== null || !reference || reference.stale || text !== "") return;
     autoFilled.current = true;
-    prefill(reference.bar_sell, { focus: false });
+    prefill(reference, { focus: false });
   }, [todayPrice, reference, text, prefill]);
 
   return (
@@ -107,25 +108,31 @@ function SetPriceCard() {
         <CardContent className="grid gap-6">
           <PriceFormError form={form} />
           <ReferencePricePanel
-            action={(ref) => (
-              <Button
-                type="button"
-                variant="outline"
-                className="justify-self-start"
-                onClick={() => prefill(ref.bar_sell)}
-              >
-                <ClipboardPaste aria-hidden="true" />
-                {t("reference.use")}
-              </Button>
-            )}
+            action={(ref) =>
+              // ประกาศเก่า (ไม่ใช่ของวันนี้ / ดึงรอบล่าสุดไม่สำเร็จ) — ไม่ให้เติม ต้องกรอกเองจากประกาศล่าสุด
+              ref.stale ? (
+                <p className="text-sm text-muted-foreground">{t("reference.staleNoPrefill")}</p>
+              ) : (
+                <Button type="button" variant="outline" className="justify-self-start" onClick={() => prefill(ref)}>
+                  <ClipboardPaste aria-hidden="true" />
+                  {t("reference.use")}
+                </Button>
+              )
+            }
           />
           <PriceInputField form={form} inputRef={inputRef} label={t("barSellLabel")} autoFocus />
           {/* live region อยู่ก่อนเสมอ — ข้อความที่เพิ่มเข้ามาภายหลังจึงถูกประกาศ */}
           <div role="status">
-            {form.fromReference && (
+            {form.referenceChanged && !form.fromReference ? (
               <p className="rounded-md border border-warning-border bg-warning px-3 py-2 text-sm text-warning-foreground">
-                {t("reference.prefilled")}
+                {t("reference.changed")}
               </p>
+            ) : (
+              form.fromReference && (
+                <p className="rounded-md border border-warning-border bg-warning px-3 py-2 text-sm text-warning-foreground">
+                  {t("reference.prefilled")}
+                </p>
+              )
             )}
           </div>
           <QuotePreview form={form} />

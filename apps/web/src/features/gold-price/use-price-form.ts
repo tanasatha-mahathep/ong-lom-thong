@@ -4,7 +4,13 @@ import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { ApiError, errorMessage } from "@/lib/api";
 import { normalizeDecimalInput } from "@/lib/decimal-input";
 import { type GoldPriceT, useTranslation } from "./i18n";
-import { type SaveGoldPriceBody, barSellErrorOf, goldPriceQuoteQueryOptions, typoWarningOf } from "./queries";
+import {
+  type ReferencePrefill,
+  type SaveGoldPriceBody,
+  barSellErrorOf,
+  goldPriceQuoteQueryOptions,
+  typoWarningOf,
+} from "./queries";
 
 /** หน่วง live preview ระหว่างพิมพ์ (spec §14.3) */
 const QUOTE_DEBOUNCE_MS = 300;
@@ -23,7 +29,17 @@ export function requestErrorMessage(t: GoldPriceT, error: unknown, action: "save
 interface TypoWarning {
   barSell: string;
   warning: string;
-  fromReference: boolean;
+  fromReference: ReferencePrefill | null;
+}
+
+/** ราคาสมาคมที่เติมลงช่อง — ข้อความในช่อง + ประกาศที่มา */
+interface Prefilled extends ReferencePrefill {
+  value: string;
+}
+
+/** ราคาสมาคม (อ้างอิง) ตัวล่าสุดที่หน้าเห็น — ใช้ตรวจว่าค่าที่เติมไว้ยังตรงกับประกาศล่าสุดหรือไม่ */
+export interface CurrentReference extends ReferencePrefill {
+  bar_sell: string;
 }
 
 interface PriceFormOptions<TSaved> {
@@ -35,6 +51,8 @@ interface PriceFormOptions<TSaved> {
   onSaved: (saved: TSaved) => Promise<void> | void;
   /** error ที่ไม่ใช่ด่านกันพิมพ์ผิด (เช่น 404 → โหลดรายการสาขาใหม่) */
   onFailed?: (error: Error) => void;
+  /** ราคาสมาคมล่าสุด (null = ไม่มี/ดึงไม่ได้) — ประกาศใหม่มาหลังเติมค่า = เตือน + ไม่นับว่ามาจากราคาสมาคมถ้าราคาไม่ตรง */
+  currentReference?: CurrentReference | null;
 }
 
 /**
@@ -48,6 +66,7 @@ export function usePriceForm<TSaved>({
   save: saveFn,
   onSaved,
   onFailed,
+  currentReference = null,
 }: PriceFormOptions<TSaved>) {
   const { t } = useTranslation("goldPrice");
   const base = useId();
@@ -55,10 +74,18 @@ export function usePriceForm<TSaved>({
   const [missing, setMissing] = useState(false);
   const [typo, setTypo] = useState<TypoWarning | null>(null);
   /** ข้อความที่เติมจากราคาสมาคม (อ้างอิง) — ยังไม่ได้บันทึก · พิมพ์แก้แล้วไม่นับว่ามาจากราคาสมาคม */
-  const [prefilled, setPrefilled] = useState<string | null>(null);
+  const [prefilled, setPrefilled] = useState<Prefilled | null>(null);
 
   const barSell = normalizeDecimalInput(text);
-  const fromReference = prefilled !== null && text === prefilled;
+  // ช่องยังเป็นค่าที่เติมไว้ · ประกาศเปลี่ยนหลังเติม = เตือน · ราคาใหม่ไม่ตรงกับค่าในช่อง = ไม่นับว่ามาจากราคาสมาคม
+  // (เทียบข้อความจาก API ที่รูปเดียวกัน "68250.00" — ไม่ใช่การคำนวณเงิน)
+  const stillPrefilled = prefilled !== null && text === prefilled.value;
+  const referenceChanged =
+    stillPrefilled && currentReference !== null && currentReference.announced_at !== prefilled.announced_at;
+  const fromReference: ReferencePrefill | null =
+    stillPrefilled && (!referenceChanged || currentReference?.bar_sell === prefilled.value)
+      ? { announced_at: prefilled.announced_at, round: prefilled.round }
+      : null;
   const debounced = useDebouncedValue(barSell, QUOTE_DEBOUNCE_MS);
   const quote = useQuery({ ...goldPriceQuoteQueryOptions(debounced, branchId), placeholderData: keepPreviousData });
 
@@ -78,7 +105,7 @@ export function usePriceForm<TSaved>({
     onError: (error, body) => {
       const warning = typoWarningOf(error);
       if (warning && !body.confirm_typo) {
-        setTypo({ barSell: body.bar_sell, warning, fromReference: !!body.from_reference });
+        setTypo({ barSell: body.bar_sell, warning, fromReference: body.from_reference ?? null });
         return;
       }
       onFailed?.(error);
@@ -117,15 +144,17 @@ export function usePriceForm<TSaved>({
      * เติมช่องราคาด้วยราคาสมาคม (อ้างอิง) — **ไม่บันทึก** ผู้จัดการต้องกดบันทึกเอง (ด่านกันพิมพ์ผิดยังทำงาน)
      * `focus` = ย้ายโฟกัสไปช่องราคา (กดปุ่มเติมเอง) · เติมอัตโนมัติตอนเปิดหน้าไม่ย้ายโฟกัส
      */
-    prefill: (value: string, { focus = true }: { focus?: boolean } = {}) => {
-      setText(value);
-      setPrefilled(value);
+    prefill: (reference: CurrentReference, { focus = true }: { focus?: boolean } = {}) => {
+      setText(reference.bar_sell);
+      setPrefilled({ value: reference.bar_sell, announced_at: reference.announced_at, round: reference.round });
       setMissing(false);
       save.reset();
       if (focus) focusInput();
     },
-    /** ข้อความในช่องยังเป็นค่าที่เติมจากราคาสมาคม (ยังไม่ได้บันทึก) */
+    /** ข้อความในช่องยังเป็นค่าที่เติมจากราคาสมาคม (ยังไม่ได้บันทึก) — ประกาศที่มา · null = ไม่ใช่ */
     fromReference,
+    /** เติมค่าไว้แล้วมีประกาศใหม่ของสมาคม — ค่าในช่องอาจไม่ตรงกับประกาศล่าสุด */
+    referenceChanged,
     idle,
     busy,
     preview: idle ? undefined : quote.data,
@@ -143,7 +172,7 @@ export function usePriceForm<TSaved>({
         inputRef.current?.focus();
         return;
       }
-      save.mutate(fromReference ? { bar_sell: barSell, from_reference: true } : { bar_sell: barSell });
+      save.mutate(fromReference ? { bar_sell: barSell, from_reference: fromReference } : { bar_sell: barSell });
     },
     typo,
     dismissTypo: () => setTypo(null),
@@ -152,7 +181,7 @@ export function usePriceForm<TSaved>({
         save.mutate({
           bar_sell: typo.barSell,
           confirm_typo: true,
-          ...(typo.fromReference ? { from_reference: true } : {}),
+          ...(typo.fromReference ? { from_reference: typo.fromReference } : {}),
         });
       }
     },
