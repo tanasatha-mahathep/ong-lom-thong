@@ -131,10 +131,17 @@ DETAILS=()
 FAILED=0
 ERRORED=0
 
+CONNECTION_LOST='CONNECT_TIMEOUT|ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|too many clients|the database system is (starting up|shutting down|in recovery mode)|cannot connect now'
+
 # record <id> <title> <PASS|FAIL|SKIP|ERROR> <one-line detail> [<file with more detail>]
 # ERROR = could not be checked (environment), which exits 2 unless something also FAILed
 record() {
   local id=$1 title=$2 status=$3 detail=$4 more=${5:-}
+  # a lost connection is the environment's fault, not the migrations' — say so and exit 2
+  if [ "$status" = FAIL ] && [ -n "$more" ] && [ -s "$more" ] && grep -qE "$CONNECTION_LOST" "$more"; then
+    status=ERROR
+    detail="PostgreSQL connection problem (environment, not the migrations) during: $detail"
+  fi
   IDS+=("$id")
   TITLES+=("$title")
   STATUSES+=("$status")

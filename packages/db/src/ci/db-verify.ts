@@ -294,5 +294,8 @@ try {
       if (pg[field]) console.error(`    ${field}: ${pg[field]}`);
     }
   }
+  const codes = new Set(["CONNECT_TIMEOUT", "ECONNREFUSED", "ECONNRESET", "ENOTFOUND", "EAI_AGAIN", "57P03", "53300"]);
+  const code = (e as { code?: string }).code;
+  if (code && codes.has(code)) console.error(`db-verify: cannot reach PostgreSQL (${code}) — an environment problem`);
   process.exitCode = e instanceof UsageError ? 2 : 1;
 }
