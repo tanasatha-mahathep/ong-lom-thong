@@ -7,13 +7,14 @@ description: วงแหวน CI ของ repo ร้านทอง (PR/dev 
 
 ## วงแหวน
 
-- **ring 0 — ทุก PR + push ทุก branch** (`ci.yml`): `check` (commitlint · lint · format · typecheck · test:coverage · build · bundle budget · workflow lint · secret scan) และ `db-verify` — เป้าหมาย < 5 นาที wall clock
-- **ring 1 — push `testing`/`staging`/`main` · `workflow_dispatch` · PR ที่ติด label `full-ci`** (`ci.yml`): `image` (build Dockerfile ที่ Railway ใช้ → smoke → Trivy → SBOM) แล้ว `e2e` (Playwright บน stack จริงจาก image เดียวกัน)
-- **ring 2 — หลัง Railway deploy** (`deploy-smoke.yml`, `deployment_status`): Playwright project `smoke` (อ่านอย่างเดียว) ยิงใส่ URL จริง
-- **security** — `codeql.yml` (PR → dev · push dev · รายสัปดาห์) · `security.yml` (dependency-review บน PR · osv-scanner บน push testing+ และรายสัปดาห์)
-- **release** — push `main` เท่านั้น (semantic-release + sync branch) — ห้ามแตะเว้นแต่ถูกสั่ง
+- **ring 0 — ทุก PR + push ทุก branch** (`ci.yml`, ขนานกัน): `check` (commitlint · lint · format · typecheck · test ทุก project · coverage gate ของ core · test ของตัวห่อ TestSprite · build · bundle budget) · `scan` (actionlint · zizmor · shellcheck · gitleaks · Semgrep CE — ไม่ติดตั้ง dependency ของ repo) · `db-verify` · `backup-image`
+- **ring 1 — push `testing`/`staging`/`main` · `workflow_dispatch`** (`make ci-full` บน branch ใดก็ได้ก่อน merge): `image` (build Dockerfile ที่ Railway ใช้ครั้งเดียว → smoke → SBOM CycloneDX → Trivy gate → ส่ง tar ให้ e2e) → `e2e` (Playwright บน stack จริงจาก image เดียวกัน ตรวจ image ID) · `sca` (OSV-Scanner บน lockfile — advisory ใหม่ออกได้ทุกวันแม้ SHA เดิม)
+- **ring 2 — หลัง Railway deploy** (`deploy-smoke.yml`, `deployment_status` ของ `railway-app[bot]`): Playwright project `smoke` (อ่านอย่างเดียว) ยิงเว็บจริง · URL จาก repo variables `E2E_URL_STAGING` · `E2E_URL_PRODUCTION` (ไม่ตั้ง = ข้าม)
+- **advisory** — `security.yml` (ทุกวันจันทร์บน `main` + dispatch · fail → เปิด/คอมเมนต์ issue) · `testsprite.yml` (ทุกคืน · เงียบจนตั้ง `vars.TESTSPRITE_PROJECT_ID`) — ไม่ block promote เพราะอยู่นอก `ci.yml`
+- **ไม่มี** CodeQL / dependency review / secret scanning ของ GitHub: repo private ของบัญชีส่วนตัวบน Free ใช้ไม่ได้ และใบอนุญาต CodeQL CLI ห้ามใช้กับโค้ด private → Semgrep CE · OSV-Scanner · gitleaks แทน · Dependabot alerts (ฟรี) เปิดอยู่
+- **release** — push `main` เท่านั้น · `needs` ทุก gate ของ ring 0 + ring 1 · ขั้น sync merge `main` กลับลงไปด้วย `--no-ff`
 
-promote เป็น fast-forward SHA เดิม → ring 1 ต้องให้**สัญญาณใหม่** ไม่ใช่รัน ring 0 ซ้ำ · repo เป็น private บน GitHub Free = นาที Actions จำกัด → ของหนักอยู่ ring 1 เท่านั้น
+promote ทีละขั้นด้วย **merge commit** (`make promote` → PR promotion → CI ของ PR ผ่าน → `gh pr merge --merge` · **ห้าม `--delete-branch`** · ห้าม fast-forward / push ตรง) → ring 1 รันบน merge commit ของ branch ปลายทาง: เนื้อโค้ดเท่ากับต้นทางที่ผ่าน ring 0 แล้ว ring 1 จึงเป็นสัญญาณใหม่ · repo private บน GitHub Free = นาที Actions และ artifact 500 MB จำกัด → ของหนักอยู่ ring 1 เท่านั้น · ส่งต่อได้เฉพาะ image ของ api (~90 MB zipped · retention 1 วัน) — gotenberg (~1.7 GB) ให้ job ที่ใช้ build เอง
 
 ## กฎ
 
@@ -22,13 +23,14 @@ promote เป็น fast-forward SHA เดิม → ring 1 ต้องให
 3. `permissions: contents: read` ระดับ workflow · เพิ่มสิทธิ์ราย job เท่าที่ใช้ · job ที่มีสิทธิ์เขียนห้ามใช้ cache
 4. ค่า `github.event.*` / `inputs.*` ส่งผ่าน `env:` แล้วอ้าง `"$VAR"` — ห้ามใส่ `${{ }}` ใน `run:` (template injection)
 5. `actions/checkout` ใส่ `persist-credentials: false` · ทุก job มี `timeout-minutes` · คง `concurrency` เดิม
-6. ห้าม `continue-on-error` บน gate เงิน/สาขา/migration/secret — ใช้ได้เฉพาะงาน advisory (TestSprite · osv รายสัปดาห์)
+6. ห้าม `continue-on-error` บน gate เงิน/สาขา/migration/secret — ใช้ได้เฉพาะงาน advisory (TestSprite) · `security.yml` ไม่ใช้ `continue-on-error`: แดงให้เห็นแต่ไม่ block promote เพราะอยู่นอก `ci.yml`
 7. ผลที่คนต้องอ่าน → `$GITHUB_STEP_SUMMARY` · หลักฐาน (trace · report · SBOM) → `actions/upload-artifact` `retention-days: 14`
 8. logic ยาวกว่า ~5 บรรทัด → `scripts/ci/<name>.sh` (bash · `set -euo pipefail` · รันในเครื่องได้เหมือน CI ผ่าน `make`) ไม่ฝังใน YAML
-9. ก่อน commit: `make ci-lint` (actionlint + zizmor) และ `make check` ต้องผ่าน
-10. เพิ่ม job/เปลี่ยนชื่อ job = อัปเดต `README.md` ส่วน CI และสกิลนี้ใน commit เดียวกัน
+9. ก่อน commit: `make ci-lint` (actionlint + zizmor + shellcheck) และ `make check` ต้องผ่าน · ข้อยกเว้นของ scanner ทุกตัวต้องมีเหตุผล (+ วันหมดอายุ ≤ 90 วันเมื่อเครื่องมือรองรับ)
+10. image ของเครื่องมือทุกตัวใน `scripts/ci` ปัก digest พร้อมคอมเมนต์ `# renovate: datasource=docker depName=…` บรรทัดก่อน — Renovate อัปเดตผ่าน customManagers ใน `renovate.json` · Trivy ใช้ `docker://aquasec/trivy@sha256:…` ไม่ใช้ trivy-action (tag ของชุดนั้นถูกเจาะ มี.ค. 2026 · GHSA-69fq-xp46-6x23)
+11. เพิ่ม job/เปลี่ยนชื่อ job = อัปเดต `README.md` ส่วน CI และสกิลนี้ใน commit เดียวกัน
 
 ## ข้อห้ามของ repo
 
-- ห้ามเปิด "Automatically delete head branches" · ห้ามกดปุ่ม merge ใน PR promotion
+- ห้ามเปิด "Automatically delete head branches" · PR promotion merge ด้วย merge commit เท่านั้น ห้าม `--delete-branch` ห้าม rebase/squash/fast-forward
 - Bash tool ของเครื่องนี้คือ zsh — ใส่ `${var}` เสมอก่อน `:` ตอนลองคำสั่งใน tool (script ใน `scripts/ci/` รันด้วย bash ไม่โดน)

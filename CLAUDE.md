@@ -21,7 +21,7 @@
 
 ## คำสั่ง
 
-`make check` (= `pnpm lint` · `format:check` · `typecheck` · `test` · `build`) — ต้องเขียวทั้งหมดก่อน commit (CI รันชุดเดียวกัน) · `make help` ดูคำสั่งทั้งหมด
+`make check` (= lint · format:check · typecheck · test ทุก project · coverage ของ core · build · งบ bundle) — ต้องเขียวทั้งหมดก่อน commit (job `check` ใน CI รันชุดเดียวกัน) · ชั้นอื่น: `make scan` · `make db-verify` · `make smoke` · `make e2e-up` / `e2e` / `e2e-down` — ตาราง "การทดสอบและ CI" ใน README · `make help` ดูคำสั่งทั้งหมด
 `pnpm dev` · `pnpm db:generate` หลังแก้ schema · plpgsql อยู่ `packages/db/sql/functions.sql`
 
 ## Commit

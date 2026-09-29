@@ -7,15 +7,19 @@ description: ชั้นเทสต์ทั้งหมดของ repo ร�
 
 ## ชั้นเทสต์ (เร็ว → ช้า)
 
-| ชั้น          | อยู่ที่                                                          | รัน                  | ต้องมี                         |
-| ------------- | ---------------------------------------------------------------- | -------------------- | ------------------------------ |
-| unit          | `packages/*/src/**/*.test.ts` (vitest)                           | `pnpm test`          | —                              |
-| coverage เงิน | root `vitest.config.ts` → `coverage.thresholds` ราย file         | `pnpm test:coverage` | —                              |
-| integration   | `apps/api/src/**/*.test.ts` + `src/test/harness.ts`              | `pnpm test`          | Postgres (`TEST_DATABASE_URL`) |
-| db-verify     | `scripts/ci/db-verify.sh`                                        | `make db-verify`     | Postgres                       |
-| smoke (image) | `scripts/ci/image-smoke.sh`                                      | `make smoke`         | Docker                         |
-| e2e           | `tests/e2e` (Playwright projects `smoke` · `api` · `pdf` · `ui`) | `make e2e`           | Docker                         |
-| TestSprite    | `tests/testsprite/` (ดูท้ายไฟล์)                                 | ดู README ในนั้น     | API key ของผู้ใช้ (ไม่ commit) |
+| ชั้น               | อยู่ที่                                                                                                                                                                                 | รัน                                          | ต้องมี                                    |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ----------------------------------------- |
+| unit               | `packages/*/src/**/*.test.ts` (vitest)                                                                                                                                                  | `make test`                                  | —                                         |
+| coverage เงิน/ภาษี | root `vitest.config.ts` — ทุกไฟล์ runtime ใน `packages/core/src` 100% ต่อไฟล์ · ข้อยกเว้นเป็นจำนวน branch ที่วัดได้ใน `MEASURED` · วัดจากเทสต์หน่วยของ core เท่านั้น (`--project core`) | `make test-coverage`                         | —                                         |
+| integration        | `apps/api/src/**/*.test.ts` + `src/test/harness.ts` · ตัวช่วย `src/test/{synthetic,pii,assertions,routes}.ts`                                                                           | `make test`                                  | Postgres (`TEST_DATABASE_URL`)            |
+| สัญญา API          | `apps/api/src/app.contract.test.ts` — อ่าน route จาก router ของ Hono เอง · allowlist ที่มีคอมเมนต์                                                                                      | `make test`                                  | Postgres                                  |
+| db-verify          | `scripts/ci/db-verify.sh` (+ `db-verify-selftest.sh`)                                                                                                                                   | `make db-verify` · `make db-verify-test`     | Postgres                                  |
+| smoke (image)      | `scripts/ci/image-smoke.sh`                                                                                                                                                             | `make smoke`                                 | Docker                                    |
+| e2e                | `tests/e2e` — Playwright projects `setup` · `smoke` (อ่านอย่างเดียว · ใช้หลัง deploy ด้วย) · `api` · `pdf` · `ui`                                                                       | `make e2e-up` → `make e2e` → `make e2e-down` | Docker                                    |
+| TestSprite         | `tests/testsprite/` (ดูท้ายไฟล์)                                                                                                                                                        | `make testsprite-probe URL=…`                | Python 3 · API key ของผู้ใช้ (ไม่ commit) |
+
+- เทสต์ที่ยึดบั๊กไว้: `it.fails("F<n> …")` (vitest) / `test.fail` + `@known-issue` (Playwright) — ชื่อต้องมีรหัส finding · คนแก้บั๊กเปลี่ยนเป็นเทสต์ปกติใน PR เดียวกัน
+- ห้ามใช้คอมเมนต์ `v8 ignore` / `istanbul ignore` / `c8 ignore` ใน `packages/core` (eslint บังคับ)
 
 integration ไม่เจอ Postgres = ข้าม (บนเครื่อง dev) แต่ใน CI (`CI=true`) = fail — อย่าเปลี่ยนพฤติกรรมนี้
 
@@ -37,6 +41,8 @@ integration ไม่เจอ Postgres = ข้าม (บนเครื่อ
 - Postgres สำหรับ unit/integration/db-verify: ใช้ container ที่รันอยู่ `postgres://ong:ong@localhost:5432/postgres` (สร้าง database ชื่อสุ่มแล้วลบทิ้ง)
 - smoke: container ชื่อขึ้นต้น `ong-smoke-` · api ที่ host port `18787`
 - e2e: compose project `ong-e2e` · api `28787` · gotenberg `23000` · ที่เหลือไม่เปิด port ออก host
+- e2e จำลอง client หลายเครื่องด้วย `X-Real-IP` (198.18.0.0/15) — better-auth อ่าน IP จาก header นี้เท่านั้น (login จำกัด 20 ครั้ง/นาที/IP)
+- Docker VM มีดิสก์จำกัด (เคยเต็มจน Postgres ร่วมล่ม) — build image ทีละตัว · ลบ image/build cache ของตัวเองเมื่อเสร็จ · ห้าม prune volume
 - ทุก script ต้อง `trap` ลบ container/network/volume ของตัวเองเสมอ แม้ fail
 - S3 ใน e2e = RustFS ปัก digest เดียวกับ `docker-compose.yml` (image `minio/minio` ถูกถอดจาก Docker Hub แล้ว) · image ทุกตัวปัก digest
 
@@ -48,6 +54,7 @@ integration ไม่เจอ Postgres = ข้าม (บนเครื่อ
 
 ## TestSprite
 
-- ใช้กับ stack e2e ในเครื่องหรือ environment `testing` ที่มีแต่ข้อมูลสมมติ — **ห้ามชี้ไปที่ production หรือ staging ที่มีข้อมูลจริง** (ข้อมูล/โค้ดถูกส่งไป cloud ของ TestSprite)
-- เทสต์ที่ TestSprite สร้าง = ข้อเสนอ: คนตรวจก่อน commit · ห้ามเป็น gate บังคับ
-- API key อยู่ใน env ของผู้ใช้หรือ repo secret เท่านั้น — ห้าม commit
+- CLI (`@testsprite/testsprite-cli` ปักเวอร์ชันตรง) ยิงได้เฉพาะ URL สาธารณะ — เทสต์ backend รันบน cloud ที่สหรัฐฯ และเข้า localhost ไม่ได้ (tunnel ของ CLI ใช้ได้แค่เทสต์ frontend) → ในเครื่องใช้ `make testsprite-probe URL=http://localhost:<port>` (pytest ของเราเอง ไฟล์เดียวกัน)
+- เป้าหมาย: environment `testing` ที่มีแต่ข้อมูลสมมติ · `staging` ได้เฉพาะ probe อ่านอย่างเดียวและไม่ใช่ช่วง UAT · **ห้าม production เด็ดขาด**
+- advisory เท่านั้น (`testsprite.yml` ทุกคืน · ห้ามย้ายเข้า `ci.yml`) · ห้ามติดตั้ง GitHub App ของ TestSprite (เปิด "Blocking PRs" เป็นค่าเริ่มต้น)
+- API key อยู่ใน repo secret `TESTSPRITE_API_KEY` หรือ env ของผู้ใช้เท่านั้น — ห้าม commit · MCP server ตั้งระดับผู้ใช้เท่านั้น ห้ามเพิ่มลง `.mcp.json`
