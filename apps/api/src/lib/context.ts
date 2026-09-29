@@ -2,6 +2,7 @@ import type { Db, Role } from "@ong/db";
 import { createMiddleware } from "hono/factory";
 import type { Auth } from "../auth";
 import type { Env } from "../env";
+import type { GoldReferenceService } from "../services/goldReference";
 import type { ReceiptPdfService } from "../services/receiptPdf";
 import { type Viewer, forUser, forUserHistory } from "./scope";
 import type { Storage } from "./storage";
@@ -14,6 +15,8 @@ export interface AppEnv {
     storage: Storage;
     /** PDF เก็บถาวรของบิล (Gotenberg จริงใน index.ts · ตัวปลอมในเทสต์) */
     pdf: ReceiptPdfService;
+    /** ราคาอ้างอิงสมาคมค้าทองคำ (แสดง/เติมค่าเริ่มต้นเท่านั้น) — ปิดได้ด้วย env */
+    goldReference: GoldReferenceService;
     viewer: Viewer;
     /** นาฬิกา — ฉีดเข้ามาได้เพื่อให้เทสต์กำหนดวันเวลาเอง */
     now: () => Date;

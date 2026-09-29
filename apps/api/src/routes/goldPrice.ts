@@ -14,6 +14,7 @@ import {
   setBranchPrice,
   setCentralPrice,
 } from "../services/goldPrice";
+import { type CachedGoldReference, referenceAudit } from "../services/goldReference";
 
 // เงินรับเป็น string เท่านั้น — ตัวเลข JSON (float) ถูกปฏิเสธ (CLAUDE.md กฎ 1)
 const QuoteBody = z.object({
@@ -21,17 +22,50 @@ const QuoteBody = z.object({
   /** ใส่เมื่อกำลังตั้งราคาเฉพาะสาขา — คำเตือนเทียบราคาที่สาขานั้นใช้ครั้งก่อน (เหมือนตอนบันทึก) */
   branch_id: z.string().max(64).nullish(),
 });
-const SetBody = z.object({ bar_sell: z.string(), confirm_typo: z.boolean().optional() });
+const SetBody = z.object({
+  bar_sell: z.string(),
+  confirm_typo: z.boolean().optional(),
+  /**
+   * ผู้จัดการกด "ใช้ราคาสมาคมเป็นค่าเริ่มต้น" ก่อนบันทึก — ประกาศที่ browser เติมมา (เป็นคำอ้าง ไม่ใช่ข้อเท็จจริง)
+   * ลง audit แยกจากราคาสมาคมที่เซิร์ฟเวอร์เห็นเอง
+   */
+  from_reference: z
+    .object({
+      announced_at: z.iso.datetime({ offset: true }).max(40),
+      round: z.number().int().min(1).max(999).nullable(),
+    })
+    .strict()
+    .optional(),
+});
 
 const BAR_SELL_ERROR = apiError("ต้องส่ง bar_sell เป็นข้อความตัวเลข", "bar_sell");
 const BRANCH_ID_ERROR = apiError("branch_id ไม่ถูกต้อง", "branch_id");
 const CONFIRM_TYPO_ERROR = apiError("confirm_typo ต้องเป็นจริงหรือเท็จ", "confirm_typo");
+const FROM_REFERENCE_ERROR = apiError("from_reference ต้องมี announced_at และ round ของประกาศ", "from_reference");
 
 /**
  * ช่องที่ผิดจริงของ SetBody (F5) — zod คืน issue ของ bar_sell ก่อนเสมอถ้าทั้งคู่ผิด (ลำดับตาม schema)
  * confirm_typo ผิดชนิด (เช่นส่ง "yes" แทน boolean) ต้องชี้ field "confirm_typo" ไม่ใช่ "bar_sell" ที่จริงแล้วถูก
  */
-const setBodyError = (e: z.ZodError) => (e.issues[0]?.path[0] === "confirm_typo" ? CONFIRM_TYPO_ERROR : BAR_SELL_ERROR);
+const setBodyError = (e: z.ZodError) => {
+  const field = e.issues[0]?.path[0];
+  if (field === "confirm_typo") return CONFIRM_TYPO_ERROR;
+  if (field === "from_reference") return FROM_REFERENCE_ERROR;
+  return BAR_SELL_ERROR;
+};
+
+/** ราคาอ้างอิงสมาคม — เงินเป็น string 2 ตำแหน่ง (กฎ 1) · round เป็นจำนวนเต็ม (ไม่ใช่เงิน) */
+const referenceJson = (r: CachedGoldReference, stale: boolean) => ({
+  source: r.source,
+  announced_at: r.announcedAt,
+  round: r.round,
+  bar_buy: r.barBuy,
+  bar_sell: r.barSell,
+  ornament_buy: r.ornamentBuy,
+  ornament_sell: r.ornamentSell,
+  fetched_at: r.fetchedAt,
+  stale,
+});
 
 const toJson = (p: TodayPrice, diff: string) => ({
   date: p.date,
@@ -78,6 +112,13 @@ export const goldPriceRoutes = new Hono<AppEnv>()
     const rows = await pricesForBranches(c.var.db, businessDate(c.var.now()), readable);
     return c.json(rows.map((r) => toBranchJson(r.branch, r.price)));
   })
+  // ราคาอ้างอิงประกาศสมาคมค้าทองคำ — ข้อมูลสาธารณะเหมือนกันทุกสาขา แสดง/เติมค่าเริ่มต้นเท่านั้น (ไม่ตั้งราคาร้าน)
+  // ดึงไม่ได้/ปิด/ข้อมูลไม่ผ่านการตรวจ = 503 {error, reason} — ไม่แต่งราคาขึ้นเอง (fail-closed)
+  .get("/reference", async (c) => {
+    const result = await c.var.goldReference.get();
+    if (!result.ok) return c.json({ ...apiError("ดึงราคาอ้างอิงไม่ได้"), reason: result.reason }, 503);
+    return c.json(referenceJson(result.value, result.stale));
+  })
   .post("/quote", async (c) => {
     const body = QuoteBody.safeParse(await c.req.json().catch(() => null));
     if (!body.success) {
@@ -114,7 +155,8 @@ export const goldPriceRoutes = new Hono<AppEnv>()
       if (q.warning && !body.data.confirm_typo) {
         return c.json({ ...apiError(q.warning, "confirm_typo"), warning: q.warning }, 409);
       }
-      await setCentralPrice(c.var.db, date, q, c.var.viewer.userId, !!q.warning);
+      const reference = referenceAudit(c.var.goldReference.peek(), body.data.from_reference ?? null, q.barSell);
+      await setCentralPrice(c.var.db, date, q, c.var.viewer.userId, !!q.warning, reference);
       const price = await priceForBranch(c.var.db, date, null);
       const setting = await loadGoldSetting(c.var.db);
       return c.json(toJson(price as TodayPrice, setting.diff));
@@ -136,7 +178,8 @@ export const goldPriceRoutes = new Hono<AppEnv>()
       if (q.warning && !body.data.confirm_typo) {
         return c.json({ ...apiError(q.warning, "confirm_typo"), warning: q.warning }, 409);
       }
-      await setBranchPrice(c.var.db, date, target, q, c.var.viewer.userId, !!q.warning);
+      const reference = referenceAudit(c.var.goldReference.peek(), body.data.from_reference ?? null, q.barSell);
+      await setBranchPrice(c.var.db, date, target, q, c.var.viewer.userId, !!q.warning, reference);
       return c.json(toBranchJson(target, await priceForBranch(c.var.db, date, target.id)));
     } catch (e) {
       if (e instanceof GoldPriceInputError) return c.json(apiError(e.message, "bar_sell"), 400);
