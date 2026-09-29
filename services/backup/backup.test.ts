@@ -210,7 +210,9 @@ for a in "$@"; do case "$a" in --file=*) printf 'PGDMP-stub' > "\${a#--file=}";;
     );
     stub(
       "pg_restore",
-      `[[ -n \${STUB_FAIL_RESTORE:-} ]] && { echo "pg_restore: error: truncated" >&2; exit 1; }; exit 0`,
+      `echo "$*" >> "$STUB_STATE/pg_restore.log"
+[[ -n \${STUB_FAIL_RESTORE:-} ]] && { echo "pg_restore: error: could not read from input file: end of file" >&2; exit 1; }
+exit 0`,
     );
     stub("pg_isready", "exit 0");
     stub(
@@ -324,9 +326,18 @@ esac`,
     expect(calls.some((c) => c.startsWith("copy "))).toBe(true);
   });
 
-  it("dump อ่านกลับไม่ได้ (pg_restore --list พัง) → ไม่อัปโหลด · exit ≠ 0", () => {
+  it("ตรวจ dump ด้วยการอ่านทั้งไฟล์ ไม่ใช่แค่ TOC (--list ผ่านแม้ไฟล์ขาดครึ่ง)", () => {
+    const r = run(baseEnv());
+    expect(r.status).toBe(0);
+    const restore = lines(read("pg_restore.log"));
+    expect(restore).toHaveLength(1);
+    expect(restore[0]).toMatch(/^--file=\/dev\/null \S+\/staging-\d{8}T\d{6}Z\.dump$/);
+  });
+
+  it("dump อ่านกลับไม่ครบ (pg_restore พัง) → ไม่อัปโหลด · exit ≠ 0", () => {
     const r = run({ ...baseEnv(), STUB_FAIL_RESTORE: "1" });
     expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/end of file/);
     expect(rcloneCalls().some((c) => c.startsWith("copyto"))).toBe(false);
   });
 

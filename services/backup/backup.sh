@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # สำรองข้อมูลรายคืน — Railway cron service (ประกาศใน .railway/railway.ts · วิธีใช้/กู้คืน: .railway/README.md)
 #
-# 1. database: pg_dump -Fc → ตรวจว่าอ่านกลับได้ (pg_restore --list) → อัปโหลด
+# 1. database: pg_dump -Fc → อ่านกลับทั้งไฟล์ (pg_restore --file=/dev/null) → อัปโหลด
 #    → ยืนยันว่าอยู่ในปลายทาง → ลบ dump เก่าตาม BACKUP_KEEP_DAILY / BACKUP_KEEP_MONTHLY
 # 2. files: rclone copy (ไม่ใช่ sync — ไฟล์ที่ถูกลบจากต้นทางไม่ถูกลบจากสำเนา) · --immutable = ไฟล์ที่มีอยู่แล้ว
 #    แต่เนื้อหาต่าง → fail ไม่เขียนทับ (ใบรับซื้อ/สำเนาบัตรเป็นเอกสารที่ห้ามแก้)
@@ -67,8 +67,8 @@ backup_database() {
   log "pg_dump ($(pg_dump --version)) → $name"
   pg_dump --format=custom --no-password --dbname="$DATABASE_URL" --file="$dump"
   [[ -s $dump ]] || fail "pg_dump produced an empty file"
-  # อ่าน TOC ได้ = ไฟล์ไม่ขาดกลางทาง (custom format เขียน TOC ท้ายไฟล์)
-  pg_restore --list "$dump" >/dev/null
+  # อ่านทั้งไฟล์ (แปลงทุก entry เป็น SQL แล้วทิ้ง) — --list อ่านแค่ TOC ต้นไฟล์: dump ที่ขาดครึ่งก็ผ่าน
+  pg_restore --file=/dev/null "$dump"
   log "dump ok: $(wc -c <"$dump" | tr -d ' ') bytes"
 
   # copyto ตรวจ size + md5 หลังอัปโหลดเอง · --immutable: ชื่อซ้ำแต่เนื้อหาต่าง = fail ไม่เขียนทับ

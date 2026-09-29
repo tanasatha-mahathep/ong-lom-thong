@@ -80,10 +80,10 @@ service `Nightly Backup` (cron · โค้ด `services/backup/`) รันท�
 - รอบก่อนยังไม่จบ Railway ข้ามรอบนั้น · รันพัง = run นั้นขึ้น failed (restart policy `NEVER` ไม่วนรันซ้ำ)
 - ปลายทาง: bucket `Backup` ของ environment เดียวกัน (Railway สร้าง key ให้เอง — ไม่มีค่าลับให้ตั้ง)
 
-| ส่วน     | ทำอะไร                                                                                                                     | ที่อยู่ใน bucket `Backup`                         |
-| -------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| database | `pg_dump -Fc` (client 18) → ตรวจด้วย `pg_restore --list` → อัปโหลด → เห็นไฟล์ในปลายทางแล้วจึง prune dump เก่า              | `<environment>/postgres/<environment>-<UTC>.dump` |
-| files    | `rclone copy --immutable --metadata` จาก `Media` — **ไม่ใช่ sync**: ไฟล์ที่ถูกลบจาก `Media` ยังอยู่ในสำเนา · ไม่ prune เลย | `<environment>/files/<key เดิม>`                  |
+| ส่วน     | ทำอะไร                                                                                                                                                                          | ที่อยู่ใน bucket `Backup`                         |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| database | `pg_dump -Fc` (client 18) → อ่านกลับทั้งไฟล์ด้วย `pg_restore --file=/dev/null` (`--list` อ่านแค่ TOC — ไฟล์ขาดครึ่งก็ผ่าน) → อัปโหลด → เห็นไฟล์ในปลายทางแล้วจึง prune dump เก่า | `<environment>/postgres/<environment>-<UTC>.dump` |
+| files    | `rclone copy --immutable --metadata` จาก `Media` — **ไม่ใช่ sync**: ไฟล์ที่ถูกลบจาก `Media` ยังอยู่ในสำเนา · ไม่ prune เลย                                                      | `<environment>/files/<key เดิม>`                  |
 
 - ชื่อ dump เช่น `production-20260929T191700Z.dump` (เวลา UTC ตอนเริ่ม dump)
 - เก็บ dump: **ทุกไฟล์ของ 30 วันล่าสุดที่มี dump + ไฟล์ล่าสุดของแต่ละเดือน 12 เดือน** (`BACKUP_KEEP_DAILY` / `BACKUP_KEEP_MONTHLY` ใน `railway.ts`) · นับวันที่มีไฟล์ ไม่ใช่อายุ — cron หยุดไปนานของเก่าก็ไม่หาย · ไฟล์ที่ไม่ตรงรูปชื่อไม่ถูกลบ · อัปโหลดไม่สำเร็จ/ยืนยันไม่ได้ = ไม่ prune
