@@ -665,6 +665,39 @@ describe.skipIf(!available)("ส่งบัญชีรายเดือน (s
     }
   });
 
+  // lib/fetchSite.ts ต่อจริงในแอปและอยู่ก่อน handler — ลิงก์จากเว็บอื่นพา browser ของฝ่ายบัญชีที่ login อยู่มาโหลด
+  // zip ไม่ได้ และไม่ทิ้ง audit ที่ดูเหมือนเจ้าตัวสั่งเอง (cookie SameSite=Lax ยังถูกแนบมากับ top-level GET)
+  it("Sec-Fetch-Site: cross-site = 403 ไม่ได้ zip ไม่ลง audit · same-origin / ไม่มี header ยังดาวน์โหลดได้", async () => {
+    const before = (await exportAudits()).length;
+    const site = (value?: string, method = "GET") =>
+      t.app.request(`/api/reports/export?${OCT}`, {
+        method,
+        headers: {
+          origin: "http://localhost:8787",
+          cookie: cookies.acct ?? "",
+          ...(value === undefined ? {} : { "sec-fetch-site": value }),
+        },
+      });
+
+    for (const value of ["cross-site", "same-site"]) {
+      const res = await site(value);
+      expect(res.status, value).toBe(403);
+      expect(await res.json()).toEqual({ error: "เปิดไฟล์นี้จากเว็บอื่นไม่ได้ — เปิดจากหน้าระบบโดยตรง" });
+    }
+    // HEAD ข้ามเว็บก็ไม่ผ่าน — ไม่ให้วัดได้ว่าเดือนนั้นมีไฟล์ชื่ออะไร
+    expect((await site("cross-site", "HEAD")).status).toBe(403);
+    expect(await exportAudits()).toHaveLength(before);
+
+    // ฝ่ายบัญชีต้องดาวน์โหลดได้ตามปกติ: หน้าระบบของเราเอง · เปิดจาก bookmark · curl ที่ไม่ส่ง header
+    for (const value of ["same-origin", "none", undefined]) {
+      const res = await site(value);
+      expect(res.status, String(value)).toBe(200);
+      // อ่าน body ให้จบ — zip ส่งแบบ stream
+      expect(readZip(new Uint8Array(await res.arrayBuffer())).length).toBeGreaterThan(0);
+    }
+    expect(await exportAudits()).toHaveLength(before + 3);
+  });
+
   it("เลขบัตรเต็ม/ชื่อไม่หลุดในไฟล์ที่ไม่ใช่ PDF (manifest · README) · CSV มาสก์เลขบัตร", async () => {
     const z = await download(OCT);
     const manifest = new TextDecoder().decode(z.entry("manifest.json"));
