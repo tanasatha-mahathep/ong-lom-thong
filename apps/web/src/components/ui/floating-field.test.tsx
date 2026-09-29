@@ -21,17 +21,32 @@ describe("floating label (U0–U1)", () => {
     expect(input).toHaveFocus();
   });
 
-  it("ไม่มี placeholder ก็ยังใช้ :placeholder-shown ได้ (ใส่ช่องว่างให้)", () => {
-    render(<FloatingInput label="ชื่อ" />);
+  it('placeholder ว่าง ("") ก็ยังใช้ :placeholder-shown ได้ (ใส่ช่องว่างให้)', () => {
+    render(<FloatingInput label="ชื่อ" placeholder="" />);
     expect(screen.getByLabelText("ชื่อ")).toHaveAttribute("placeholder", " ");
+  });
+
+  it("placeholder บังคับใน type (U1) — ลืมใส่ = typecheck ไม่ผ่าน", () => {
+    // @ts-expect-error — placeholder (ตัวอย่าง/รูปแบบ) เป็น prop บังคับ
+    render(<FloatingInput label="ลืม placeholder" />);
+    // @ts-expect-error — textarea ก็บังคับเหมือนกัน
+    render(<FloatingTextarea label="ลืม placeholder ที่อยู่" />);
+    expect(screen.getByLabelText("ลืม placeholder")).toHaveAttribute("placeholder", " ");
+  });
+
+  it("textarea: ป้ายที่ลอยมีพื้นทึบ (ข้อความที่เลื่อนขึ้นไม่ลอดใต้ป้าย)", () => {
+    render(<FloatingTextarea label="ที่อยู่ลูกค้า" placeholder="99/1" />);
+    const label = screen.getByText("ที่อยู่ลูกค้า", { selector: "label" });
+    expect(label).toHaveClass("floated:bg-background");
+    expect(screen.getByLabelText("ที่อยู่ลูกค้า")).toHaveClass("dark:bg-background");
   });
 
   it("ลำดับ Tab เหมือนช่องธรรมดา — ป้ายไม่รับโฟกัส", async () => {
     const user = userEvent.setup();
     render(
       <>
-        <FloatingInput label="ช่องแรก" />
-        <FloatingTextarea label="ที่อยู่" />
+        <FloatingInput label="ช่องแรก" placeholder="สมชาย" />
+        <FloatingTextarea label="ที่อยู่" placeholder="99/1 ถ.สุขุมวิท" />
         <FloatingSelect label="สาขา" placeholder="— เลือก —">
           <NativeSelectOption value="1">สาขา 1</NativeSelectOption>
         </FloatingSelect>
@@ -69,7 +84,7 @@ describe("floating label (U0–U1)", () => {
   });
 
   it("ไม่มี error → ไม่มี aria-invalid และไม่มีข้อความใต้ช่อง", () => {
-    render(<FloatingTextarea label="หมายเหตุ" />);
+    render(<FloatingTextarea label="หมายเหตุ" placeholder="" />);
     const textarea = screen.getByLabelText("หมายเหตุ");
     expect(textarea).not.toHaveAttribute("aria-invalid");
     expect(textarea).not.toHaveAttribute("aria-describedby");
@@ -77,7 +92,7 @@ describe("floating label (U0–U1)", () => {
   });
 
   it("size=compact ติดไว้ที่ช่องและกล่อง (ให้ CSS ความสูงน้อยลง)", () => {
-    render(<FloatingInput label="น้ำหนัก" size="compact" inputMode="decimal" />);
+    render(<FloatingInput label="น้ำหนัก" placeholder="0.000" size="compact" inputMode="decimal" />);
     const input = screen.getByLabelText("น้ำหนัก");
     expect(input).toHaveAttribute("data-size", "compact");
     expect(input.closest("[data-slot=floating-field]")).toHaveAttribute("data-size", "compact");
@@ -85,7 +100,15 @@ describe("floating label (U0–U1)", () => {
   });
 
   it("ส่ง role=combobox ได้ (ช่องค้นหาแบบ autocomplete)", () => {
-    render(<FloatingInput label="ค้นหาลูกค้า" role="combobox" aria-expanded={false} aria-controls="list" />);
+    render(
+      <FloatingInput
+        label="ค้นหาลูกค้า"
+        placeholder="ชื่อ · เลขบัตร"
+        role="combobox"
+        aria-expanded={false}
+        aria-controls="list"
+      />,
+    );
     expect(screen.getByRole("combobox", { name: "ค้นหาลูกค้า" })).toBeInTheDocument();
   });
 });

@@ -11,7 +11,8 @@ import { Textarea } from "@/components/ui/textarea";
  * - ป้ายเป็น `<label for>` จริง วางใน DOM **หลัง** ช่อง (Tailwind `peer`) แต่แสดงทับอยู่ในช่อง
  *   ช่องว่าง = ป้ายอยู่กลางช่อง · โฟกัส/มีค่า/autofill = ป้ายลอยขึ้นขอบบน (variant `floated:` ใน styles.css)
  * - placeholder = ตัวอย่าง/รูปแบบ (`วว/ดด/ปปปป` · `081-234-5678`) โปร่งใสระหว่างที่ป้ายทับช่อง เห็นเมื่อโฟกัส
- *   ไม่ส่ง placeholder ก็ได้ (ใช้ช่องว่างแทน — `:placeholder-shown` ต้องมี placeholder เสมอ)
+ *   `placeholder` บังคับใน type (U1) · ส่ง "" ได้เมื่อไม่มีตัวอย่างที่มีความหมาย (ใช้ช่องว่างแทน — `:placeholder-shown`
+ *   ต้องมี placeholder เสมอ)
  * - คีย์บอร์ด/โฟกัสเหมือนช่องธรรมดา (ป้าย `pointer-events-none` คลิกทะลุไปที่ช่อง)
  * - `error` → ขอบแดง + `aria-invalid` + ข้อความใต้ช่องผูก `aria-describedby` · `description` = คำอธิบายใต้ช่อง
  * - `size="compact"` = ความสูงน้อยลงสำหรับหน้าซื้อเข้า (ฟอร์มยาว หน้าจอเดียว)
@@ -37,8 +38,9 @@ const CONTROL = {
 } as const satisfies Record<FloatingSize, string>;
 
 const TEXTAREA = {
-  default: "min-h-20 pt-7 pb-2",
-  compact: "min-h-16 pt-5 pb-1.5 text-sm",
+  // พื้นทึบทั้งสองธีม — ป้ายที่ลอยอยู่มีพื้นสีเดียวกัน ข้อความที่เลื่อนขึ้นไปจึงไม่ลอดใต้ป้าย
+  default: "min-h-20 pt-7 pb-2 dark:bg-background",
+  compact: "min-h-16 pt-5 pb-1.5 text-sm dark:bg-background",
 } as const satisfies Record<FloatingSize, string>;
 
 /** placeholder โปร่งใสจนกว่าช่องได้โฟกัส (ป้ายลอยขึ้นแล้ว) */
@@ -53,10 +55,15 @@ const INPUT_LABEL = {
   compact: "top-1/2 -translate-y-1/2 text-sm floated:top-0.5 floated:translate-y-0 floated:text-[0.6875rem]",
 } as const satisfies Record<FloatingSize, string>;
 
-/** ป้ายของ textarea: บรรทัดแรก → ขอบบน */
+/**
+ * ป้ายของ textarea: บรรทัดแรก → ขอบบน · ตอนลอยมีพื้นทึบเต็มแถบบน (จากขอบซ้ายถึงก่อน scrollbar)
+ * บังข้อความที่เลื่อน (scroll) ขึ้นไปไม่ให้ทับตัวป้าย
+ */
 const TEXTAREA_LABEL = {
-  default: "top-2.5 text-base md:text-sm floated:top-1.5 floated:text-xs",
-  compact: "top-2 text-sm floated:top-0.5 floated:text-[0.6875rem]",
+  default:
+    "top-2.5 text-base md:text-sm floated:top-px floated:right-4 floated:left-px floated:rounded-tl-md floated:bg-background floated:pt-1.5 floated:pb-0.5 floated:pl-[calc(0.75rem-1px)] floated:text-xs",
+  compact:
+    "top-2 text-sm floated:top-px floated:right-4 floated:left-px floated:rounded-tl-md floated:bg-background floated:pt-0.5 floated:pl-[calc(0.75rem-1px)] floated:text-[0.6875rem]",
 } as const satisfies Record<FloatingSize, string>;
 
 /** ป้ายของ select: select มีค่าที่เลือกแสดงอยู่เสมอ → ลอยตลอด (เหมือน Bootstrap) */
@@ -131,7 +138,14 @@ function FloatingFrame({
   );
 }
 
-export type FloatingInputProps = Omit<React.ComponentProps<"input">, "size"> & FloatingExtraProps;
+/** placeholder = ตัวอย่าง/รูปแบบ (U1) — บังคับ ให้ลืมไม่ได้ */
+interface RequiredPlaceholder {
+  placeholder: string;
+}
+
+export type FloatingInputProps = Omit<React.ComponentProps<"input">, "size" | "placeholder"> &
+  FloatingExtraProps &
+  RequiredPlaceholder;
 
 /** input + floating label — ใช้แทน `Input` ในทุกฟอร์ม (รวมช่องแบบ combobox: ส่ง `role="combobox"` + aria เอง) */
 function FloatingInput({
@@ -165,7 +179,9 @@ function FloatingInput({
   );
 }
 
-export type FloatingTextareaProps = React.ComponentProps<"textarea"> & FloatingExtraProps;
+export type FloatingTextareaProps = Omit<React.ComponentProps<"textarea">, "placeholder"> &
+  FloatingExtraProps &
+  RequiredPlaceholder;
 
 /** textarea + floating label (ที่อยู่ · หมายเหตุ) */
 function FloatingTextarea({
