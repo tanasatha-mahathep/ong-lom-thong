@@ -98,7 +98,7 @@ describe("ตัวเลือกสาขาที่หัว sidebar", () =>
     let release = () => {};
     const answered = new Promise<void>((resolve) => (release = resolve));
     const { api, user } = setup({ delay: answered });
-    expect(await screen.findByText("67,850.00")).toBeInTheDocument();
+    expect(await screen.findByText("67,850")).toBeInTheDocument();
     const menu = await openSwitcher(user);
     await user.click(within(menu).getByRole("menuitemradio", { name: /สาขา 2/ }));
 
@@ -114,24 +114,24 @@ describe("ตัวเลือกสาขาที่หัว sidebar", () =>
 
   it("สลับสาขา → ราคาของสาขาเดิมไม่ค้างใต้หัวสาขาใหม่ (cache ถูก reset)", async () => {
     const { user } = setup();
-    expect(await screen.findByText("67,850.00")).toBeInTheDocument();
+    expect(await screen.findByText("67,850")).toBeInTheDocument();
     const menu = await openSwitcher(user);
     await user.click(within(menu).getByRole("menuitemradio", { name: /สาขา 2/ }));
 
-    expect(await screen.findByText("68,000.00")).toBeInTheDocument();
-    expect(screen.queryByText("67,850.00")).not.toBeInTheDocument();
+    expect(await screen.findByText("68,000")).toBeInTheDocument();
+    expect(screen.queryByText("67,850")).not.toBeInTheDocument();
   });
 
   it("สลับไม่สำเร็จ → toast error · อยู่สาขาเดิม ข้อมูลเดิมยังอยู่", async () => {
     const { api, user } = setup({ switchTo: () => json({ error: "ไม่มีสิทธิ์ในสาขานี้" }, 403) });
-    expect(await screen.findByText("67,850.00")).toBeInTheDocument();
+    expect(await screen.findByText("67,850")).toBeInTheDocument();
     const menu = await openSwitcher(user);
     await user.click(within(menu).getByRole("menuitemradio", { name: /สาขา 2/ }));
 
     expect(await screen.findByText(/^เปลี่ยนสาขาไม่สำเร็จ/)).toBeInTheDocument();
     expect(switchCalls(api)).toHaveLength(1);
     expect(await switcher()).toHaveTextContent(BRANCH_HQ.name);
-    expect(screen.getByText("67,850.00")).toBeInTheDocument();
+    expect(screen.getByText("67,850")).toBeInTheDocument();
     expect(screen.queryByRole("dialog", { name: "กำลังทำงาน…" })).not.toBeInTheDocument();
   });
 
@@ -281,12 +281,12 @@ describe("ผลการสลับที่ไม่แน่นอน (fail-
 describe("สาขาเปลี่ยนจากที่อื่น (แท็บอื่น)", () => {
   it("ไม่มีฟอร์มค้าง → ล้างข้อมูลสาขาเดิม แสดงข้อมูลสาขาใหม่ และแจ้งเตือน", async () => {
     const { changeElsewhere } = setup();
-    expect(await screen.findByText("67,850.00")).toBeInTheDocument();
+    expect(await screen.findByText("67,850")).toBeInTheDocument();
     await changeElsewhere(BRANCH_2);
 
     expect(await screen.findByText("สาขาถูกเปลี่ยนเป็น สาขา 2 จากที่อื่น")).toBeInTheDocument();
-    expect(await screen.findByText("68,000.00")).toBeInTheDocument();
-    expect(screen.queryByText("67,850.00")).not.toBeInTheDocument();
+    expect(await screen.findByText("68,000")).toBeInTheDocument();
+    expect(screen.queryByText("67,850")).not.toBeInTheDocument();
     expect(await switcher()).toHaveTextContent(BRANCH_2.name);
   });
 
@@ -330,22 +330,14 @@ describe("โลโก้ร้านที่หัว sidebar", () => {
 });
 
 describe("ชื่อสาขาเมื่อ sidebar ย่อ", () => {
-  it("ย่อ → หัวหน้ามีป้ายสาขา · ปุ่มเลือกสาขา/เมนูผู้ใช้มี tooltip", async () => {
+  it("ย่อ → ปุ่มเลือกสาขา/เมนูผู้ใช้มี tooltip · หัวหน้าไม่มีป้ายสาขา", async () => {
     document.cookie = "sidebar_state=false; path=/";
     setup();
     const banner = await screen.findByRole("banner");
-    expect(await within(banner).findByText(BRANCH_HQ.name)).toBeInTheDocument();
-
     (await switcher()).focus();
     expect(await screen.findByRole("tooltip", { name: BRANCH_HQ.name })).toBeInTheDocument();
     screen.getByRole("button", { name: /ทดสอบ manager/ }).focus();
     expect(await screen.findByRole("tooltip", { name: "ทดสอบ manager · ผู้จัดการ" })).toBeInTheDocument();
-  });
-
-  it("ขยาย → หัวหน้าไม่มีป้ายสาขา (อยู่ใน sidebar แล้ว)", async () => {
-    setup();
-    const banner = await screen.findByRole("banner");
-    await within(banner).findByRole("group", { name: "ราคาทองวันนี้" });
     expect(within(banner).queryByText(BRANCH_HQ.name)).not.toBeInTheDocument();
   });
 });

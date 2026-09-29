@@ -73,23 +73,26 @@ describe("sidebar ของแอป", () => {
     expect(within(nav).queryByRole("link", { name: "สาขา" })).not.toBeInTheDocument();
   });
 
-  it("หัวหน้าแสดงราคาทองวันนี้ 3 ค่าจากข้อความของ API", async () => {
-    renderShell("staff");
-    const prices = await screen.findByRole("group", { name: "ราคาทองวันนี้" });
-
-    expect(within(prices).getByText("67,850.00")).toBeInTheDocument();
-    expect(within(prices).getByText("67,650.00")).toBeInTheDocument();
-    expect(within(prices).getByText("64,268")).toBeInTheDocument();
-  });
-
-  it("ยังไม่ตั้งราคาทอง (404) → ป้ายเตือน · ผู้จัดการกดไปหน้าตั้งราคาได้", async () => {
-    fakeApi({ "GET /api/me": () => json(makeMe("manager")) });
-    renderApp("/");
-
-    // หน้าแรกโหลดทั้งหน้า (ราคา · ยอดวันนี้ · ตารางบิลวันนี้) ก่อนหัวหน้าจะแสดงป้าย — เผื่อเครื่องที่รันเทสต์ขนานกัน
-    const warning = await screen.findByRole("link", { name: "ยังไม่ได้ตั้งราคาทองวันนี้" }, { timeout: 10_000 });
-    expect(warning).toHaveAttribute("href", "/settings/gold-price");
-  });
+  it.each([
+    ["ขยาย", "true"],
+    ["ย่อ", "false"],
+  ])(
+    "หัวหน้า (%s) = ปุ่มย่อ/ขยาย + breadcrumb เท่านั้น — ไม่มีป้ายสาขา ไม่มีราคาทอง/ป้ายเตือนราคา",
+    async (_, open) => {
+      document.cookie = `sidebar_state=${open}; path=/`;
+      fakeApi({ "GET /api/me": () => json(makeMe("manager")) });
+      renderApp("/");
+      const banner = await screen.findByRole("banner");
+      // หน้าแรกยังแสดงป้ายเตือนราคา (ไม่ได้ลบ query) — แต่ไม่อยู่ในหัวหน้า
+      expect(await screen.findByText("ยังไม่ได้ตั้งราคาทองวันนี้", {}, { timeout: 10_000 })).toBeInTheDocument();
+      expect(within(banner).getByRole("button", { name: "แสดง/ซ่อนเมนู" })).toBeInTheDocument();
+      expect(within(banner).getByRole("navigation", { name: "ตำแหน่งของหน้า" })).toBeInTheDocument();
+      expect(within(banner).queryByRole("group", { name: "ราคาทองวันนี้" })).not.toBeInTheDocument();
+      expect(within(banner).queryByText("ยังไม่ได้ตั้งราคาทองวันนี้")).not.toBeInTheDocument();
+      expect(within(banner).queryByText(BRANCH_HQ.name)).not.toBeInTheDocument();
+      expect(within(banner).queryByText("สาขาปัจจุบัน")).not.toBeInTheDocument();
+    },
+  );
 
   it("เมนูผู้ใช้ออกจากระบบได้", async () => {
     const { api, router } = renderShell("staff");

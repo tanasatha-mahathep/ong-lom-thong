@@ -55,7 +55,7 @@ describe("เมนูผู้ใช้ท้าย sidebar (NavUser ของ 
   it("หัวหน้าไม่มีปุ่มธีมและป้ายสาขาแล้ว (ย้ายไปเมนูผู้ใช้/หัว sidebar)", async () => {
     setup();
     const banner = await screen.findByRole("banner");
-    expect(await within(banner).findByRole("group", { name: "ราคาทองวันนี้" })).toBeInTheDocument();
+    expect(await within(banner).findByRole("button", { name: "แสดง/ซ่อนเมนู" })).toBeInTheDocument();
     expect(within(banner).queryByRole("button", { name: /ธีม/ })).not.toBeInTheDocument();
     expect(within(banner).queryByText("สาขาปัจจุบัน")).not.toBeInTheDocument();
     expect(within(banner).queryByText("สำนักงานใหญ่ (สาขา 1)")).not.toBeInTheDocument();
