@@ -1,4 +1,5 @@
 import { CircleAlert, Download } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { z } from "zod";
 import { AppForm, SubmitButton } from "@/components/app-form";
@@ -15,6 +16,8 @@ import { navigation } from "@/lib/navigation";
 import { useMe } from "@/lib/queries";
 import { useTranslation } from "./i18n";
 import { type ExportParams, exportHref } from "./queries";
+
+type ExportUrl = ReturnType<typeof exportHref>;
 import { BranchSelect, ReportForbidden } from "./report-parts";
 import { lastMonth } from "./search";
 
@@ -87,12 +90,14 @@ function ExportForm() {
    * ระหว่างเช็คทั้งฟอร์มปิด + ปุ่มหมุน (U4) · ผล: toast บนกลาง (U5) — เริ่มดาวน์โหลดแล้ว / ล้มเหลวพร้อมเหตุผล
    * ไม่ใช้ชั้นบังหน้าจอ (U6): การดาวน์โหลดไฟล์ไม่ทำให้หน้านี้เปลี่ยนหรือโหลดใหม่
    */
+  // useMutation: 401 ระหว่างเช็คไปทางเดียวกับ query อื่น (MutationCache → /login?redirect=…) ไม่ใช่แค่ toast
+  const check = useMutation({ mutationFn: (url: ExportUrl) => apiFetch(url, { method: "HEAD" }) });
   const f = useAppForm({
     defaultValues: defaults,
     schema,
     submit: async (params: ExportParams) => {
       const url = exportHref({ ...params, branch_id: params.branch_id || undefined });
-      await apiFetch(url, { method: "HEAD" });
+      await check.mutateAsync(url);
       return url;
     },
     successMessage: t("export.started"),

@@ -424,3 +424,63 @@ describe("รายงานยอดซื้อ — สิทธิ์แล�
     ).toEqual(["ทุกสาขา", ...branches.map((branch) => `${branch.code} ${branch.name}`)]);
   });
 });
+
+describe("รายงานยอดซื้อ — ไฟล์ CSV", () => {
+  const csvWithName = (name: string) => () =>
+    new Response("a,b", { headers: { "Content-Type": "text/csv", "Content-Disposition": name } });
+
+  it("ใช้ชื่อไฟล์ของเซิร์ฟเวอร์ (มีรหัสสาขา) — สองสาขาช่วงเดียวกันไม่ชื่อซ้ำ", async () => {
+    const save = vi.spyOn(navigation, "saveBlob").mockImplementation(() => undefined);
+    const branchUrl = `${THIS_MONTH}&branch_id=${BRANCH_2.id}`;
+    const { user } = await open(`/reports/purchase?branch_id=${BRANCH_2.id}`, {
+      [`GET ${branchUrl}`]: () => json(REPORT),
+      [`GET ${branchUrl}&format=csv`]: csvWithName('attachment; filename="purchase_2026-09-01_2026-09-29_00001.csv"'),
+    });
+    await screen.findByRole("region", { name: "สรุปยอดซื้อ" });
+
+    await user.click(csvButton());
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]?.[1]).toBe("purchase_2026-09-01_2026-09-29_00001.csv");
+  });
+
+  it("ไม่มี Content-Disposition → ชื่อสำรองมีรหัสสาขาและโลหะที่กรอง", async () => {
+    const save = vi.spyOn(navigation, "saveBlob").mockImplementation(() => undefined);
+    const url = `${THIS_MONTH}&metal=gold&branch_id=${BRANCH_2.id}`;
+    const { user } = await open(`/reports/purchase?metal=gold&branch_id=${BRANCH_2.id}`, {
+      [`GET ${url}`]: () => json(REPORT),
+      [`GET ${url}&format=csv`]: () => new Response("a,b"),
+    });
+    await screen.findByRole("region", { name: "สรุปยอดซื้อ" });
+
+    await user.click(csvButton());
+
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]?.[1]).toBe("รายงานยอดซื้อ_2026-09-01_2026-09-29_00001_gold.csv");
+  });
+
+  it("ช่วงวันที่ใน URL กลับด้าน → ปุ่ม CSV กดไม่ได้", async () => {
+    await open("/reports/purchase?date_from=2026-09-10&date_to=2026-09-01");
+
+    expect(await screen.findByText("วันที่เริ่มต้องไม่เกินวันที่สิ้นสุด")).toBeInTheDocument();
+    expect(csvButton()).toBeDisabled();
+  });
+
+  it("session หมดระหว่างดาวน์โหลด (401) → ไปหน้า login พร้อม redirect กลับ (ไม่ใช่แค่ toast)", async () => {
+    let signedIn = true;
+    const { router, user } = await open("/reports/purchase", {
+      "GET /api/me": () =>
+        signedIn ? json(makeMe("manager", [BRANCH_HQ, BRANCH_2])) : json({ error: "unauthorized" }, 401),
+      [`GET ${THIS_MONTH}&format=csv`]: () => {
+        signedIn = false;
+        return json({ error: "unauthorized" }, 401);
+      },
+    });
+    await screen.findByRole("region", { name: "สรุปยอดซื้อ" });
+
+    await user.click(csvButton());
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+    expect(router.state.location.search).toEqual({ redirect: "/reports/purchase" });
+  });
+});

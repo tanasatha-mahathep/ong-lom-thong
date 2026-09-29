@@ -28,8 +28,8 @@ export default {
     downloading: "กำลังดาวน์โหลด…",
     done: "ดาวน์โหลด {{file}} แล้ว",
     failed: "ดาวน์โหลด CSV ไม่สำเร็จ — {{reason}}",
-    purchaseFile: "รายงานยอดซื้อ_{{from}}_{{to}}.csv",
-    stockFile: "สต็อกคงเหลือ_{{asOf}}.csv",
+    purchaseFile: "รายงานยอดซื้อ_{{from}}_{{to}}{{suffix}}.csv",
+    stockFile: "สต็อกคงเหลือ_{{asOf}}{{suffix}}.csv",
   },
   purchase: {
     description: "ยอดรับซื้อตามช่วงวันที่ ไม่นับบิลที่ยกเลิก — ยอดรวมทุกตัวคำนวณจากเซิร์ฟเวอร์",

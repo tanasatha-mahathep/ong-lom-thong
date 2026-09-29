@@ -19,6 +19,7 @@ import {
 import { useAppForm } from "@/hooks/use-app-form";
 import { useBusinessDate } from "@/hooks/use-business-date";
 import { ApiError } from "@/lib/api";
+import { useMe } from "@/lib/queries";
 import { formatWeight } from "@/lib/format";
 import { useTranslation } from "./i18n";
 import { type StockParams, type StockReport, stockCsvHref, stockReportQueryOptions } from "./queries";
@@ -33,6 +34,7 @@ import {
   ReportSkeleton,
   TableFrame,
 } from "./report-parts";
+import { csvNameSuffix } from "./csv-name";
 import { type FieldProblem, fieldProblem, problemOf } from "./report-problem";
 import { type StockSearch, isoToThaiInput, lastMonth } from "./search";
 
@@ -48,6 +50,7 @@ export function StockReportPage() {
   const { t } = useTranslation("reports");
   const search = route.useSearch();
   const navigate = route.useNavigate();
+  const me = useMe();
   const today = useBusinessDate();
   const params: StockParams = { as_of: search.as_of ?? today, branch_id: search.branch_id };
   const report = useQuery({ ...stockReportQueryOptions(params), placeholderData: keepPreviousData });
@@ -66,7 +69,13 @@ export function StockReportPage() {
       <PageHeader
         description={t("stock.description")}
         actions={
-          <CsvDownloadButton href={stockCsvHref(params)} filename={t("csv.stockFile", { asOf: params.as_of })} />
+          <CsvDownloadButton
+            href={stockCsvHref(params)}
+            fallbackName={t("csv.stockFile", {
+              asOf: params.as_of,
+              suffix: csvNameSuffix(me.branches.find((branch) => branch.id === params.branch_id)?.code, undefined),
+            })}
+          />
         }
       />
       <StockFilters

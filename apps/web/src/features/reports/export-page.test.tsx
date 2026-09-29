@@ -139,6 +139,25 @@ describe("ส่งบัญชีรายเดือน", () => {
     expect(screen.getByLabelText("ปี")).toBeEnabled();
   });
 
+  it("session หมดระหว่างเช็ค (401) → ไปหน้า login พร้อม redirect กลับ", async () => {
+    let signedIn = true;
+    const { router, user } = await open({
+      "GET /api/me": () =>
+        signedIn ? json(makeMe("accounting", [BRANCH_HQ, BRANCH_2])) : json({ error: "unauthorized" }, 401),
+      [`HEAD ${DEFAULT_URL}`]: () => {
+        signedIn = false;
+        return json({ error: "unauthorized" }, 401);
+      },
+    });
+    vi.spyOn(navigation, "downloadAt").mockImplementation(() => undefined);
+
+    await user.click(download());
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+    expect(router.state.location.search).toEqual({ redirect: "/reports/export" });
+    expect(navigation.downloadAt).not.toHaveBeenCalled();
+  });
+
   it.each(["staff", "manager"] as const)("role %s เห็นสถานะไม่มีสิทธิ์แทนฟอร์ม ไม่เรียก API export", async (role) => {
     const { api } = await open({}, makeMe(role, [BRANCH_HQ]));
     expect(await screen.findByText("ไม่มีสิทธิ์ส่งบัญชีรายเดือน")).toBeInTheDocument();

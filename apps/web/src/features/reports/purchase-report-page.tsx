@@ -15,6 +15,7 @@ import { useAppForm } from "@/hooks/use-app-form";
 import { useBusinessDate } from "@/hooks/use-business-date";
 import { ApiError } from "@/lib/api";
 import { formatInteger, formatMoney, formatWeight } from "@/lib/format";
+import { useMe } from "@/lib/queries";
 import { formatDocDateTime } from "@/lib/thai-date";
 import { useTranslation } from "./i18n";
 import {
@@ -36,6 +37,7 @@ import {
   ReportSkeleton,
   TableFrame,
 } from "./report-parts";
+import { csvNameSuffix } from "./csv-name";
 import { type FieldProblem, fieldProblem, problemOf } from "./report-problem";
 import { type DatePreset, type PurchaseSearch, isoToThaiInput, monthStart, presetRange } from "./search";
 
@@ -52,6 +54,7 @@ export function PurchaseReportPage() {
   const { t: tc } = useCommonTranslation("common");
   const search = route.useSearch();
   const navigate = route.useNavigate();
+  const me = useMe();
   const today = useBusinessDate();
   // ไม่ระบุช่วง = วันที่ 1 ของเดือนนี้ ถึงวันนี้ (ตามเวลาไทย) — ค่าเดียวกับค่าเริ่มต้นของ API
   const params: PurchaseParams = {
@@ -83,7 +86,12 @@ export function PurchaseReportPage() {
         actions={
           <CsvDownloadButton
             href={purchaseCsvHref(params)}
-            filename={t("csv.purchaseFile", { from: params.date_from, to: params.date_to })}
+            disabled={!validRange}
+            fallbackName={t("csv.purchaseFile", {
+              from: params.date_from,
+              to: params.date_to,
+              suffix: csvNameSuffix(me.branches.find((branch) => branch.id === params.branch_id)?.code, params.metal),
+            })}
           />
         }
       />
@@ -299,11 +307,14 @@ function PurchaseSummary({ total }: { total: PurchaseReport["total"] }) {
       <h2 id={titleId} className="sr-only">
         {t("purchase.summary.title")}
       </h2>
-      <dl className="grid gap-4 sm:grid-cols-3">
+      <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {items.map((item) => (
-          <div key={item.label} className="grid gap-1 rounded-xl border bg-card p-4 text-card-foreground shadow-sm">
+          <div
+            key={item.label}
+            className="grid min-w-0 gap-1 rounded-xl border bg-card p-4 text-card-foreground shadow-sm"
+          >
             <dt className="text-sm text-muted-foreground">{item.label}</dt>
-            <dd className="text-2xl font-semibold tabular-nums">{item.value}</dd>
+            <dd className="text-2xl font-semibold tabular-nums [overflow-wrap:anywhere]">{item.value}</dd>
           </div>
         ))}
       </dl>

@@ -1,13 +1,13 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { CircleAlert, Download, Info, LoaderCircle } from "lucide-react";
-import { type ReactNode, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { LabeledSelect, type LabeledSelectProps } from "@/components/labeled-select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { NativeSelectOption } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableCell } from "@/components/ui/table";
-import { apiBlob, errorMessage } from "@/lib/api";
+import { apiFile, errorMessage } from "@/lib/api";
 import { navigation } from "@/lib/navigation";
 import { notifyError, notifySuccess } from "@/lib/notify";
 import { useMe } from "@/lib/queries";
@@ -61,33 +61,39 @@ export function BranchSelect(props: Omit<LabeledSelectProps, "label" | "children
  * ขอผ่าน fetch เพื่อรู้ผล (U4/U5): ระหว่างโหลดปุ่มกดไม่ได้ + หมุน · สำเร็จ/ล้มเหลวมี toast บนกลาง
  * (เดิมเป็น `<a download>` — browser ไม่บอกว่าไฟล์มาหรือไม่ ผู้ใช้จึงไม่รู้เมื่อ 403/ล่ม)
  */
-export function CsvDownloadButton({ href, filename }: { href: `/api/${string}`; filename: string }) {
+export function CsvDownloadButton({
+  href,
+  fallbackName,
+  disabled = false,
+}: {
+  href: `/api/${string}`;
+  /** ชื่อไฟล์เมื่อเซิร์ฟเวอร์ไม่ส่ง Content-Disposition (ปกติใช้ชื่อของเซิร์ฟเวอร์: มีรหัสสาขาเมื่อกรองสาขา) */
+  fallbackName: string;
+  /** ตัวกรองที่ใช้อยู่ไม่ถูกต้อง (เช่น ช่วงกลับด้าน) — ไม่มีอะไรให้ดาวน์โหลด */
+  disabled?: boolean;
+}) {
   const { t } = useTranslation("reports");
-  const [pending, setPending] = useState(false);
-  const busy = useRef(false);
-
-  const download = async () => {
-    if (busy.current) return;
-    busy.current = true;
-    setPending(true);
-    try {
-      navigation.saveBlob(await apiBlob(href), filename);
-      notifySuccess(t("csv.done", { file: filename }), { id: CSV_TOAST });
-    } catch (error) {
-      notifyError(t("csv.failed", { reason: errorMessage(error) }), { id: CSV_TOAST });
-    } finally {
-      busy.current = false;
-      setPending(false);
-    }
-  };
+  // useMutation: 401 ไปทางเดียวกับ query อื่น (MutationCache ใน router.tsx → /login?redirect=…) แทนที่จะแค่ toast
+  const download = useMutation({
+    mutationFn: () => apiFile(href),
+    onSuccess: ({ blob, filename }) => {
+      const name = filename ?? fallbackName;
+      navigation.saveBlob(blob, name);
+      notifySuccess(t("csv.done", { file: name }), { id: CSV_TOAST });
+    },
+    onError: (error) => notifyError(t("csv.failed", { reason: errorMessage(error) }), { id: CSV_TOAST }),
+  });
+  const pending = download.isPending;
 
   return (
     <Button
       type="button"
       variant="outline"
-      disabled={pending}
+      disabled={pending || disabled}
       aria-busy={pending || undefined}
-      onClick={() => void download()}
+      onClick={() => {
+        if (!pending) download.mutate();
+      }}
     >
       {pending ? (
         <LoaderCircle className="motion-safe:animate-spin" aria-hidden="true" />
