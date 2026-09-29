@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { ApiError, apiBlob, apiFetch, errorMessage } from "./api";
+import { ApiError, apiBlob, apiFetch, apiFile, errorMessage, filenameFromDisposition } from "./api";
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -140,5 +140,31 @@ describe("apiBlob — ไฟล์ส่วนตัวผ่าน cookie sessi
 
     stubFetch(() => Promise.reject(new TypeError("Failed to fetch")));
     expect(await caught(apiBlob("/api/customers/c1/photo"))).toMatchObject({ status: 0 });
+  });
+});
+
+describe("apiFile — ไฟล์พร้อมชื่อจาก Content-Disposition", () => {
+  it.each([
+    ['attachment; filename="purchase_2026-09-01_2026-09-29_00001.csv"', "purchase_2026-09-01_2026-09-29_00001.csv"],
+    ["attachment; filename=stock_2026-09-29.csv", "stock_2026-09-29.csv"],
+    ["attachment; filename*=UTF-8''%E0%B8%AA%E0%B8%95%E0%B9%87%E0%B8%AD%E0%B8%81.csv", "สต็อก.csv"],
+    // filename* ชนะ filename
+    [`attachment; filename="x.csv"; filename*=UTF-8''%E0%B8%81.csv`, "ก.csv"],
+    ["attachment; filename*=UTF-8''%E0%B8", null],
+    ["attachment", null],
+    [null, null],
+  ])("%s → %s", (header, expected) => {
+    // filename* ที่ decode ไม่ได้และไม่มี filename ธรรมดา = null
+    expect(filenameFromDisposition(header)).toBe(expected);
+  });
+
+  it("คืน blob + ชื่อไฟล์ · error เป็น ApiError", async () => {
+    stubFetch(new Response("a,b", { headers: { "Content-Disposition": 'attachment; filename="r_00001.csv"' } }));
+    const file = await apiFile("/api/reports/stock?format=csv");
+    expect(file.filename).toBe("r_00001.csv");
+    expect(await file.blob.text()).toBe("a,b");
+
+    stubFetch(json({ error: "forbidden" }, 403));
+    expect(await caught(apiFile("/api/reports/stock?format=csv"))).toMatchObject({ status: 403 });
   });
 });
