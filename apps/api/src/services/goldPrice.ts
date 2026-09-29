@@ -2,6 +2,7 @@ import { D, type GoldPriceSetting, deriveGoldPrice, fmtInt, fmtMoney, parseDecim
 import { type Db, auditLog, goldPrice, goldPriceSetting } from "@ong/db";
 import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { BranchRef } from "../lib/scope";
+import type { Executor } from "./adminCommon";
 
 export class GoldPriceInputError extends Error {}
 
@@ -148,6 +149,18 @@ const auditValues = (r: GoldPriceRow) => ({
 
 const branchRef = (b: BranchRef) => ({ id: b.id, code: b.code, name: b.name });
 
+/**
+ * ล็อกต่อ (ราคากลาง หรือสาขา, วันที่) ตลอดทรานแซกชัน (F11)
+ * `SELECT … FOR UPDATE` ล็อกแถวที่มีอยู่แล้วเท่านั้น — ราคาแรกของวันยังไม่มีแถวให้ล็อก สอง request แรกของวันที่ยิงพร้อมกัน
+ * จึงเห็น "ก่อน" เป็น null ทั้งคู่ (audit กลายเป็น create ซ้ำสองครั้งแทนที่จะเป็น create แล้ว update)
+ * ต้องเรียกก่อน SELECT เสมอ — คีย์ = hash ของ scope+วันที่ (`hashtextextended`) · ปล่อยเองตอนจบทรานแซกชัน (xact)
+ * ตัวที่ยิงทีหลังจึงรอจนตัวแรก commit ก่อน แล้วเห็นแถวที่เพิ่งสร้างจริง → บันทึกเป็น update ถูกต้อง
+ */
+async function lockPriceRow(tx: Executor, branchId: string | null, date: string): Promise<void> {
+  const key = `gold_price:${branchId ?? "central"}:${date}`;
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
+}
+
 /** ตั้งราคากลางของวัน (upsert) + audit ในทรานแซกชันเดียว (R12) */
 export async function setCentralPrice(
   db: Db,
@@ -157,6 +170,7 @@ export async function setCentralPrice(
   confirmedWarning: boolean,
 ) {
   return db.transaction(async (tx) => {
+    await lockPriceRow(tx, null, date);
     const [before] = await tx
       .select()
       .from(goldPrice)
@@ -198,6 +212,7 @@ export async function setBranchPrice(
   confirmedWarning: boolean,
 ) {
   return db.transaction(async (tx) => {
+    await lockPriceRow(tx, target.id, date);
     const [before] = await tx
       .select()
       .from(goldPrice)
