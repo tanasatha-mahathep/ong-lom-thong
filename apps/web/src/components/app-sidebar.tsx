@@ -1,9 +1,10 @@
 import type { ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
+import { AppVersion } from "@/components/app-version";
 import { BranchChangedNotice, BranchSwitchConfirm, BranchSwitcher } from "@/components/branch-switcher";
 import { NavMain } from "@/components/nav-main";
 import { NavUser } from "@/components/nav-user";
-import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarRail } from "@/components/ui/sidebar";
+import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader } from "@/components/ui/sidebar";
 import { useBranchHotkeys, useBranchSwitch } from "@/hooks/use-branch-switch";
 import { useMe } from "@/lib/queries";
 
@@ -17,7 +18,7 @@ export function AppSidebar(props: ComponentProps<typeof Sidebar>) {
 
   return (
     <>
-      {/* ย่อเป็นแถบไอคอนแบบ sidebar-07 (collapsible="icon") — Ctrl/⌘+B หรือปุ่มในหัวหน้า · จำใน cookie */}
+      {/* ย่อเป็นแถบไอคอนแบบ sidebar-07 (collapsible="icon") — Ctrl/⌘+B หรือปุ่มในหัวหน้า · จำใน cookie · ไม่มี SidebarRail (เจ้าของไม่ต้องการเส้น/เงาตอน hover ที่ขอบ) */}
       <Sidebar collapsible="icon" {...props}>
         {/* landmark ของทั้งแถบ — หัว (สาขา) และเมนูผู้ใช้ไม่หลุดอยู่นอก landmark */}
         <aside aria-label={t("sidebar")} className="flex h-full min-h-0 w-full flex-col">
@@ -29,9 +30,9 @@ export function AppSidebar(props: ComponentProps<typeof Sidebar>) {
           </SidebarContent>
           <SidebarFooter>
             <NavUser me={me} />
+            <AppVersion />
           </SidebarFooter>
         </aside>
-        <SidebarRail />
       </Sidebar>
       <BranchSwitchConfirm state={branchSwitch} />
       <BranchChangedNotice state={branchSwitch} />

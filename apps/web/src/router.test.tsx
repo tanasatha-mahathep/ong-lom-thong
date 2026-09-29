@@ -17,7 +17,7 @@ describe("guard ของหน้าในแอป", () => {
     fakeApi({
       // ครั้งแรกยังใช้ได้ หลังจากนั้น session หมดอายุ
       "GET /api/me": () => (meCalls++ === 0 ? json(makeMe("staff")) : json({ error: "unauthorized" }, 401)),
-      "GET /api/gold-price/today": () => json({ error: "unauthorized" }, 401),
+      "GET /api/customers": () => json({ error: "unauthorized" }, 401),
     });
     const router = renderApp("/customers");
 

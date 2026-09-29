@@ -20,6 +20,7 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { BrandMark } from "@/components/brand-mark";
 import { RailTooltip } from "@/components/rail-tooltip";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
 import type { useBranchSwitch } from "@/hooks/use-branch-switch";
@@ -75,12 +76,9 @@ export function BranchChangedNotice({ state }: { state: ReturnType<typeof useBra
   );
 }
 
+/** ช่องสี่เหลี่ยมหัว sidebar = โลโก้ร้าน (ประดับ — ชื่อสาขาอยู่ข้าง ๆ) · ย่อเป็นแถบไอคอนก็เหลือแค่ช่องนี้ */
 function BranchTile() {
-  return (
-    <span className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-      <Store className="size-4" aria-hidden="true" />
-    </span>
-  );
+  return <BrandMark className="size-8" />;
 }
 
 /** ชื่อสาขา (ตัวหนา) + รหัสสาขา — "สาขาปัจจุบัน" สำหรับ screen reader อยู่ในชื่อปุ่มด้วย */
