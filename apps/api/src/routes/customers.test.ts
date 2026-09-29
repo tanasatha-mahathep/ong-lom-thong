@@ -169,6 +169,29 @@ describe.skipIf(!available)("ลูกค้า (Siam ID · R12 · R13) — /api
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(PNG);
   });
 
+  // รูปที่แนบคือสำเนาบัตร (ต้นฉบับของไฟล์ idcard — services/receiptPdf.ts) · lib/fetchSite.ts กันลิงก์ข้ามเว็บ
+  it("รูปสำเนาบัตร: Sec-Fetch-Site cross-site = 403 · same-origin / ไม่มี header ยังเปิดได้", async () => {
+    const fetchSite = (path: string, value?: string) =>
+      t.app.request(path, {
+        headers: {
+          origin: "http://localhost:8787",
+          cookie: cookies.staff ?? "",
+          ...(value === undefined ? {} : { "sec-fetch-site": value }),
+        },
+      });
+    const site = (value?: string) => fetchSite(`/api/customers/${idA}/photo`, value);
+    for (const value of ["cross-site", "same-site"]) {
+      const res = await site(value);
+      expect(res.status, value).toBe(403);
+      expect(await res.json()).toEqual({ error: "เปิดไฟล์นี้จากเว็บอื่นไม่ได้ — เปิดจากหน้าระบบโดยตรง" });
+    }
+    for (const value of ["same-origin", "none", undefined]) {
+      expect((await site(value)).status, String(value)).toBe(200);
+    }
+    // หน้าลูกค้าเอง (JSON) ไม่ได้รับผลกระทบ
+    expect((await fetchSite(`/api/customers/${idA}`, "cross-site")).status).toBe(200);
+  });
+
   it("audit ตอนเพิ่ม — เลขบัตรในบันทึกถูกมาสก์ (R12 · PDPA)", async () => {
     const rows = await t.db
       .select()

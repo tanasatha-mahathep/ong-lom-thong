@@ -61,8 +61,33 @@ const EnvSchema = z
       .trim()
       .regex(/^\d{13}$/, "ต้องเป็นตัวเลข 13 หลัก ไม่มีขีด/ช่องว่าง")
       .refine(isValidNationalId, "หลักตรวจสอบไม่ถูกต้อง — พิมพ์ผิด?"),
+    // ราคาอ้างอิงสมาคมค้าทองคำ (แสดง/เติมค่าเริ่มต้นเท่านั้น — ไม่ตั้งราคาร้านเอง) · ไม่ใช่ค่าลับ
+    // ค่าเริ่มต้น "none" = ปิด: GET /api/gold-price/reference ตอบ 503 reason "disabled" (ไม่มีราคาปลอม)
+    // "goldtraders-html" = หน้า HTML ของสมาคม · "thai-gold-api" = JSON ของบุคคลที่สามที่ดึงจากหน้านั้น
+    GOLD_REFERENCE_PROVIDER: z.enum(["none", "goldtraders-html", "thai-gold-api"]).default("none"),
+    GOLD_REFERENCE_URL: z
+      .string()
+      .trim()
+      .optional()
+      .transform((v) => v || undefined)
+      .pipe(
+        z
+          .url({ protocol: /^https$/, error: "ต้องเป็น URL https" })
+          .refine((v) => {
+            const u = new URL(v);
+            return u.username === "" && u.password === "";
+          }, "ห้ามใส่ user/password ใน URL")
+          .optional(),
+      ),
   })
   .superRefine((env, ctx) => {
+    if (env.GOLD_REFERENCE_PROVIDER !== "none" && !env.GOLD_REFERENCE_URL) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["GOLD_REFERENCE_URL"],
+        message: "ต้องตั้งเมื่อเปิด GOLD_REFERENCE_PROVIDER",
+      });
+    }
     // production ห้ามใช้ค่าตัวอย่างจาก .env.example
     if (env.NODE_ENV !== "production") return;
     if (PLACEHOLDER.test(env.BETTER_AUTH_SECRET)) {

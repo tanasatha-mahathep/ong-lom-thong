@@ -221,6 +221,31 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
     expect(views.map((v) => v.userId).sort()).toEqual([s.userIds.acct, s.userIds.acct, s.userIds.admin].sort());
   });
 
+  // lib/fetchSite.ts ต่อจริงในแอปและอยู่ก่อน handler ที่ลง audit — ลิงก์จากเว็บอื่นพา browser ที่ login อยู่มาโหลด
+  // ไฟล์ไม่ได้ และไม่ทิ้ง audit ที่ดูเหมือนพนักงานเปิดเอง (cookie SameSite=Lax ยังถูกแนบมากับ top-level GET)
+  it("Sec-Fetch-Site: cross-site เข้าสำเนาบัตร/ใบรับซื้อ = 403 ไม่ได้ไฟล์ ไม่ลง audit", async () => {
+    const before = (await audits("buy.idcard_view", billA.id)).length;
+    const site = (path: string, who: string, value: string) =>
+      t.app.request(`/api/buy${path}`, {
+        headers: { origin: "http://localhost:8787", cookie: s.cookies[who] ?? "", "sec-fetch-site": value },
+      });
+
+    for (const path of [`/${billA.id}/idcard`, `/${billA.id}/pdf`]) {
+      for (const value of ["cross-site", "same-site"]) {
+        const res = await site(path, "acct", value);
+        expect(res.status, `${path} ${value}`).toBe(403);
+        expect(await res.json()).toEqual({ error: "เปิดไฟล์นี้จากเว็บอื่นไม่ได้ — เปิดจากหน้าระบบโดยตรง" });
+      }
+    }
+    expect(await audits("buy.idcard_view", billA.id)).toHaveLength(before);
+
+    // หน้าระบบของเราเอง (same-origin) และ client ที่ไม่ส่ง header เลย ยังใช้ได้ตามปกติ
+    expect((await site(`/${billA.id}/idcard`, "acct", "same-origin")).status).toBe(200);
+    expect((await site(`/${billA.id}/pdf`, "acct", "none")).status).toBe(200);
+    expect((await get(`/${billA.id}/pdf`, "acct")).status).toBe(200);
+    expect(await audits("buy.idcard_view", billA.id)).toHaveLength(before + 1);
+  });
+
   it("บิลที่ลูกค้าไม่มีรูปบัตร: ไม่มีสำเนาบัตร (404) · ใบรับซื้อ ready", async () => {
     const bill = await save({ customer_id: s.custC });
     await t.tasks.idle();

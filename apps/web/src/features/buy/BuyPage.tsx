@@ -5,12 +5,14 @@ import { PageHeader } from "@/components/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { type Branch, type Me, useMe } from "@/lib/queries";
+import { useUnsavedChanges } from "@/lib/unsaved-changes";
 import { BillHeaderCard } from "./components/BillHeaderCard";
 import { CustomerCard } from "./components/CustomerCard";
 import { LinesCard } from "./components/LinesCard";
 import { PaymentsCard } from "./components/PaymentsCard";
 import { ConflictDialog, SaveBar } from "./components/SaveBar";
 import { useTranslation } from "./i18n";
+import type { BuyState } from "./model";
 import { metalsQuery } from "./queries";
 import { useBuyController } from "./use-buy-controller";
 
@@ -49,8 +51,27 @@ export function BuyPage() {
       </>
     );
   }
-  // สลับสาขากลางบิล: บิลที่กรอกอยู่ยังอยู่ · quote โหลดใหม่ หัวบิลแสดงสาขาใหม่ (บันทึกลงสาขาที่ทำงานเสมอ)
+  // สลับสาขากลางบิล: ถามยืนยันก่อน แล้วหน้าเริ่มใหม่ทั้งหน้า (Outlet ใน _app.tsx mount ใหม่ตามสาขา)
   return <BuyForm me={me} />;
+}
+
+/** มีอะไรกรอกไว้ที่หายได้ถ้าหน้าเริ่มใหม่ — ลูกค้า · แถว · การชำระ · ช่องที่พิมพ์ค้าง · ย้อนหลัง */
+function isBillDirty(state: BuyState): boolean {
+  return (
+    state.customer !== null ||
+    state.lines.length > 0 ||
+    state.payments.length > 0 ||
+    state.backdate.enabled ||
+    [
+      state.idText,
+      state.searchText,
+      state.detail,
+      state.lineEntry.weight_g,
+      state.lineEntry.amount,
+      state.paymentEntry.amount,
+      state.paymentEntry.bank,
+    ].some((text) => text.trim() !== "")
+  );
 }
 
 /**
@@ -74,6 +95,8 @@ function BuyForm({ me }: { me: Me }) {
   const { t } = useTranslation("buy");
   const { data: metals } = useSuspenseQuery(metalsQuery);
   const c = useBuyController(me, metals);
+  // สลับสาขาล้างบิลที่กรอกค้าง — ถามยืนยันก่อน (components/branch-switcher.tsx)
+  useUnsavedChanges(isBillDirty(c.state));
 
   return (
     // scroll-mb: ช่องที่โฟกัสต้องไม่ถูกแถบบันทึกด้านล่างบัง (WCAG 2.4.11)

@@ -73,7 +73,7 @@ export function DataTable<TData>({
   const rows = table.getRowModel().rows;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex min-w-0 flex-col gap-3">
       <div className="overflow-hidden rounded-lg border bg-card">
         <Table aria-busy={isLoading}>
           <TableCaption className="sr-only">{caption}</TableCaption>

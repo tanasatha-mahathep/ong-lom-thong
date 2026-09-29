@@ -1,0 +1,47 @@
+name: codeql
+
+# GitHub code scanning (CodeQL) — repo เพิ่ง public (28 ก.ย. 2026) จึงใช้ได้ฟรี ก่อนหน้านี้ private ใช้ไม่ได้
+# advisory เสริม Semgrep CE / OSV-Scanner / gitleaks (defence in depth) — ไม่ใช่ ring 0/1 ของ ci.yml
+# make promote และ Railway ไม่รอ workflow นี้ · แดง = ดูที่แท็บ Security > Code scanning ไม่ใช่ block merge
+# advanced setup (เขียน workflow เอง ไม่ใช่ "Default setup" ปุ่มเดียวใน Settings) — คุมภาษา/query suite/trigger ได้เอง
+# language: javascript-typescript · build-mode: none (interpreted — CodeQL อ่านซอร์สตรง ไม่ต้อง build)
+on:
+  pull_request:
+    branches: [dev]
+  push:
+    branches: [main, staging, testing, dev]
+  schedule:
+    - cron: "38 2 * * 3" # พุธ 09:38 เวลาไทย (02:38 UTC) — นอกต้นชั่วโมงที่คิว GitHub แน่น คนละวันกับ security.yml (จันทร์)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# actions ปักที่ commit SHA + คอมเมนต์ vX.Y.Z (Renovate อัปเดตให้)
+jobs:
+  analyze:
+    name: analyze (javascript-typescript)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write # อัป SARIF ขึ้นแท็บ Security > Code scanning
+      actions: read # codeql-action/init อ่าน workflow run ปัจจุบันเพื่อตั้งค่า analysis
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: initialize CodeQL
+        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          languages: javascript-typescript
+          build-mode: none
+          queries: security-extended
+      - name: perform CodeQL analysis
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          category: "/language:javascript-typescript"

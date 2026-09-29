@@ -1,0 +1,36 @@
+name: dependency-review
+
+# actions/dependency-review-action — ตรวจ dependency ใหม่/เปลี่ยนใน diff ของ PR กับ GitHub Advisory Database
+# repo เพิ่ง public (28 ก.ย. 2026) จึงใช้ได้ฟรี — advisory เสริม Semgrep CE / OSV-Scanner / gitleaks (defence in
+# depth) ไม่ใช่ ring 0/1 ของ ci.yml · make promote และ Railway ไม่รอ workflow นี้
+# comment-summary-in-pr: never → ไม่ต้องมีสิทธิ์ pull-requests: write · contents: read พอ (อ่านอย่างเดียว)
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-review:
+    name: dependency review (fail on high · deny GPL-3.0/AGPL-3.0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: dependency review
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: never
+          # ผลิตภัณฑ์ปิด (closed-source, commercial) — GPL-3.0/AGPL-3.0 บังคับเปิดซอร์สทั้งโปรแกรมเมื่อแจกจ่าย
+          # ใช้ไม่ได้ · LGPL/MPL (copyleft เฉพาะไฟล์ที่แก้ไข) อนุโลม — ไม่ใส่ในลิสต์นี้ (deny-list ไม่ใช่ allow-list)
+          # deny-licenses ถูกประกาศ deprecate ในตัว action (อาจย้ายไป allow-licenses ในเมเจอร์ถัดไป — ดู
+          # actions/dependency-review-action#938) แต่ตอนนี้ deny-list ตรงกับนโยบาย "ห้ามเฉพาะที่ระบุ" กว่า
+          # allow-licenses ที่ต้องแจกแจงทุก license ที่อนุญาต (เสี่ยง false-positive กับ license ที่ยังไม่รู้จัก)
+          deny-licenses: GPL-3.0-only, GPL-3.0-or-later, AGPL-3.0-only, AGPL-3.0-or-later

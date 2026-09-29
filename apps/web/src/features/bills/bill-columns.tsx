@@ -3,7 +3,7 @@ import { type ColumnDef } from "@tanstack/react-table";
 import { type ComponentProps } from "react";
 import { Badge } from "@/components/ui/badge";
 import { EMPTY, formatMoney, formatWeight } from "@/lib/format";
-import { isoToThaiInput } from "@/lib/thai-date";
+import { formatDocDateTime } from "@/lib/thai-date";
 import { cn } from "@/lib/utils";
 import { type Bill } from "./api";
 import { type BillsKey, type BillsT } from "./i18n";
@@ -38,7 +38,7 @@ export interface BillColumnsOptions {
 export function makeBillColumns({ t, showBranch, compact }: BillColumnsOptions): ColumnDef<Bill>[] {
   const statusBadge = (bill: Bill) => {
     if (bill.status === "active") return null;
-    return <Badge variant="outline">{isVoid(bill) ? t("status.void") : bill.status}</Badge>;
+    return <Badge variant="destructive">{isVoid(bill) ? t("status.void") : bill.status}</Badge>;
   };
 
   return [
@@ -66,7 +66,7 @@ export function makeBillColumns({ t, showBranch, compact }: BillColumnsOptions):
       header: compact ? t("columns.time") : t("columns.date"),
       cell: ({ row: { original: bill } }) => (
         <span className={cn("whitespace-nowrap tabular-nums", voidText(bill))}>
-          {compact ? bill.time : t("cells.dateTime", { date: isoToThaiInput(bill.date), time: bill.time })}
+          {compact ? bill.time : formatDocDateTime(bill.date, bill.time)}
         </span>
       ),
     },

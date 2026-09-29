@@ -8,7 +8,22 @@ export default {
     shopName: "โอเอ็นจี หลอมทอง",
     retry: "ลองใหม่",
     saving: "กำลังบันทึก…",
+    /** ชั้นบังหน้าจอระหว่างพาไปหน้าอื่น/โหลดใหม่หลังการกระทำ (components/blocking-overlay.tsx) */
+    blocking: "กำลังทำงาน…",
+    /** ชั้นบังหน้าจอค้างเกินเวลา (lib/blocking.ts) — ปลดให้ทำงานต่อได้ */
+    blockingTimeout: "ใช้เวลานานผิดปกติ — ตรวจการเชื่อมต่อ แล้วลองใหม่หรือรีเฟรชหน้า",
+    /** บันทึกสำเร็จแล้วแต่ขั้นถัดไป (นำทาง/พิมพ์) ล้ม — ห้ามให้บันทึกซ้ำ (hooks/use-app-form.ts) */
+    afterSaveFailed: "บันทึกแล้ว แต่เปิดหน้าถัดไปไม่ได้ — ห้ามบันทึกซ้ำ รีเฟรชหน้าเพื่อทำงานต่อ",
     baht: "บาท",
+    /** ช่องวันที่พิมพ์เอง พ.ศ. (components/thai-date-field.tsx) — ข้อความชุดเดียวทุกหน้า */
+    dateField: {
+      placeholder: "วว/ดด/ปปปป",
+      hint: "พ.ศ. เช่น 29/09/2569",
+      required: "กรอกวันที่",
+      invalid: "วันที่ไม่ถูกต้อง — พิมพ์ วว/ดด/ปปปป (พ.ศ.) เช่น 29/09/2569",
+      tooEarly: "วันที่ต้องตั้งแต่ 1 ม.ค. 2543",
+      range: "วันที่เริ่มต้องไม่เกินวันที่สิ้นสุด",
+    },
     noBranch: "ยังไม่ได้เลือกสาขา",
     branchCode: "รหัสสาขา {{code}}",
     loadFailed: "โหลด{{what}}ไม่ได้",
@@ -63,7 +78,11 @@ export default {
     notifications: "การแจ้งเตือน",
     closeNotification: "ปิดการแจ้งเตือน",
     currentBranch: "สาขาปัจจุบัน",
-    quickBuy: "ซื้อเข้า",
+    /** ปุ่มย้อนกลับ [←] หน้าชื่อหน้าเอกสาร (PageHeader `back`) */
+    back: {
+      customers: "กลับไปรายการลูกค้า",
+      bills: "กลับไปค้นบิล",
+    },
     groups: {
       reports: "รายงาน",
       settings: "ตั้งค่า",
@@ -99,15 +118,36 @@ export default {
       stock: "สต็อกคงเหลือ",
       export: "ส่งบัญชีรายเดือน",
     },
+    /** ตัวเลือกสาขาที่หัว sidebar (แบบ TeamSwitcher ของ sidebar-07) */
+    branchSwitcher: {
+      label: "สาขา",
+      /** ปุ่มลัดของสาขาที่ n ในรายการ — Alt (ไม่ใช่ Ctrl/⌘ ที่ browser ใช้สลับแท็บ) */
+      shortcut: "Alt+{{n}}",
+      manage: "จัดการสาขา",
+      switched: "เปลี่ยนสาขาเป็น {{name}} แล้ว",
+      failed: "เปลี่ยนสาขาไม่สำเร็จ — {{reason}}",
+      confirmTitle: "ข้อมูลในหน้านี้ยังไม่ได้บันทึก",
+      confirmBody: "ถ้าเปลี่ยนเป็น {{name}} ข้อมูลที่กรอกค้างไว้จะหายไป",
+      confirmStay: "อยู่ต่อ",
+      confirmSwitch: "ทิ้งข้อมูลและเปลี่ยนสาขา",
+      savingWait: "กำลังบันทึก… รอให้เสร็จก่อนเปลี่ยนสาขา",
+      changedElsewhere: "สาขาถูกเปลี่ยนเป็น {{name}} จากที่อื่น",
+      changedTitle: "สาขาถูกเปลี่ยนจากที่อื่น",
+      changedBody:
+        "ตอนนี้บัญชีนี้ทำงานที่ {{name}} (เปลี่ยนจากแท็บหรือเครื่องอื่น) — ข้อมูลที่กรอกค้างไว้บันทึกไม่ได้ กรุณาโหลดหน้าใหม่",
+      changedReload: "โหลดหน้าใหม่",
+    },
+    /** เวอร์ชันใต้เมนูผู้ใช้ (components/app-version.tsx) */
+    appVersion: {
+      plain: "v{{version}}",
+      withCommit: "v{{version}} · {{commit}}",
+    },
     userMenu: {
-      switchBranch: "สลับสาขา",
       signOut: "ออกจากระบบ",
-      switched: "สลับสาขาแล้ว — {{name}}",
-      switchFailed: "สลับสาขาไม่สำเร็จ — {{reason}}",
       signOutFailed: "ออกจากระบบไม่สำเร็จ — {{reason}}",
     },
     theme: {
-      label: "เปลี่ยนธีม",
+      label: "ธีม",
       light: "สว่าง",
       dark: "มืด",
       system: "ตามระบบ",

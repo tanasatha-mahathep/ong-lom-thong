@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { CircleAlert, CircleCheck, Pencil, X } from "lucide-react";
 import { useCallback, useState } from "react";
 import { z } from "zod";
@@ -67,7 +67,7 @@ function CustomerPage() {
   if (detail.isPending) {
     return (
       <>
-        <PageHeader />
+        <PageHeader back="/customers" />
         <Skeleton className="h-96 w-full max-w-3xl" role="status" aria-label={t("detail.loading")} />
       </>
     );
@@ -76,7 +76,7 @@ function CustomerPage() {
     const notFound = detail.error instanceof ApiError && detail.error.status === 404;
     return (
       <>
-        <PageHeader />
+        <PageHeader back="/customers" />
         <Alert variant="destructive" className="max-w-3xl">
           <CircleAlert aria-hidden="true" />
           <AlertTitle>{t(notFound ? "detail.notFound" : "detail.loadFailed")}</AlertTitle>
@@ -86,9 +86,6 @@ function CustomerPage() {
                 {t("detail.retry")}
               </Button>
             )}
-            <Button asChild variant="outline" size="sm">
-              <Link to="/customers">{t("detail.backToList")}</Link>
-            </Button>
           </AlertDescription>
         </Alert>
       </>
@@ -106,7 +103,7 @@ function CustomerPage() {
   if (search.mode === "edit") {
     return (
       <>
-        <PageHeader description={customer.name_th} />
+        <PageHeader back="/customers" description={customer.name_th} />
         <div ref={modeChanged ? focusOnMount : undefined} tabIndex={-1}>
           <EditCustomer
             customer={customer}
@@ -129,16 +126,7 @@ function CustomerPage() {
 
   return (
     <>
-      <PageHeader
-        actions={
-          <>
-            {editButton}
-            <Button asChild variant="outline">
-              <Link to="/customers">{t("detail.backToList")}</Link>
-            </Button>
-          </>
-        }
-      />
+      <PageHeader back="/customers" actions={editButton} />
       {search.saved && (
         <SavedBanner
           saved={search.saved}

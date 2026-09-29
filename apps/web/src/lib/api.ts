@@ -105,9 +105,33 @@ export async function apiFetch<T>(
  * ไม่ใช้ HTTP cache ของ browser (ข้อมูลส่วนบุคคล) · error เป็น ApiError รูปเดียวกับ apiFetch
  */
 export async function apiBlob(path: ApiPath, { signal }: { signal?: AbortSignal } = {}): Promise<Blob> {
+  return (await apiFile(path, { signal })).blob;
+}
+
+/** ชื่อไฟล์จาก Content-Disposition — รับ `filename*=UTF-8''…` (RFC 5987) ก่อน แล้ว `filename="…"` · ไม่มี/อ่านไม่ได้ = null */
+export function filenameFromDisposition(header: string | null): string | null {
+  if (!header) return null;
+  const star = /filename\*\s*=\s*([^']*)'[^']*'([^;]+)/i.exec(header);
+  if (star?.[2]) {
+    try {
+      return decodeURIComponent(star[2].trim());
+    } catch {
+      // ตกไปใช้ filename ธรรมดา
+    }
+  }
+  const plain = /filename\s*=\s*(?:"([^"]+)"|([^;]+))/i.exec(header);
+  const name = (plain?.[1] ?? plain?.[2])?.trim();
+  return name || null;
+}
+
+/** ไฟล์ + ชื่อที่เซิร์ฟเวอร์ตั้ง (Content-Disposition) — เหมือน apiBlob */
+export async function apiFile(
+  path: ApiPath,
+  { signal }: { signal?: AbortSignal } = {},
+): Promise<{ blob: Blob; filename: string | null }> {
   const res = await send(path, { signal, cache: "no-store" });
   if (!res.ok) throw toApiError(res.status, res.statusText, await readBody(res));
-  return res.blob();
+  return { blob: await res.blob(), filename: filenameFromDisposition(res.headers.get("Content-Disposition")) };
 }
 
 const THAI = /[\u0E00-\u0E7F]/;
