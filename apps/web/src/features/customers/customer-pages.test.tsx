@@ -15,6 +15,12 @@ const png = () => new Response(PNG_1X1, { headers: { "Content-Type": "image/png"
 // เพดานเท่านั้น: find* คืนทันทีที่เจอ เทสต์ที่ผ่านจึงไม่ช้าลง
 configure({ asyncUtilTimeout: 10_000 });
 
+/** query string ของทุกคำขอ GET /api/customers ตามลำดับ */
+const listQueries = (api: ReturnType<typeof fakeApi>) =>
+  api
+    .callsTo("GET", "/api/customers")
+    .map((call) => Object.fromEntries(new URL(call.path, "http://test.local").searchParams));
+
 beforeEach(() => {
   Object.assign(URL, { createObjectURL: vi.fn(() => "blob:photo"), revokeObjectURL: vi.fn() });
 });
@@ -83,6 +89,41 @@ describe("/customers — รายการและค้นหา", () => {
     await user.clear(box);
     await user.type(box, "สมชาย{Enter}");
     await waitFor(() => expect(router.state.location.search).toEqual({ q: "สมชาย" }));
+  });
+
+  it.each([
+    ["จัดกลุ่มแบบหน้าบัตร", "1 1037 00123 45 8"],
+    ["ขีดคั่น", "1-1037-00123-45-8"],
+    ["12 หลัก", "110370012345"],
+    ["ตามด้วยชื่อ", "1103700123458 สมชาย"],
+  ])("เลขบัตรแบบ%s: ค้นได้แต่ไม่ลงใน URL", async (_name, typed) => {
+    const api = fakeApi({
+      ...shell,
+      "GET /api/customers": () => json({ items: [CUSTOMER_ROW], page: 1, has_more: false }),
+    });
+    const router = renderApp("/customers");
+    const user = userEvent.setup();
+    const box = await screen.findByLabelText("ค้นหาลูกค้า");
+
+    await user.type(box, `${typed}{Enter}`);
+
+    await waitFor(() => expect(listQueries(api)).toContainEqual({ q: typed }));
+    expect(router.state.location.search).toEqual({});
+    expect(box).toHaveValue(typed);
+  });
+
+  it("เบอร์โทร 10 หลักไม่ใช่เลขบัตร: ลงใน URL ตามเดิม", async () => {
+    const api = fakeApi({
+      ...shell,
+      "GET /api/customers": () => json({ items: [CUSTOMER_ROW], page: 1, has_more: false }),
+    });
+    const router = renderApp("/customers");
+    const user = userEvent.setup();
+
+    await user.type(await screen.findByLabelText("ค้นหาลูกค้า"), "0812345678{Enter}");
+
+    await waitFor(() => expect(router.state.location.search).toEqual({ q: "0812345678" }));
+    expect(listQueries(api)).toContainEqual({ q: "0812345678" });
   });
 
   it("URL ?q=ตัวเลขล้วน (พิมพ์เอง) ยังค้นได้ · Esc ล้างคำค้น · ไม่พบ → บอกคำค้นที่ใช้", async () => {

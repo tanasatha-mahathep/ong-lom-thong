@@ -169,6 +169,34 @@ describe("หน้าค้นบิล — ช่องค้นหา", { tim
     expect(router.state.location.search).toEqual({ q: "สมชาย" });
   });
 
+  it.each([
+    ["จัดกลุ่มแบบหน้าบัตร", "1 1037 00123 45 8"],
+    ["ขีดคั่น", "1-1037-00123-45-8"],
+    ["12 หลัก", "110370012345"],
+    ["ตามด้วยชื่อ", "1103700123458 สมชาย"],
+  ])("เลขบัตรแบบ%s: ค้นได้แต่ไม่ลงใน URL", async (_name, typed) => {
+    const { api, user, router } = openBills();
+    await waitForRows();
+
+    await user.type(searchBox(), `${typed}{Enter}`);
+
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: typed }));
+    expect(router.state.location.search).toEqual({});
+    expect(searchBox()).toHaveValue(typed);
+  });
+
+  it("เบอร์โทร 10 หลักและเลขที่บิลไม่ใช่เลขบัตร: ลงใน URL ตามเดิม", async () => {
+    const { user, router } = openBills();
+    await waitForRows();
+
+    await user.type(searchBox(), "0812345678{Enter}");
+    await waitFor(() => expect(router.state.location.search).toEqual({ q: "0812345678" }));
+
+    await user.clear(searchBox());
+    await user.type(searchBox(), "RC6910-0001{Enter}");
+    await waitFor(() => expect(router.state.location.search).toEqual({ q: "RC6910-0001" }));
+  });
+
   it("400 ที่ชี้ช่องคำค้น แสดงใต้ช่องนั้น ไม่ใช่กล่องแจ้งรวม", async () => {
     const { user } = openBills({
       list: ({ path }) =>
