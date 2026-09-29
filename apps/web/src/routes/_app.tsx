@@ -6,6 +6,7 @@ import { SkipLink } from "@/components/skip-link";
 import { NotFoundPage } from "@/components/status-page";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { ApiError } from "@/lib/api";
+import { useRememberListSearch } from "@/lib/back-target";
 import { useContentEpoch } from "@/lib/branch-epoch";
 import { meQueryOptions } from "@/lib/queries";
 import { readSidebarOpen } from "@/lib/sidebar-state";
@@ -34,6 +35,8 @@ export const Route = createFileRoute("/_app")({
 /** โครงของ dashboard-01: sidebar แบบ inset + หัวหน้า + เนื้อหา */
 function AppLayout() {
   const contentEpoch = useContentEpoch();
+  // ปุ่มย้อนกลับของหน้าเอกสารพากลับไปรายการพร้อมตัวกรองเดิม (components/page-header.tsx)
+  useRememberListSearch();
   // อ่าน cookie ครั้งเดียวตอน mount — ย่อ sidebar ค้างไว้ข้ามการโหลดหน้า
   const [defaultOpen] = useState(readSidebarOpen);
   return (
@@ -50,7 +53,12 @@ function AppLayout() {
       <AppSidebar variant="inset" />
       <SidebarInset className="min-w-0">
         <SiteHeader />
-        <main id="main" tabIndex={-1} className="flex min-w-0 flex-1 flex-col gap-4 p-4 md:gap-6 md:p-6 [&>*]:min-w-0">
+        {/* @container/main + --main-px: แถบที่ต้องเต็มความกว้างเนื้อหา (แถบบันทึกของ /buy) คำนวณจากตรงนี้ */}
+        <main
+          id="main"
+          tabIndex={-1}
+          className="@container/main flex min-w-0 flex-1 flex-col gap-4 p-(--main-px) [--main-px:1rem] md:gap-6 md:[--main-px:1.5rem] [&>*]:min-w-0"
+        >
           {/* สลับสาขาสำเร็จ = หน้าเนื้อหา mount ใหม่ — state ในหน้า (บิลที่กรอก · ฟอร์ม) ของสาขาเดิมไม่ติดไปสาขาใหม่
               (hooks/use-branch-switch.ts เพิ่ม epoch เอง ไม่ผูกกับ me ตรง ๆ: me เปลี่ยนจากที่อื่นต้องไม่ล้างฟอร์มเงียบ ๆ) */}
           <Outlet key={contentEpoch} />
