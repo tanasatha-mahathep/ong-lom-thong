@@ -94,6 +94,43 @@ describe("ธีม (สว่าง · มืด · ตามระบบ)", ()
     expect(localStorage.getItem("ong.theme")).toBe("system");
   });
 
+  it("เมนูธีม: ไอคอน SunMoon · แต่ละตัวเลือกมีไอคอนของตัวเอง · เช็กชิดขวาเฉพาะตัวที่เลือก (ไม่มีจุดนำหน้า)", async () => {
+    stubSystemDark(false);
+    localStorage.setItem("ong.theme", "dark");
+    setup();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /ทดสอบ staff/ }));
+    const themeItem = await screen.findByRole("menuitem", { name: "ธีม" });
+    expect(themeItem.querySelector("svg.lucide-sun-moon")).not.toBeNull();
+    await user.click(themeItem);
+
+    const options = await screen.findAllByRole("menuitemradio");
+    const icons = { สว่าง: "lucide-sun", มืด: "lucide-moon", ตามระบบ: "lucide-monitor" } as const;
+    expect(options.map((o) => o.textContent)).toEqual(["สว่าง", "มืด", "ตามระบบ"]);
+    for (const option of options) {
+      const label = option.textContent as keyof typeof icons;
+      // ไอคอนแรกของแถว = ไอคอนธีม
+      expect(option.querySelector("svg")).toHaveClass(icons[label]);
+      expect(option.querySelector("svg.lucide-circle")).toBeNull();
+    }
+    const checked = () => options.map((o) => o.getAttribute("aria-checked"));
+    const checks = () => options.map((o) => o.querySelector("svg.lucide-check") !== null);
+    expect(checked()).toEqual(["false", "true", "false"]);
+    expect(checks()).toEqual([false, true, false]);
+    // เช็กอยู่ท้ายแถว (ขวาสุด)
+    expect(options[1]?.lastElementChild?.querySelector("svg.lucide-check")).not.toBeNull();
+
+    // คีย์บอร์ดเหมือนเดิม: ↓ ไปตัวถัดไป · Enter เลือก
+    (options[1] as HTMLElement).focus();
+    await user.keyboard("{ArrowDown}{Enter}");
+    await waitFor(() => expect(localStorage.getItem("ong.theme")).toBe("system"));
+    await user.click(screen.getByRole("button", { name: /ทดสอบ staff/ }));
+    await user.click(await screen.findByRole("menuitem", { name: "ธีม" }));
+    const again = await screen.findAllByRole("menuitemradio");
+    expect(again.map((o) => o.getAttribute("aria-checked"))).toEqual(["false", "false", "true"]);
+    expect(again.map((o) => o.querySelector("svg.lucide-check") !== null)).toEqual([false, false, true]);
+  });
+
   it("ภาษาไทยเป็นภาษาของหน้า (<html lang>)", () => {
     expect(document.documentElement.lang).toBe("th");
   });
