@@ -78,7 +78,13 @@ export function BranchChangedNotice({ state }: { state: ReturnType<typeof useBra
 
 /** ช่องสี่เหลี่ยมหัว sidebar = โลโก้ร้าน (ประดับ — ชื่อสาขาอยู่ข้าง ๆ) · ย่อเป็นแถบไอคอนก็เหลือแค่ช่องนี้ */
 function BranchTile() {
-  return <BrandMark className="size-8" />;
+  // ครอบด้วย span: SidebarMenuButton บีบ svg ลูกตรงเหลือ 16px ([&>svg]:size-4) — โลโก้ต้องเต็มช่อง 32px
+  // เท่าช่อง TeamSwitcher ของ sidebar-07 ทั้งตอนขยาย หัวนิ่ง และแถบไอคอน (ปุ่มเป็น size-8 พอดีโลโก้)
+  return (
+    <span data-slot="branch-tile" className="flex size-8 shrink-0 items-center justify-center">
+      <BrandMark className="size-8 rounded-lg" />
+    </span>
+  );
 }
 
 /** ชื่อสาขา (ตัวหนา) + รหัสสาขา — "สาขาปัจจุบัน" สำหรับ screen reader อยู่ในชื่อปุ่มด้วย */
