@@ -44,7 +44,7 @@ make railway-plan ENV=staging
 - **ring 1** — push `testing` / `staging` / `main` และ `make ci-full` (workflow_dispatch บน branch ใดก็ได้): `image` (build ครั้งเดียว → smoke → SBOM CycloneDX → Trivy gate) → `e2e` บน image เดียวกัน · `sca`
 - **ring 2** — [deploy-smoke.yml](.github/workflows/deploy-smoke.yml): Railway deploy สำเร็จ → Playwright `smoke` (อ่านอย่างเดียว) ยิงเว็บจริง · URL จาก repository variables `E2E_URL_STAGING` · `E2E_URL_PRODUCTION` (ไม่ตั้ง = ข้าม)
 - **advisory** — [security.yml](.github/workflows/security.yml) ทุกวันจันทร์บน `main` · [testsprite.yml](.github/workflows/testsprite.yml) ทุกคืน (เงียบจนตั้ง `vars.TESTSPRITE_PROJECT_ID`) — ไม่ block promote
-- repo private บน GitHub Free ใช้ CodeQL / dependency review / secret scanning ของ GitHub ไม่ได้ → ใช้ Semgrep CE · OSV-Scanner · gitleaks ใน container ปัก digest แทน · Dependabot alerts (ฟรี) เปิดอยู่ · ข้อยกเว้นทุกตัวต้องมีเหตุผล (และวันหมดอายุเมื่อเครื่องมือรองรับ)
+- repo public (28 ก.ย. 2026) — GitHub code scanning ([codeql.yml](.github/workflows/codeql.yml)) · dependency review ([dependency-review.yml](.github/workflows/dependency-review.yml)) · secret scanning ของ GitHub ใช้ได้ฟรีแล้ว เสริม Semgrep CE · OSV-Scanner · gitleaks ใน container ปัก digest (defence in depth ไม่ใช่แทนที่) · Dependabot alerts (ฟรี) เปิดอยู่ · ข้อยกเว้นทุกตัวต้องมีเหตุผล (และวันหมดอายุเมื่อเครื่องมือรองรับ)
 - Docker VM ในเครื่องมีดิสก์จำกัด — build image ทีละตัว และลบ image ของตัวเองเมื่อเสร็จ
 
 ## Commit / release
