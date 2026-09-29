@@ -15,7 +15,7 @@ set -euo pipefail
 shopt -s inherit_errexit 2>/dev/null || true
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# shellcheck source=lib.sh
+# shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$here/lib.sh"
 
 log() { printf 'backup: %s\n' "$*"; }

@@ -87,8 +87,29 @@ jobs:
       - run: pnpm test
       - run: pnpm build
 
+  # cron สำรองข้อมูล (services/backup) — Railway build Dockerfile นี้เองตอน deploy · ให้พังใน PR ไม่ใช่ตอน cron รันตีสอง
+  # เทสต์ของสคริปต์อยู่ใน pnpm test ของ job check แล้ว · job นี้ตรวจ shell + image ที่จะรันจริง
+  backup-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: shellcheck
+        run: |
+          command -v shellcheck >/dev/null || { sudo apt-get update -q && sudo apt-get install -yq shellcheck; }
+          shellcheck --version
+          shellcheck services/backup/*.sh
+      - run: docker build -t ong-backup services/backup
+      # คำสั่งที่ backup.sh ต้องใช้มีครบใน image (pg_dump 18 · rclone · timeout ของ busybox)
+      - name: tools in the image
+        run: >-
+          docker run --rm --entrypoint /bin/bash ong-backup -c
+          'pg_dump --version && pg_restore --version && rclone version | head -1 && command -v timeout awk'
+
   release:
-    needs: check
+    needs: [check, backup-image]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10

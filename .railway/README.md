@@ -308,6 +308,7 @@ rclone move "backup:$BACKUP_S3_BUCKET/staging/postgres/" "backup:$BACKUP_S3_BUCK
 
 - `pnpm test` รวม `services/backup/backup.test.ts` — ชื่อไฟล์ การเลือก dump ที่ลบ การตรวจขนาด และลำดับงานของ `backup.sh` กับคำสั่งปลอมใน PATH (ไม่ต้องมี Postgres/S3)
 - `services/backup/restore-doc-counters.test.ts` — อ่าน key และรัน SQL ที่ได้ด้วย `psql` กับ database ที่ migrate + seed จริง (ยกตัวนับ · ไม่ลด · รันซ้ำได้ · รหัสสาขาไม่รู้จัก = หยุด · `next_doc_no()` ต่อจากเลขสูงสุด) — ต้องมี `psql` + Postgres ของ compose · ไม่มีข้าม (CI ต้องมี)
+- CI job `backup-image`: `shellcheck services/backup/*.sh` · `docker build services/backup` · ตรวจว่า image มี pg_dump 18 · rclone · timeout — release รอ job นี้ด้วย
 - end-to-end: build `services/backup` แล้วรันกับ Postgres 18 + RustFS ของ compose (ตั้ง `S3_*`/`BACKUP_S3_*` ชี้ `http://s3:9000` · `…_FORCE_PATH_STYLE=true` · สร้าง bucket ปลายทางก่อน · ต่อ network ของ compose)
 
 ## บัญชีพนักงาน
