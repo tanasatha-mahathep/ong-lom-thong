@@ -310,6 +310,25 @@ describe("สาขาเปลี่ยนจากที่อื่น (แ�
   });
 });
 
+describe("โลโก้ร้านที่หัว sidebar", () => {
+  const logoIn = (el: HTMLElement) => el.querySelector('svg[data-slot="brand-mark"]');
+
+  it("ขยาย: โลโก้เป็นช่องสี่เหลี่ยมของตัวเลือกสาขา (ประดับ — ชื่อปุ่มยังเป็นชื่อสาขา)", async () => {
+    setup();
+    const trigger = await switcher();
+    expect(logoIn(trigger)).toHaveAttribute("aria-hidden", "true");
+    expect(trigger.querySelector("svg.lucide-store")).toBeNull();
+  });
+
+  it("ย่อเป็นแถบไอคอน: ยังเห็นโลโก้ · สาขาเดียว (หัวนิ่ง) ก็ใช้โลโก้", async () => {
+    document.cookie = "sidebar_state=false; path=/";
+    setup({ role: "staff", branches: [BRANCH_HQ] });
+    const header = await screen.findByRole("link", { name: /^สาขาปัจจุบัน/ });
+    expect(document.querySelector('[data-slot="sidebar"]')).toHaveAttribute("data-state", "collapsed");
+    expect(logoIn(header)).not.toBeNull();
+  });
+});
+
 describe("ชื่อสาขาเมื่อ sidebar ย่อ", () => {
   it("ย่อ → หัวหน้ามีป้ายสาขา · ปุ่มเลือกสาขา/เมนูผู้ใช้มี tooltip", async () => {
     document.cookie = "sidebar_state=false; path=/";
