@@ -19,6 +19,10 @@ RUN pnpm --filter @ong/web build && pnpm --filter @ong/api build
 RUN pnpm --filter @ong/api deploy --prod --legacy /out
 
 FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402
+# runtime ใช้แค่ node — ถอด package manager ของ base image (npm · npx · corepack · yarn) ไม่ให้อยู่ใน
+# filesystem ที่ container รัน/ที่ Trivy สแกน (CMD และ Railway pre-deploy เรียก node ตรง)
+RUN rm -rf /usr/local/lib/node_modules /opt/yarn-v* \
+      /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /out/dist ./dist
