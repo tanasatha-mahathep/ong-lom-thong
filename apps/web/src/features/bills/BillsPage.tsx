@@ -170,7 +170,7 @@ interface BillFiltersProps {
   /** 400 ของ API ที่ชี้ช่องค้น/วันที่ */
   problem: FieldProblem | undefined;
   onApply: (patch: FilterPatch) => void;
-  /** คำค้นเป็นเลขบัตรประชาชนเต็ม 13 หลัก — ค้นได้แต่ไม่ผ่าน onApply (ไม่ลง URL) */
+  /** คำค้นเป็นเลขบัตรประชาชน (looksLikeNationalId) — ค้นได้แต่ไม่ผ่าน onApply (ไม่ลง URL) */
   onSensitiveQuery: (q: string) => void;
   onClear: () => void;
 }
@@ -192,7 +192,7 @@ function BillFilters({ search, branches, problem, onApply, onSensitiveQuery, onC
 
   /**
    * ส่งคำค้นเข้า URL — 1 ตัวอักษรไม่ส่ง (ช่องแสดงคำแนะนำ) · ช่องว่าง = เลิกกรอง
-   * เลขบัตรประชาชนเต็ม 13 หลัก: ค้นเหมือนกันแต่ไม่ผ่าน onApply เพื่อไม่ให้เลขบัตรเต็มไปอยู่ใน URL
+   * เลขบัตรประชาชน (looksLikeNationalId): ค้นเหมือนกันแต่ไม่ผ่าน onApply เพื่อไม่ให้เลขบัตรเต็มไปอยู่ใน URL
    */
   const commitQuery = (text: string) => {
     clearTimeout(timer.current);
