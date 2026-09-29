@@ -1,24 +1,25 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
-import { type FormEvent, type KeyboardEvent, useId, useRef, useState } from "react";
+import { type KeyboardEvent, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { z } from "zod";
+import { AppForm, SubmitButton } from "@/components/app-form";
 import { BrandMark } from "@/components/brand-mark";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Field,
   FieldContent,
   FieldDescription,
-  FieldError,
   FieldGroup,
   FieldLabel,
   FieldLegend,
   FieldSet,
   FieldTitle,
 } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
+import { FloatingInput } from "@/components/ui/floating-field";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { useAppForm } from "@/hooks/use-app-form";
 import { errorMessage } from "@/lib/api";
 import { type Me, canSwitchBranch, meQueryOptions } from "@/lib/queries";
 import { signIn, signInErrorMessage, switchBranch } from "@/lib/session";
@@ -27,8 +28,9 @@ import { signIn, signInErrorMessage, switchBranch } from "@/lib/session";
  * login-04 ของ shadcn ปรับเป็นสองขั้นในการ์ดเดียว:
  * 1) อีเมล + รหัสผ่าน  2) เลือกสาขาที่ทำงาน (เฉพาะบัญชีที่มีสิทธิ์มากกว่า 1 สาขา)
  * ไม่มี social login / สมัครเอง (ปิดที่เซิร์ฟเวอร์) · คีย์บอร์ดล้วน: โฟกัสอีเมลเอง · Enter = ส่ง
+ * หน้าอ้างอิงของกฎฟอร์ม U0–U6: useAppForm · FloatingInput · toast · ชั้นบังหน้าจอตอนพาเข้าแอป (`onDone`)
  */
-export function LoginForm({ onDone }: { onDone: () => void }) {
+export function LoginForm({ onDone }: { onDone: () => Promise<void> | void }) {
   const [me, setMe] = useState<Me | null>(null);
 
   return (
@@ -64,23 +66,31 @@ function FormAlert({ id, message }: { id: string; message: string }) {
   );
 }
 
-type FieldErrors = { email?: string; password?: string };
-
-function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
+function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => Promise<void> | void }) {
   const { t } = useTranslation("auth");
   const queryClient = useQueryClient();
-  const ids = useId();
-  const emailRef = useRef<HTMLInputElement>(null);
-  const passwordRef = useRef<HTMLInputElement>(null);
-  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const schema = useMemo(
+    () =>
+      z.object({
+        email: z
+          .string()
+          .trim()
+          .min(1, t("signIn.missingEmail"))
+          .pipe(z.email(t("signIn.invalidEmail"))),
+        password: z.string().min(1, t("signIn.missingPassword")),
+      }),
+    [t],
+  );
 
-  const mutation = useMutation({
-    mutationFn: async (credentials: { email: string; password: string }): Promise<Me> => {
-      await signIn(credentials);
+  const f = useAppForm({
+    defaultValues: { email: "", password: "" },
+    schema,
+    submit: async ({ email, password }): Promise<Me> => {
+      await signIn({ email: email.trim(), password });
       // session ใหม่ — ทิ้ง cache ของ session ก่อนหน้า แล้วอ่านผู้ใช้จากเซิร์ฟเวอร์
       queryClient.removeQueries();
       const me = await queryClient.fetchQuery({ ...meQueryOptions, staleTime: 0 });
-      // มีสิทธิ์สาขาเดียวแต่ session ยังไม่มีสาขา (สาขาหลักถูกปิด / สร้างด้วย --allow) → ตั้งให้เลย ไม่ต้องถาม
+      // มีสิทธิ์สาขาเดียวแต่ session ยังไม่มีสาขา (สาขาหลักถูกปิด / สร้างแบบ allow) → ตั้งให้เลย ไม่ต้องถาม
       const [only] = me.branches;
       if (me.branch || !only || me.branches.length > 1) return me;
       const branch = await switchBranch(only.id);
@@ -88,166 +98,154 @@ function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
       queryClient.setQueryData(meQueryOptions.queryKey, withBranch);
       return withBranch;
     },
-    // 401 = รหัสผิด แสดงในฟอร์ม ไม่ใช่ session หมดอายุ
-    meta: { handlesUnauthorized: true },
+    // ยังต้องเลือกสาขา = ยังไม่ต้อนรับ (ต้อนรับตอนเข้าแอปจริง)
+    successMessage: (me) => (canSwitchBranch(me) ? undefined : t("signIn.welcome", { name: me.user.name })),
     onSuccess: onSignedIn,
-    onError: () => passwordRef.current?.select(),
+    // 401 = รหัสผิด (ไม่ใช่ session หมดอายุ — sign-in ไม่ผ่านตัวดัก 401 กลางเพราะไม่ใช่ useMutation)
+    // better-auth ไม่ชี้ช่อง → ข้อความรวมเหนือช่อง + toast · เลือกรหัสผ่านไว้ให้พิมพ์ใหม่
+    errorMessage: (error) => signInErrorMessage(error, window.location.origin),
+    fieldOfError: () => undefined,
+    focusOnFormError: "password",
   });
 
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const read = (name: string) => {
-      const value = form.get(name);
-      return typeof value === "string" ? value : "";
-    };
-    const email = read("email").trim();
-    const password = read("password");
-    const errors: FieldErrors = {
-      ...(email ? {} : { email: t("signIn.missingEmail") }),
-      ...(password ? {} : { password: t("signIn.missingPassword") }),
-    };
-    setFieldErrors(errors);
-    if (errors.email) return emailRef.current?.focus();
-    if (errors.password) return passwordRef.current?.focus();
-    mutation.mutate({ email, password });
-  };
-
-  const formError = mutation.isError ? signInErrorMessage(mutation.error, window.location.origin) : null;
-  const describedBy = (field: keyof FieldErrors) =>
-    [fieldErrors[field] && `${ids}-${field}-error`, formError && `${ids}-form-error`].filter(Boolean).join(" ") ||
-    undefined;
+  const formErrorId = f.fieldId("form-error");
+  const describedBy = f.formError ? formErrorId : undefined;
 
   return (
-    <form noValidate onSubmit={submit} className="p-6 md:p-8">
-      <FieldGroup>
+    <AppForm form={f} className="p-6 md:p-8">
+      <FieldGroup className="gap-5">
         <StepHeading
           title={t("signIn.title")}
           description={t("signIn.description", { shop: t("shopName", { ns: "common" }) })}
         />
-        {formError && <FormAlert id={`${ids}-form-error`} message={formError} />}
-        <Field data-invalid={!!fieldErrors.email}>
-          <FieldLabel htmlFor={`${ids}-email`}>{t("signIn.email")}</FieldLabel>
-          <Input
-            ref={emailRef}
-            id={`${ids}-email`}
-            name="email"
-            type="email"
-            autoComplete="username"
-            autoFocus
-            required
-            aria-invalid={!!fieldErrors.email || !!formError}
-            aria-describedby={describedBy("email")}
-          />
-          <FieldError id={`${ids}-email-error`}>{fieldErrors.email}</FieldError>
-        </Field>
-        <Field data-invalid={!!fieldErrors.password}>
-          <FieldLabel htmlFor={`${ids}-password`}>{t("signIn.password")}</FieldLabel>
-          <Input
-            ref={passwordRef}
-            id={`${ids}-password`}
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            required
-            aria-invalid={!!fieldErrors.password || !!formError}
-            aria-describedby={describedBy("password")}
-          />
-          <FieldError id={`${ids}-password-error`}>{fieldErrors.password}</FieldError>
-        </Field>
+        {f.formError && <FormAlert id={formErrorId} message={f.formError} />}
+        <f.form.Field name="email">
+          {(field) => (
+            <FloatingInput
+              {...f.bind(field)}
+              label={t("signIn.email")}
+              placeholder={t("signIn.emailPlaceholder")}
+              type="email"
+              inputMode="email"
+              autoComplete="username"
+              spellCheck={false}
+              autoFocus
+              required
+              aria-invalid={f.formError ? true : undefined}
+              aria-describedby={describedBy}
+            />
+          )}
+        </f.form.Field>
+        <f.form.Field name="password">
+          {(field) => (
+            <FloatingInput
+              {...f.bind(field)}
+              label={t("signIn.password")}
+              placeholder={t("signIn.passwordPlaceholder")}
+              type="password"
+              autoComplete="current-password"
+              required
+              aria-invalid={f.formError ? true : undefined}
+              aria-describedby={describedBy}
+            />
+          )}
+        </f.form.Field>
         <Field>
-          <Button type="submit" disabled={mutation.isPending}>
-            {mutation.isPending ? t("signIn.submitting") : t("signIn.submit")}
-          </Button>
+          <SubmitButton form={f} size="lg" pendingLabel={t("signIn.submitting")}>
+            {t("signIn.submit")}
+          </SubmitButton>
           <FieldDescription className="text-center">{t("signIn.help")}</FieldDescription>
         </Field>
       </FieldGroup>
-    </form>
+    </AppForm>
   );
 }
 
-function BranchStep({ me, onDone }: { me: Me; onDone: () => void }) {
+function BranchStep({ me, onDone }: { me: Me; onDone: () => Promise<void> | void }) {
   const { t } = useTranslation("auth");
   const queryClient = useQueryClient();
-  const ids = useId();
-  const formRef = useRef<HTMLFormElement>(null);
   // ค่าเริ่มต้น = สาขาปัจจุบันของ session (สาขาหลักของบัญชี)
   const [initialId] = useState(() => me.branch?.id ?? me.branches[0]?.id ?? "");
-  const [branchId, setBranchId] = useState(initialId);
 
-  const mutation = useMutation({
-    mutationFn: switchBranch,
-    onSuccess: (branch) => {
+  const f = useAppForm({
+    defaultValues: { branchId: initialId },
+    submit: ({ branchId }) => switchBranch(branchId),
+    successMessage: (branch) => t("branch.welcome", { name: me.user.name, branch: branch.name }),
+    onSuccess: async (branch) => {
       queryClient.setQueryData(meQueryOptions.queryKey, { ...me, branch });
-      onDone();
+      await onDone();
     },
+    errorMessage: (error) => t("branch.saveFailed", { reason: errorMessage(error) }),
+    fieldOfError: () => undefined,
   });
+  const ids = f.fieldId("branch");
+  const formErrorId = `${ids}-form-error`;
 
   // radio ของ Radix ไม่ส่งฟอร์มเมื่อกด Enter — ส่งเองให้คีย์บอร์ดจบได้ในปุ่มเดียว
   const submitOnEnter = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== "Enter") return;
+    if (event.key !== "Enter" || event.ctrlKey || event.metaKey) return;
     event.preventDefault();
-    formRef.current?.requestSubmit();
+    f.submit();
   };
 
-  const formError = mutation.isError ? t("branch.saveFailed", { reason: errorMessage(mutation.error) }) : null;
-
   return (
-    <form
-      ref={formRef}
-      onSubmit={(event) => {
-        event.preventDefault();
-        mutation.mutate(branchId);
-      }}
-      className="p-6 md:p-8"
-    >
+    <AppForm form={f} className="p-6 md:p-8">
       <FieldGroup>
         <StepHeading
           title={t("branch.title")}
           description={t("branch.greeting", { name: me.user.name, count: me.branches.length })}
         />
-        {formError && <FormAlert id={`${ids}-form-error`} message={formError} />}
+        {f.formError && <FormAlert id={formErrorId} message={f.formError} />}
         <FieldSet>
           <FieldLegend variant="label">{t("branch.legend")}</FieldLegend>
-          <RadioGroup
-            value={branchId}
-            onValueChange={setBranchId}
-            onKeyDown={submitOnEnter}
-            aria-describedby={formError ? `${ids}-form-error` : undefined}
-          >
-            {me.branches.map((branch) => {
-              const id = `${ids}-${branch.id}`;
-              return (
-                <FieldLabel key={branch.id} htmlFor={id}>
-                  <Field orientation="horizontal">
-                    <FieldContent>
-                      <FieldTitle id={`${id}-name`}>{branch.name}</FieldTitle>
-                      <FieldDescription id={`${id}-code`} className="tabular-nums">
-                        {t("branchCode", { ns: "common", code: branch.code })}
-                      </FieldDescription>
-                    </FieldContent>
-                    {/* radio ของ Radix เป็น <button> — label[for] ไม่ถูกนับเป็นชื่อในเครื่องมือตรวจ จึงผูกชื่อตรง ๆ */}
-                    <RadioGroupItem
-                      id={id}
-                      value={branch.id}
-                      aria-labelledby={`${id}-name`}
-                      aria-describedby={`${id}-code`}
-                      autoFocus={branch.id === initialId}
-                    />
-                  </Field>
-                </FieldLabel>
-              );
-            })}
-          </RadioGroup>
+          <f.form.Field name="branchId">
+            {(field) => (
+              <RadioGroup
+                name={field.name}
+                value={field.state.value}
+                onValueChange={field.handleChange}
+                onKeyDown={submitOnEnter}
+                aria-describedby={f.formError ? formErrorId : undefined}
+              >
+                {me.branches.map((branch) => {
+                  const id = `${ids}-${branch.id}`;
+                  return (
+                    <FieldLabel key={branch.id} htmlFor={id}>
+                      <Field orientation="horizontal">
+                        <FieldContent>
+                          <FieldTitle id={`${id}-name`}>{branch.name}</FieldTitle>
+                          <FieldDescription id={`${id}-code`} className="tabular-nums">
+                            {t("branchCode", { ns: "common", code: branch.code })}
+                          </FieldDescription>
+                        </FieldContent>
+                        {/* radio ของ Radix เป็น <button> — label[for] ไม่ถูกนับเป็นชื่อในเครื่องมือตรวจ จึงผูกชื่อตรง ๆ */}
+                        <RadioGroupItem
+                          id={id}
+                          value={branch.id}
+                          aria-labelledby={`${id}-name`}
+                          aria-describedby={`${id}-code`}
+                          autoFocus={branch.id === initialId}
+                        />
+                      </Field>
+                    </FieldLabel>
+                  );
+                })}
+              </RadioGroup>
+            )}
+          </f.form.Field>
           <FieldDescription>{t("branch.hint")}</FieldDescription>
         </FieldSet>
         <Field>
-          <Button type="submit" disabled={mutation.isPending || !branchId}>
-            {mutation.isPending ? t("saving", { ns: "common" }) : t("branch.submit")}
-          </Button>
+          <f.form.Subscribe selector={(state) => state.values.branchId}>
+            {(branchId) => (
+              <SubmitButton form={f} size="lg" disabled={!branchId}>
+                {t("branch.submit")}
+              </SubmitButton>
+            )}
+          </f.form.Subscribe>
         </Field>
       </FieldGroup>
-    </form>
+    </AppForm>
   );
 }
 
