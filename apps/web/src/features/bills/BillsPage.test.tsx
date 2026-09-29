@@ -276,6 +276,30 @@ describe("หน้าค้นบิล — ช่องค้นหา", { tim
     expect(listRequests(api).at(-1)).toEqual({ q: "1103700123458" });
   });
 
+  it("ปุ่มย้อนกลับ: URL กลับมามีคำค้นของตัวเอง — ช่องและผลตาม URL ไม่ค้างเป็นเลขบัตร", async () => {
+    const { user, router } = openBills({
+      path: "/bills?q=somchai",
+      list: ({ path }) => (path.includes("q=1103700123458") ? buyList([VOID_BILL]) : buyList([BILL])),
+    });
+    await waitForRows();
+    expect(searchBox()).toHaveValue("somchai");
+
+    // กดเมนู "ค้นบิล" (หน้าใหม่ ไม่มีคำค้น) แล้วค้นด้วยเลขบัตร — ผลเป็นของเลขบัตร
+    const menu = await screen.findByRole("navigation", { name: "เมนูหลัก" });
+    await user.click(within(menu).getByRole("link", { name: "ค้นบิล" }));
+    await waitFor(() => expect(searchBox()).toHaveValue(""));
+    await user.type(searchBox(), "1103700123458{Enter}");
+    expect(await screen.findByRole("link", { name: VOID_BILL.doc_no })).toBeInTheDocument();
+    expect(router.state.location.search).toEqual({});
+
+    act(() => router.history.back());
+
+    await waitFor(() => expect(router.state.location.search).toEqual({ q: "somchai" }));
+    await waitFor(() => expect(searchBox()).toHaveValue("somchai"));
+    expect(await screen.findByRole("link", { name: BILL.doc_no })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: VOID_BILL.doc_no })).not.toBeInTheDocument();
+  });
+
   it("เบอร์โทร 10 หลักและเลขที่บิลไม่ใช่เลขบัตร: ลงใน URL ตามเดิม", async () => {
     const { user, router } = openBills();
     await waitForRows();

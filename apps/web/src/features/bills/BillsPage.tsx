@@ -75,14 +75,17 @@ export function BillsPage() {
   const me = useMe();
   const search = route.useSearch();
   const navigate = route.useNavigate();
-  // เลขบัตรประชาชนเต็ม 13 หลักที่พิมพ์ค้น: ใช้ค้นได้แต่ไม่เก็บลง URL (ต่างจากตัวกรองอื่นที่อยู่ใน URL ทั้งหมด)
+  // เลขบัตรประชาชนที่พิมพ์ค้น: ใช้ค้นได้แต่ไม่เก็บลง URL (ต่างจากตัวกรองอื่นที่อยู่ใน URL ทั้งหมด)
   // ลิงก์เก่า/บุ๊กมาร์กที่มีเลขบัตรอยู่ใน ?q= — ค้นตามนั้นต่อ (เก็บเป็น state) แล้ว effect ด้านล่างแทนที่ URL ด้วยฉบับที่ไม่มี q
   const urlHoldsId = search.q !== undefined && looksLikeNationalId(search.q);
   const [sensitiveQuery, setSensitiveQuery] = useState<string | undefined>(() => (urlHoldsId ? search.q : undefined));
+  // URL เปลี่ยนมาพร้อม q จากภายนอก (ปุ่มย้อนกลับ/ไปข้างหน้าของ browser · ลิงก์) → q ใน URL ชนะเลขบัตรที่ค้างอยู่
+  // ไม่งั้นช่องกับผลยังเป็นเลขบัตรทั้งที่ URL บอกอย่างอื่น · q ที่หายไปจาก URL เพราะหน้านี้ล้างเอง (ค้นด้วยเลขบัตร) ไม่นับ
+  // เทียบตอน URL "เปลี่ยน" เท่านั้น ไม่เทียบทุก render — ช่วงที่ router ยังไม่ทันใช้ URL ใหม่ URL ยังเป็นค่าเก่า
   const [seenQ, setSeenQ] = useState(search.q);
   if (seenQ !== search.q) {
     setSeenQ(search.q);
-    if (urlHoldsId) setSensitiveQuery(search.q);
+    if (search.q !== undefined) setSensitiveQuery(urlHoldsId ? search.q : undefined);
   }
   const scrubLegacyLink = useEffectEvent(() => {
     void navigate({ search: (prev) => ({ ...prev, q: undefined }), replace: true });
