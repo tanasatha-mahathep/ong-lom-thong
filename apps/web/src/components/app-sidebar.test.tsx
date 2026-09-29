@@ -251,6 +251,11 @@ describe("เมนูที่เลือกอยู่ตามหน้า 
     const buy = within(nav).getByRole("link", { name: "ซื้อเข้า" });
     // ซื้อเข้าเป็นเมนูธรรมดา — ไม่มีพื้นสีหลักถาวร
     expect(buy.className).not.toMatch(/(^|\s)bg-primary(\s|$)/);
+    // สไตล์ที่เลือกอยู่ = พื้นนุ่ม (sidebar-accent) น้ำหนักตัวอักษรเท่าเดิม ไม่มีแถบซ้าย · hover เมนูอื่นอ่อนกว่า
+    const active = within(nav).getByRole("link", { name: label });
+    expect(active).toHaveClass("data-[active=true]:bg-sidebar-accent", "data-[active=true]:font-normal");
+    expect(active).toHaveClass("hover:bg-sidebar-accent/60");
+    expect(active.className).not.toMatch(/font-semibold|inset_3px|data-\[active=true\]:font-medium/);
   });
 });
 
