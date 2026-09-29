@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { BRANCH_2, BRANCH_HQ, GOLD_PRICE, fakeApi, json, makeMe, renderApp } from "@/test/app";
@@ -35,6 +35,9 @@ async function submitCredentials() {
   await user.keyboard(`${CREDENTIALS.password}{Enter}`);
   return user;
 }
+
+/** กล่องของ toast (portal ที่ body นอก #root) */
+const toasts = () => document.querySelector<HTMLElement>('[data-slot="toaster-host"]') ?? document.body;
 
 describe("หน้า login", () => {
   it("login สำเร็จ (สาขาเดียว) → ส่งอีเมล/รหัสผ่าน แล้วเข้าหน้าแรก", async () => {
@@ -87,9 +90,12 @@ describe("หน้า login", () => {
     const router = renderApp("/login");
     await submitCredentials();
 
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(message);
-    expect(screen.getByLabelText("อีเมล")).toHaveAccessibleDescription(expect.stringMatching(message));
+    // ข้อความอยู่ใน toast บนกลางจออย่างเดียว — ไม่มีกล่องเตือนในฟอร์ม
+    await waitFor(() => expect(toasts()).toHaveTextContent(message));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("อีเมล")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("รหัสผ่าน")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("อีเมล")).not.toHaveAccessibleDescription(expect.stringMatching(message));
     // พร้อมพิมพ์รหัสผ่านใหม่ทันที
     expect(screen.getByLabelText("รหัสผ่าน")).toHaveFocus();
     expect(router.state.location.pathname).toBe("/login");
@@ -126,8 +132,8 @@ describe("หน้า login", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "ค้นบิล" })).toBeInTheDocument();
     expect(api.callsTo("POST", "/api/me/branch").map((c) => c.body)).toEqual([{ branch_id: BRANCH_2.id }]);
     expect(router.state.location.pathname).toBe("/bills");
-    // หัวหน้าแสดงสาขาที่เพิ่งเลือก
-    expect(screen.getByText("สาขาปัจจุบัน").parentElement).toHaveTextContent(BRANCH_2.name);
+    // หัว sidebar แสดงสาขาที่เพิ่งเลือก
+    expect(screen.getByRole("button", { name: /^สาขาปัจจุบัน/ })).toHaveTextContent(BRANCH_2.name);
   });
 
   it("หลายสาขาแต่ยังไม่มีสาขาปัจจุบัน → ขั้นเลือกสาขา ค่าเริ่มต้นเป็นสาขาแรก", async () => {
@@ -151,7 +157,7 @@ describe("หน้า login", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "หน้าแรก" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "เลือกสาขาที่ทำงาน" })).not.toBeInTheDocument();
     expect(api.callsTo("POST", "/api/me/branch").map((c) => c.body)).toEqual([{ branch_id: BRANCH_2.id }]);
-    expect(screen.getByText("สาขาปัจจุบัน").parentElement).toHaveTextContent(BRANCH_2.name);
+    expect(screen.getByRole("link", { name: /^สาขาปัจจุบัน/ })).toHaveTextContent(BRANCH_2.name);
   });
 
   it("login อยู่แล้ว → เปิด /login แล้วเข้าแอปเลย", async () => {
@@ -277,7 +283,8 @@ describe("หน้า login — กฎฟอร์ม U0–U6", () => {
     await user.keyboard("{Enter}");
 
     const message = "บันทึกสาขาไม่สำเร็จ — เซิร์ฟเวอร์ขัดข้อง ลองใหม่อีกครั้ง";
-    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(await within(toasts()).findByText(message)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "ปิดการแจ้งเตือน" })).toBeInTheDocument();
     expect(api.callsTo("POST", "/api/me/branch")).toHaveLength(1);
     expect(screen.getByRole("radio", { name: "สำนักงานใหญ่ (สาขา 1)" })).toBeEnabled();
@@ -286,13 +293,13 @@ describe("หน้า login — กฎฟอร์ม U0–U6", () => {
     expect(router.state.location.pathname).toBe("/login");
   });
 
-  it("รหัสผิด → toast ค้าง (มีปุ่มปิด) + ข้อความเหนือช่อง · ฟอร์มเปิดให้แก้ · ไม่มีชั้นบังหน้าจอ", async () => {
+  it("รหัสผิด → toast ค้าง (มีปุ่มปิด) อย่างเดียว · ฟอร์มเปิดให้แก้ · ไม่มีชั้นบังหน้าจอ", async () => {
     signInServer(makeMe("staff"), () => json({ code: "INVALID_EMAIL_OR_PASSWORD", message: "Invalid" }, 401));
     renderApp("/login");
     await submitCredentials();
 
     expect(await screen.findByRole("button", { name: "ปิดการแจ้งเตือน" })).toBeInTheDocument();
-    expect(screen.getAllByText("อีเมลหรือรหัสผ่านไม่ถูกต้อง")).toHaveLength(2);
+    expect(screen.getAllByText("อีเมลหรือรหัสผ่านไม่ถูกต้อง")).toHaveLength(1);
     await waitFor(() => expect(screen.getByLabelText("รหัสผ่าน")).toHaveFocus());
     expect(screen.getByLabelText("รหัสผ่าน")).toBeEnabled();
     expect(screen.getByRole("button", { name: "เข้าสู่ระบบ" })).toBeEnabled();

@@ -2,15 +2,21 @@ import { type UseQueryResult, keepPreviousData, useQuery } from "@tanstack/react
 import { Link, getRouteApi } from "@tanstack/react-router";
 import { createColumnHelper } from "@tanstack/react-table";
 import { CircleAlert } from "lucide-react";
-import { type FormEvent, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useId, useMemo } from "react";
+import { useTranslation as useCommonTranslation } from "react-i18next";
+import { AppForm } from "@/components/app-form";
 import { DataTable } from "@/components/data-table";
 import { PageHeader } from "@/components/page-header";
+import { ThaiDateField } from "@/components/thai-date-field";
 import { Alert, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCaption, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useAppForm } from "@/hooks/use-app-form";
 import { useBusinessDate } from "@/hooks/use-business-date";
 import { ApiError } from "@/lib/api";
-import { formatInteger, formatMoney, formatThaiDate, formatWeight } from "@/lib/format";
+import { formatInteger, formatMoney, formatWeight } from "@/lib/format";
+import { useMe } from "@/lib/queries";
+import { formatDocDateTime } from "@/lib/thai-date";
 import { useTranslation } from "./i18n";
 import {
   type PurchaseParams,
@@ -19,25 +25,21 @@ import {
   purchaseCsvHref,
   purchaseReportQueryOptions,
 } from "./queries";
+import { purchaseFilterSchema } from "./filter-schema";
 import {
+  ApplyButton,
   BranchSelect,
-  CsvLink,
+  CsvDownloadButton,
   MetalSelect,
   NumberCell,
   ReportForbidden,
   ReportLoadError,
   ReportSkeleton,
   TableFrame,
-  ThaiDateField,
 } from "./report-parts";
-import {
-  type DatePreset,
-  type PurchaseSearch,
-  isoToThaiInput,
-  monthStart,
-  parseDateInput,
-  presetRange,
-} from "./search";
+import { csvNameSuffix } from "./csv-name";
+import { type FieldProblem, fieldProblem, problemOf } from "./report-problem";
+import { type DatePreset, type PurchaseSearch, isoToThaiInput, monthStart, presetRange } from "./search";
 
 const route = getRouteApi("/_app/reports/purchase");
 
@@ -49,8 +51,10 @@ const isForbidden = (error: unknown) => error instanceof ApiError && error.statu
  */
 export function PurchaseReportPage() {
   const { t } = useTranslation("reports");
+  const { t: tc } = useCommonTranslation("common");
   const search = route.useSearch();
   const navigate = route.useNavigate();
+  const me = useMe();
   const today = useBusinessDate();
   // ไม่ระบุช่วง = วันที่ 1 ของเดือนนี้ ถึงวันนี้ (ตามเวลาไทย) — ค่าเดียวกับค่าเริ่มต้นของ API
   const params: PurchaseParams = {
@@ -80,19 +84,29 @@ export function PurchaseReportPage() {
       <PageHeader
         description={t("purchase.description")}
         actions={
-          <CsvLink
+          <CsvDownloadButton
             href={purchaseCsvHref(params)}
-            filename={t("csv.purchaseFile", { from: params.date_from, to: params.date_to })}
+            disabled={!validRange}
+            fallbackName={t("csv.purchaseFile", {
+              from: params.date_from,
+              to: params.date_to,
+              suffix: csvNameSuffix(me.branches.find((branch) => branch.id === params.branch_id)?.code, params.metal),
+            })}
           />
         }
       />
-      <PurchaseFilters applied={params} onApply={(next) => void navigate({ search: next })} />
+      <PurchaseFilters
+        applied={params}
+        loading={report.isFetching}
+        problem={fieldProblem(report.error)}
+        onApply={(next) => void navigate({ search: next })}
+      />
       {validRange ? (
         <PurchaseResults report={report} />
       ) : (
         <Alert variant="destructive">
           <CircleAlert aria-hidden="true" />
-          <AlertTitle>{t("filters.errors.range")}</AlertTitle>
+          <AlertTitle>{tc("dateField.range")}</AlertTitle>
         </Alert>
       )}
     </>
@@ -100,113 +114,136 @@ export function PurchaseReportPage() {
 }
 
 interface FilterValues {
-  from: string;
-  to: string;
+  date_from: string;
+  date_to: string;
   metal: string;
-  branch: string;
+  branch_id: string;
 }
 
 const toValues = (p: PurchaseParams): FilterValues => ({
-  from: isoToThaiInput(p.date_from),
-  to: isoToThaiInput(p.date_to),
+  date_from: isoToThaiInput(p.date_from),
+  date_to: isoToThaiInput(p.date_to),
   metal: p.metal ?? "",
-  branch: p.branch_id ?? "",
+  branch_id: p.branch_id ?? "",
 });
 
-/** ค่าในฟอร์ม → search ของ URL (ไม่ใส่ key ที่ไม่ได้กรอง) */
-const toSearch = (from: string, to: string, v: FilterValues): PurchaseSearch => ({
-  date_from: from,
-  date_to: to,
+/** ค่าที่ตรวจแล้ว (วันที่เป็น ISO) → search ของ URL (ไม่ใส่ key ที่ไม่ได้กรอง) */
+const toSearch = (v: FilterValues): PurchaseSearch => ({
+  date_from: v.date_from,
+  date_to: v.date_to,
   ...(v.metal ? { metal: v.metal } : {}),
-  ...(v.branch ? { branch_id: v.branch } : {}),
+  ...(v.branch_id ? { branch_id: v.branch_id } : {}),
 });
 
 /**
- * ตัวกรอง — Enter ในช่องใดก็ได้ / ปุ่ม "แสดงรายงาน" = ใช้ตัวกรอง · ปุ่มลัดช่วงวันที่ใช้ทันที
+ * ตัวกรอง — ใช้ตัวกรองด้วย Enter ในช่องใดก็ได้ / ปุ่ม "แสดงรายงาน" · ตัวเลือก (โลหะ · สาขา) และปุ่มลัดช่วงวันที่ใช้ทันที
+ * (เหมือนหน้าค้นบิล) · วันที่ที่พิมพ์ต้องกด Enter/ปุ่ม เพราะรายงานคำนวณยอดรวมทั้งช่วง หนักกว่ารายการบิล —
+ * ไม่ยิงทุกครั้งที่ออกจากช่อง · ผิดรูป/ช่วงกลับด้านแจ้งใต้ช่องก่อนยิง API (U2)
  * ลิงก์ CSV และตัวเลขบนจอเป็นของตัวกรองที่ใช้แล้ว (URL) เสมอ ไม่ใช่ค่าที่ยังพิมพ์ค้างอยู่
  */
-function PurchaseFilters({ applied, onApply }: { applied: PurchaseParams; onApply: (next: PurchaseSearch) => void }) {
+function PurchaseFilters({
+  applied,
+  loading,
+  problem,
+  onApply,
+}: {
+  applied: PurchaseParams;
+  loading: boolean;
+  problem: FieldProblem | undefined;
+  onApply: (next: PurchaseSearch) => void;
+}) {
   const { t } = useTranslation("reports");
-  const ids = useId();
+  const { t: tc } = useCommonTranslation("common");
   const today = useBusinessDate();
-  const fromRef = useRef<HTMLInputElement>(null);
-  const toRef = useRef<HTMLInputElement>(null);
-  const [values, setValues] = useState(() => toValues(applied));
-  const [errors, setErrors] = useState<{ from: string | null; to: string | null }>({ from: null, to: null });
+  const schema = useMemo(() => purchaseFilterSchema(tc), [tc]);
+  const f = useAppForm({
+    defaultValues: toValues(applied),
+    schema,
+    submit: (values) => Promise.resolve(values),
+    onSuccess: (values) => onApply(toSearch(values)),
+  });
 
   // URL เปลี่ยนจากทางอื่น (ย้อนกลับ/ไปต่อ · ปุ่มลัด) → ช่องแสดงค่าที่ใช้อยู่จริง โดยไม่ remount ฟอร์ม (โฟกัสไม่หลุด)
   const appliedKey = JSON.stringify(applied);
-  const [syncedKey, setSyncedKey] = useState(appliedKey);
-  if (appliedKey !== syncedKey) {
-    setSyncedKey(appliedKey);
-    setValues(toValues(applied));
-    setErrors({ from: null, to: null });
-  }
-
-  const change = (patch: Partial<FilterValues>) => {
-    setValues((current) => ({ ...current, ...patch }));
-    if (patch.from !== undefined) setErrors((current) => ({ ...current, from: null }));
-    if (patch.to !== undefined) setErrors((current) => ({ ...current, to: null }));
-  };
-
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const from = parseDateInput(values.from);
-    const to = parseDateInput(values.to);
-    const next = {
-      from: "error" in from ? t(`filters.errors.${from.error}`) : null,
-      to:
-        "error" in to
-          ? t(`filters.errors.${to.error}`)
-          : "iso" in from && from.iso > to.iso
-            ? t("filters.errors.range")
-            : null,
-    };
-    if (next.from || next.to || !("iso" in from) || !("iso" in to)) {
-      setErrors(next);
-      (next.from ? fromRef : toRef).current?.focus();
-      return;
-    }
-    onApply(toSearch(from.iso, to.iso, values));
-  };
+  const syncFromUrl = useEffectEvent(() => f.form.reset(toValues(applied)));
+  useEffect(() => syncFromUrl(), [appliedKey]);
 
   const applyPreset = (preset: DatePreset) => {
     const range = presetRange(preset, today);
-    setValues((current) => ({ ...current, from: isoToThaiInput(range.from), to: isoToThaiInput(range.to) }));
-    setErrors({ from: null, to: null });
-    onApply(toSearch(range.from, range.to, values));
+    const { metal, branch_id } = f.form.state.values;
+    f.form.setFieldValue("date_from", isoToThaiInput(range.from));
+    f.form.setFieldValue("date_to", isoToThaiInput(range.to));
+    onApply(toSearch({ date_from: range.from, date_to: range.to, metal, branch_id }));
   };
 
   return (
-    <form
+    <AppForm
+      form={f}
       role="search"
       aria-label={t("filters.label")}
-      noValidate
-      onSubmit={submit}
-      className="grid gap-4 rounded-lg border bg-card p-4"
+      className="rounded-lg border bg-card p-4"
+      fieldsetClassName="grid gap-4"
     >
       <div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <ThaiDateField
-          id={`${ids}-from`}
-          inputRef={fromRef}
-          label={t("filters.dateFrom")}
-          value={values.from}
-          error={errors.from}
-          onChange={(from) => change({ from })}
-        />
-        <ThaiDateField
-          id={`${ids}-to`}
-          inputRef={toRef}
-          label={t("filters.dateTo")}
-          value={values.to}
-          error={errors.to}
-          onChange={(to) => change({ to })}
-        />
-        <MetalSelect id={`${ids}-metal`} value={values.metal} onChange={(metal) => change({ metal })} />
-        <BranchSelect id={`${ids}-branch`} value={values.branch} onChange={(branch) => change({ branch })} />
+        <f.form.Field name="date_from">
+          {(field) => {
+            const bound = f.bind(field);
+            return (
+              <ThaiDateField
+                {...bound}
+                label={t("filters.dateFrom")}
+                error={bound.error ?? problemOf(problem, "date_from")}
+                onFormat={field.handleChange}
+              />
+            );
+          }}
+        </f.form.Field>
+        <f.form.Field name="date_to">
+          {(field) => {
+            const bound = f.bind(field);
+            return (
+              <ThaiDateField
+                {...bound}
+                label={t("filters.dateTo")}
+                error={bound.error ?? problemOf(problem, "date_to")}
+                onFormat={field.handleChange}
+              />
+            );
+          }}
+        </f.form.Field>
+        <f.form.Field name="metal">
+          {(field) => {
+            const bound = f.bind(field);
+            return (
+              <MetalSelect
+                {...bound}
+                error={bound.error ?? problemOf(problem, "metal")}
+                onChange={(event) => {
+                  bound.onChange(event);
+                  f.submit();
+                }}
+              />
+            );
+          }}
+        </f.form.Field>
+        <f.form.Field name="branch_id">
+          {(field) => {
+            const bound = f.bind(field);
+            return (
+              <BranchSelect
+                {...bound}
+                error={bound.error ?? problemOf(problem, "branch_id")}
+                onChange={(event) => {
+                  bound.onChange(event);
+                  f.submit();
+                }}
+              />
+            );
+          }}
+        </f.form.Field>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="submit">{t("filters.apply")}</Button>
+        <ApplyButton loading={loading} />
         <div role="group" aria-label={t("filters.presets")} className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" onClick={() => applyPreset("thisMonth")}>
             {t("filters.thisMonth")}
@@ -219,7 +256,7 @@ function PurchaseFilters({ applied, onApply }: { applied: PurchaseParams; onAppl
           </Button>
         </div>
       </div>
-    </form>
+    </AppForm>
   );
 }
 
@@ -228,22 +265,26 @@ function PurchaseResults({ report }: { report: UseQueryResult<PurchaseReport> })
   const data = report.data;
   if (data === undefined) {
     return report.isError ? (
-      <ReportLoadError error={report.error} onRetry={() => void report.refetch()} />
+      <ReportLoadError
+        error={report.error}
+        detail={!fieldProblem(report.error)}
+        onRetry={() => void report.refetch()}
+      />
     ) : (
       <ReportSkeleton />
     );
   }
 
   return (
-    <div aria-busy={report.isFetching} className="grid gap-4 md:gap-6">
+    <div aria-busy={report.isFetching} className="grid grid-cols-1 gap-4 md:gap-6">
       <p className="text-sm text-muted-foreground">
         {t("purchase.period", {
-          from: formatThaiDate(data.date_from, "long"),
-          to: formatThaiDate(data.date_to, "long"),
+          from: isoToThaiInput(data.date_from),
+          to: isoToThaiInput(data.date_to),
         })}
       </p>
       <PurchaseSummary total={data.total} />
-      <div className="grid items-start gap-4 md:gap-6 xl:grid-cols-2">
+      <div className="grid grid-cols-1 items-start gap-4 md:gap-6 xl:grid-cols-2">
         <ByBranchTable report={data} />
         <ByMetalTable report={data} />
       </div>
@@ -266,11 +307,14 @@ function PurchaseSummary({ total }: { total: PurchaseReport["total"] }) {
       <h2 id={titleId} className="sr-only">
         {t("purchase.summary.title")}
       </h2>
-      <dl className="grid gap-4 sm:grid-cols-3">
+      <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {items.map((item) => (
-          <div key={item.label} className="grid gap-1 rounded-xl border bg-card p-4 text-card-foreground shadow-sm">
+          <div
+            key={item.label}
+            className="grid min-w-0 gap-1 rounded-xl border bg-card p-4 text-card-foreground shadow-sm"
+          >
             <dt className="text-sm text-muted-foreground">{item.label}</dt>
-            <dd className="text-2xl font-semibold tabular-nums">{item.value}</dd>
+            <dd className="text-2xl font-semibold tabular-nums [overflow-wrap:anywhere]">{item.value}</dd>
           </div>
         ))}
       </dl>
@@ -291,7 +335,7 @@ function ByBranchTable({ report }: { report: PurchaseReport }) {
   const { t } = useTranslation("reports");
   const titleId = useId();
   return (
-    <section aria-labelledby={titleId} className="grid gap-3">
+    <section aria-labelledby={titleId} className="grid grid-cols-1 gap-3">
       <SectionTitle id={titleId}>{t("purchase.byBranch.title")}</SectionTitle>
       <TableFrame>
         <Table>
@@ -345,7 +389,7 @@ function ByMetalTable({ report }: { report: PurchaseReport }) {
   const { t } = useTranslation("reports");
   const titleId = useId();
   return (
-    <section aria-labelledby={titleId} className="grid gap-3">
+    <section aria-labelledby={titleId} className="grid grid-cols-1 gap-3">
       <SectionTitle id={titleId}>{t("purchase.byMetal.title")}</SectionTitle>
       <TableFrame>
         <Table>
@@ -419,7 +463,7 @@ function BillRows({ rows }: { rows: PurchaseRow[] }) {
         header: t("purchase.rows.date"),
         cell: (info) => (
           <span className="whitespace-nowrap tabular-nums">
-            {t("purchase.rows.dateTime", { date: formatThaiDate(info.getValue()), time: info.row.original.time })}
+            {formatDocDateTime(info.getValue(), info.row.original.time)}
           </span>
         ),
       }),
@@ -469,7 +513,7 @@ function BillRows({ rows }: { rows: PurchaseRow[] }) {
   );
 
   return (
-    <section aria-labelledby={titleId} className="grid gap-3">
+    <section aria-labelledby={titleId} className="grid grid-cols-1 gap-3">
       <SectionTitle id={titleId}>{t("purchase.rows.title")}</SectionTitle>
       <DataTable
         columns={columns}

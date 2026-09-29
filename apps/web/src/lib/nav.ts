@@ -88,3 +88,22 @@ export const canCreateBill = (role: Role) => BILL_CREATORS.includes(role);
 export const canSetGoldPrice = (role: Role) => GOLD_PRICE_SETTERS.includes(role);
 /** ส่งบัญชีรายเดือน — GET /api/reports/export รับเฉพาะ accounting/admin (role อื่นเห็นสถานะไม่มีสิทธิ์แทนฟอร์ม) */
 export const canExportReports = (role: Role) => EXPORTERS.includes(role);
+
+/** หน้าเอกสารบิล (/buy/$id) เป็นของเมนู "ค้นบิล" ไม่ใช่ "ซื้อเข้า" (ซื้อเข้า = เปิดบิลใหม่เท่านั้น) */
+const BILL_PAGE = /^\/buy\/[^/]+/;
+
+/**
+ * เมนูที่ตรงกับหน้าปัจจุบัน (มีได้เมนูเดียว) — "/" ตรงตัวเท่านั้น · หน้าลูกเป็นของเมนูแม่ที่ path ยาวที่สุด
+ * (/customers/new → ลูกค้า · /reports/stock → สต็อก) · /buy/$id → ค้นบิล
+ */
+export function activeNavPath(pathname: string, role: Role): AppPath | undefined {
+  const path = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+  const items = navFor(role).flatMap((group) => group.items);
+  if (BILL_PAGE.test(path)) return items.find((item) => item.to === "/bills")?.to;
+  let best: AppPath | undefined;
+  for (const item of items) {
+    const hit = item.to === "/" ? path === "/" : path === item.to || path.startsWith(`${item.to}/`);
+    if (hit && (!best || item.to.length > best.length)) best = item.to;
+  }
+  return best;
+}

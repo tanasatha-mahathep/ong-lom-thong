@@ -2,6 +2,7 @@ import type { Db } from "@ong/db";
 import { Hono } from "hono";
 import { accessLog } from "./lib/accessLog";
 import { requireJsonBody } from "./lib/contentType";
+import { requireSameOriginFetch } from "./lib/fetchSite";
 import { noStoreByDefault, securityHeaders } from "./lib/httpHeaders";
 import type { Auth } from "./auth";
 import type { Env } from "./env";
@@ -9,6 +10,7 @@ import { type AppEnv, apiError } from "./lib/context";
 import { loggableError } from "./lib/log";
 import { sameOriginOnly } from "./lib/origin";
 import type { Storage } from "./lib/storage";
+import { type GoldReferenceService, createGoldReferenceService, providerFromEnv } from "./services/goldReference";
 import type { ReceiptPdfService } from "./services/receiptPdf";
 import { buyRoutes } from "./routes/buy";
 import { customerRoutes } from "./routes/customers";
@@ -25,13 +27,23 @@ export interface AppDeps {
   storage: Storage;
   /** สร้าง/เก็บ PDF ของบิล — renderer จริง (Gotenberg) ใน index.ts · ตัวปลอมใน test harness */
   pdf: ReceiptPdfService;
+  /** ราคาอ้างอิงสมาคม — ไม่ส่ง = สร้างจาก env (ค่าเริ่มต้นปิด) · เทสต์ส่ง provider ปลอม */
+  goldReference?: GoldReferenceService;
   now?: () => Date;
 }
 
 const health = () => ({ ok: true, time: new Date().toISOString() });
 
 /** ประกอบแอปจาก dependency ที่ส่งเข้ามา — เทสต์เรียก app.request() ได้โดยไม่ต้องเปิดพอร์ต */
-export function createApp({ db, auth, env, storage, pdf, now = () => new Date() }: AppDeps) {
+export function createApp({ db, auth, env, storage, pdf, goldReference, now = () => new Date() }: AppDeps) {
+  const reference =
+    goldReference ??
+    createGoldReferenceService({
+      provider: providerFromEnv(env),
+      now,
+      // ไม่ log URL/ข้อความเต็ม — บอกแค่ชนิดของปัญหา
+      onError: (reason) => console.warn(`[gold-reference] fetch failed: ${reason}`),
+    });
   const app = new Hono<AppEnv>();
   // ก่อนทุก route (รวม SPA ใน index.ts): access log ไม่มี PII · header ความปลอดภัย · API ไม่ cache
   app.use(accessLog(env.NODE_ENV === "test" ? null : (line) => console.log(line)));
@@ -43,6 +55,7 @@ export function createApp({ db, auth, env, storage, pdf, now = () => new Date() 
     c.set("env", env);
     c.set("storage", storage);
     c.set("pdf", pdf);
+    c.set("goldReference", reference);
     c.set("now", now);
     await next();
   });
@@ -52,6 +65,8 @@ export function createApp({ db, auth, env, storage, pdf, now = () => new Date() 
   api.use(sameOriginOnly(env.BETTER_AUTH_URL));
   // defence in depth (ASVS V13.2.5) — request ที่มี body ต้องเป็น application/json (F12 · F15 · F16)
   api.use(requireJsonBody);
+  // Fetch Metadata — GET ที่ส่งไฟล์สำคัญ/ลง audit ต้องไม่มาจากเว็บอื่น (sameOriginOnly ยกเว้นเมธอดปลอดภัย)
+  api.use(requireSameOriginFetch);
   api.get("/healthz", (c) => c.json(health()));
   // login / logout / session ของ better-auth
   api.on(["GET", "POST"], "/auth/*", (c) => auth.handler(c.req.raw));

@@ -15,11 +15,12 @@ export async function signOut(): Promise<void> {
 const SwitchBranchSchema = z.object({ branch: BranchSchema });
 
 /** เปลี่ยนสาขาที่กำลังทำงาน (เก็บใน session ฝั่งเซิร์ฟเวอร์) — ได้สาขาใหม่กลับมา */
-export async function switchBranch(branchId: string) {
+export async function switchBranch(branchId: string, { signal }: { signal?: AbortSignal } = {}) {
   const { branch } = await apiFetch("/api/me/branch", {
     method: "POST",
     json: { branch_id: branchId },
     schema: SwitchBranchSchema,
+    signal,
   });
   return branch;
 }

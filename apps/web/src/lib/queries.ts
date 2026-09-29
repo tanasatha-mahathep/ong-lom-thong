@@ -67,3 +67,31 @@ export const goldPriceTodayQueryOptions = queryOptions({
   },
   staleTime: 60_000,
 });
+
+export const GoldReferenceSchema = z.object({
+  /** host ที่เซิร์ฟเวอร์ดึงราคามา */
+  source: z.string(),
+  /** เวลาประกาศของสมาคม (ISO เวลาไทย) */
+  announced_at: z.iso.datetime({ offset: true }),
+  /** ครั้งที่ของวัน — ไม่มีในประกาศ = null */
+  round: z.number().int().positive().nullable(),
+  bar_buy: decimalString,
+  bar_sell: decimalString,
+  ornament_buy: decimalString,
+  ornament_sell: decimalString,
+  fetched_at: z.iso.datetime({ offset: true }),
+  /** ประกาศล่าสุดไม่ใช่ของวันนี้ หรือดึงรอบล่าสุดไม่สำเร็จ (แสดงค่าที่ดึงไว้ก่อน) */
+  stale: z.boolean(),
+});
+export type GoldReference = z.infer<typeof GoldReferenceSchema>;
+
+/**
+ * ราคาสมาคมค้าทองคำ (อ้างอิง) — GET /api/gold-price/reference · แสดง/เติมค่าเริ่มต้นเท่านั้น ไม่ใช่ราคาของร้าน
+ * 503 = ดึงไม่ได้/ปิดไว้ (error ของ query) · ไม่ลองซ้ำเอง: เซิร์ฟเวอร์ cache และพักการดึงหลังล้มอยู่แล้ว
+ */
+export const goldReferenceQueryOptions = queryOptions({
+  queryKey: ["gold-price", "reference"],
+  queryFn: ({ signal }) => apiFetch("/api/gold-price/reference", { signal, schema: GoldReferenceSchema }),
+  staleTime: 5 * 60_000,
+  retry: false,
+});

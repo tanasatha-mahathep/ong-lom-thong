@@ -665,6 +665,59 @@ describe.skipIf(!available)("ส่งบัญชีรายเดือน (s
     }
   });
 
+  // lib/fetchSite.ts ต่อจริงในแอปและอยู่ก่อน handler — ลิงก์จากเว็บอื่นพา browser ของฝ่ายบัญชีที่ login อยู่มาโหลด
+  // zip ไม่ได้ และไม่ทิ้ง audit ที่ดูเหมือนเจ้าตัวสั่งเอง (cookie SameSite=Lax ยังถูกแนบมากับ top-level GET)
+  it("Sec-Fetch-Site: cross-site = 403 ไม่ได้ zip ไม่ลง audit · same-origin / ไม่มี header ยังดาวน์โหลดได้", async () => {
+    const before = (await exportAudits()).length;
+    const site = (value?: string, method = "GET") =>
+      t.app.request(`/api/reports/export?${OCT}`, {
+        method,
+        headers: {
+          origin: "http://localhost:8787",
+          cookie: cookies.acct ?? "",
+          ...(value === undefined ? {} : { "sec-fetch-site": value }),
+        },
+      });
+
+    for (const value of ["cross-site", "same-site"]) {
+      const res = await site(value);
+      expect(res.status, value).toBe(403);
+      expect(await res.json()).toEqual({ error: "เปิดไฟล์นี้จากเว็บอื่นไม่ได้ — เปิดจากหน้าระบบโดยตรง" });
+    }
+    // HEAD ข้ามเว็บก็ไม่ผ่าน — ไม่ให้วัดได้ว่าเดือนนั้นมีไฟล์ชื่ออะไร
+    expect((await site("cross-site", "HEAD")).status).toBe(403);
+    expect(await exportAudits()).toHaveLength(before);
+
+    // ฝ่ายบัญชีต้องดาวน์โหลดได้ตามปกติ: หน้าระบบของเราเอง · เปิดจาก bookmark · curl ที่ไม่ส่ง header
+    for (const value of ["same-origin", "none", undefined]) {
+      const res = await site(value);
+      expect(res.status, String(value)).toBe(200);
+      // อ่าน body ให้จบ — zip ส่งแบบ stream
+      expect(readZip(new Uint8Array(await res.arrayBuffer())).length).toBeGreaterThan(0);
+    }
+    expect(await exportAudits()).toHaveLength(before + 3);
+  });
+
+  // ด่านเทียบ c.req.path ตรงตัวอักษร — พิสูจน์กับ router จริงว่าไม่มีรูป path ที่ "ถึง handler ได้แต่ข้ามด่าน"
+  // (Hono decode ก่อน middleware · รูปที่ regex ไม่ match router ก็ไม่ match → 404 ไม่ลง audit)
+  it("path ที่ percent-encode / trailing slash ข้ามด่านไม่ได้ และไม่ลง audit", async () => {
+    const before = (await exportAudits()).length;
+    const raw = (path: string) =>
+      t.app.request(`http://localhost${path}`, {
+        headers: { origin: "http://localhost:8787", cookie: cookies.acct ?? "", "sec-fetch-site": "cross-site" },
+      });
+
+    // decode แล้วยังเป็นเส้นทางเดิม → ด่านจับได้ 403
+    for (const path of [`/api/reports/e%78port?${OCT}`, `/api/reports/%65xport?${OCT}`]) {
+      expect((await raw(path)).status, path).toBe(403);
+    }
+    // รูปที่ regex ไม่ match ต้องไม่ถึง handler (404) — ห้ามเป็น 200
+    for (const path of [`/api/reports/export/?${OCT}`, `/api/reports//export?${OCT}`, `/API/reports/export?${OCT}`]) {
+      expect((await raw(path)).status, path).toBe(404);
+    }
+    expect(await exportAudits()).toHaveLength(before);
+  });
+
   it("เลขบัตรเต็ม/ชื่อไม่หลุดในไฟล์ที่ไม่ใช่ PDF (manifest · README) · CSV มาสก์เลขบัตร", async () => {
     const z = await download(OCT);
     const manifest = new TextDecoder().decode(z.entry("manifest.json"));

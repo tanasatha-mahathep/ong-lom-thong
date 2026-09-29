@@ -78,6 +78,12 @@ export default defineConfig(
     },
   },
   { files: ["**/*.js"], extends: [tseslint.configs.disableTypeChecked] },
+  // .pnpmfile.cjs — pnpm โหลดไฟล์ hook แบบ CommonJS เท่านั้น
+  {
+    files: ["**/*.cjs"],
+    extends: [tseslint.configs.disableTypeChecked],
+    languageOptions: { sourceType: "commonjs" },
+  },
   {
     // สคริปต์ที่ browser โหลดตรง ๆ ก่อนแอป (ตั้งธีมกันจอวาบ) — ไม่ผ่าน Vite
     files: ["apps/web/public/**/*.js"],
