@@ -42,7 +42,7 @@ describe("toast หลังส่งฟอร์ม (U5)", () => {
     notifyError("พัง");
 
     expect(TOAST_SUCCESS_MS).toBe(4000);
-    expect(success).toHaveBeenCalledWith("ok", { duration: 4000 });
+    expect(success).toHaveBeenCalledWith("ok", { duration: 4000, closeButton: false });
     expect(error).toHaveBeenCalledWith("พัง", { duration: Number.POSITIVE_INFINITY, closeButton: true });
   });
 });

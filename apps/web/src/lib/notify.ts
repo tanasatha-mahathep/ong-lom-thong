@@ -10,7 +10,8 @@ export const TOAST_POSITION = "top-center" as const;
 export const TOAST_SUCCESS_MS = 4000;
 
 export function notifySuccess(message: string, options?: ExternalToast) {
-  return toast.success(message, { duration: TOAST_SUCCESS_MS, ...options });
+  // closeButton: false — แทน toast error เดิมที่ id เดียวกันได้โดยไม่พาปุ่มปิดมาด้วย
+  return toast.success(message, { duration: TOAST_SUCCESS_MS, closeButton: false, ...options });
 }
 
 export function notifyError(message: string, options?: ExternalToast) {

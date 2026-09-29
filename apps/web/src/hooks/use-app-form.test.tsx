@@ -8,7 +8,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { FloatingInput } from "@/components/ui/floating-field";
 import { Toaster } from "@/components/ui/sonner";
 import { ApiError } from "@/lib/api";
-import { useAppForm } from "./use-app-form";
+import { toFieldName, useAppForm } from "./use-app-form";
 
 interface Values {
   name: string;
@@ -19,19 +19,21 @@ function DemoForm({
   submit,
   onSuccess,
   submitOnEnter,
+  distinct = false,
 }: {
   submit: (values: Values) => Promise<string>;
-  onSuccess?: (result: string) => void;
+  onSuccess?: (result: string) => void | Promise<void>;
   submitOnEnter?: boolean;
+  /** เพิ่ม refine ระดับฟอร์ม (ไม่มี path) */
+  distinct?: boolean;
 }) {
-  const schema = useMemo(
-    () =>
-      z.object({
-        name: z.string().trim().min(1, "กรอกชื่อ"),
-        mobile: z.string().regex(/^0\d{2}-?\d{3}-?\d{4}$/, "เบอร์มือถือไม่ถูกต้อง"),
-      }),
-    [],
-  );
+  const schema = useMemo(() => {
+    const base = z.object({
+      name: z.string().trim().min(1, "กรอกชื่อ"),
+      mobile: z.string().regex(/^0\d{2}-?\d{3}-?\d{4}$/, "เบอร์มือถือไม่ถูกต้อง"),
+    });
+    return distinct ? base.refine((v) => !v.mobile.endsWith("0000"), "เบอร์นี้ใช้ทดสอบเท่านั้น") : base;
+  }, [distinct]);
   const f = useAppForm({
     defaultValues: { name: "", mobile: "" },
     schema,
@@ -49,8 +51,12 @@ function DemoForm({
         <f.form.Field name="mobile">
           {(field) => <FloatingInput label="มือถือ" placeholder="081-234-5678" {...f.bind(field)} />}
         </f.form.Field>
+        {f.formError && <p data-testid="form-error">{f.formError}</p>}
         <SubmitButton form={f}>บันทึก</SubmitButton>
       </AppForm>
+      <button type="button" onClick={f.reset}>
+        เริ่มใหม่
+      </button>
       <Toaster position="top-center" />
     </ThemeProvider>
   );
@@ -199,8 +205,166 @@ describe("useAppForm — ระหว่างส่งและหลังส�
     await user.type(mobile(), "0812345678");
     await user.keyboard("{Enter}");
 
-    expect(await screen.findByText("ติดต่อเซิร์ฟเวอร์ไม่ได้ ตรวจการเชื่อมต่อแล้วลองใหม่")).toBeInTheDocument();
+    expect(
+      await screen.findByText("ติดต่อเซิร์ฟเวอร์ไม่ได้ ตรวจการเชื่อมต่อแล้วลองใหม่", { selector: "[data-title]" }),
+    ).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "บันทึก" })).toHaveFocus());
     expect(name()).not.toHaveAttribute("aria-invalid");
   });
+});
+
+/** ฟอร์มที่มีรายการ (array) — ชื่อช่องแบบ TanStack `lines[0].weight` */
+function LinesForm({ submit }: { submit: () => Promise<void> }) {
+  const f = useAppForm({ defaultValues: { lines: [{ weight: "1.000" }, { weight: "2.500" }] }, submit });
+  return (
+    <ThemeProvider>
+      <AppForm form={f}>
+        {[0, 1].map((i) => (
+          <f.form.Field key={i} name={`lines[${i}].weight`}>
+            {(field) => <FloatingInput label={`น้ำหนักแถว ${i + 1}`} placeholder="0.000" {...f.bind(field)} />}
+          </f.form.Field>
+        ))}
+        {f.formError && <p data-testid="form-error">{f.formError}</p>}
+        <SubmitButton form={f}>บันทึก</SubmitButton>
+      </AppForm>
+      <Toaster position="top-center" />
+    </ThemeProvider>
+  );
+}
+
+async function fillValid(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(name(), "  สมชาย  ");
+  await user.type(mobile(), "081-234-5678");
+}
+
+describe("useAppForm — หลังรีวิว PR #91", () => {
+  it("submit ได้ค่าที่ผ่าน schema.parse แล้ว (trim)", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn(() => Promise.resolve("B-1"));
+    render(<DemoForm submit={submit} />);
+    await fillValid(user);
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(submit).toHaveBeenCalledWith({ name: "สมชาย", mobile: "081-234-5678" }));
+  });
+
+  it("ส่งซ้ำพร้อมกันบนฟอร์มที่ยังเปิดอยู่ (Enter · Ctrl+Enter · submit ซ้ำ) → ส่งครั้งเดียว", async () => {
+    const user = userEvent.setup();
+    const pending = deferred<string>();
+    const submit = vi.fn(() => pending.promise);
+    render(<DemoForm submit={submit} />);
+    await fillValid(user);
+
+    // ยิงทั้งหมดใน tick เดียวกัน ก่อน React render ฟอร์มเป็น disabled
+    const form = screen.getByRole("form", { name: "ลูกค้า" });
+    act(() => {
+      fireEvent.keyDown(mobile(), { key: "Enter", ctrlKey: true });
+      fireEvent.keyDown(mobile(), { key: "Enter", metaKey: true });
+      fireEvent.submit(form);
+      fireEvent.submit(form);
+    });
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: "กำลังบันทึก…" })).toBeDisabled();
+    await act(async () => {
+      pending.resolve("B-2");
+      await pending.promise;
+    });
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
+  it("บันทึกสำเร็จแต่ onSuccess ล้ม → ไม่นับเป็นบันทึกไม่สำเร็จ · ฟอร์มล็อก · บันทึกซ้ำไม่ได้ · reset ปลดล็อก", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn(() => Promise.resolve("B-3"));
+    const onSuccess = vi.fn(() => Promise.reject(new Error("navigation failed")));
+    render(<DemoForm submit={submit} onSuccess={onSuccess} />);
+    await fillValid(user);
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByText(/^บันทึกแล้ว แต่เปิดหน้าถัดไปไม่ได้/)).toBeInTheDocument();
+    // ไม่ใช่ error ของการบันทึก: ไม่มีข้อความรวม · ไม่มี error ใต้ช่อง
+    expect(screen.queryByTestId("form-error")).not.toBeInTheDocument();
+    expect(name()).not.toHaveAttribute("aria-invalid");
+    // ล็อกค้าง — กดบันทึกซ้ำ (บิลซ้ำ) ไม่ได้
+    expect(name()).toBeDisabled();
+    expect(screen.getByRole("button", { name: "กำลังบันทึก…" })).toBeDisabled();
+    fireEvent.submit(screen.getByRole("form", { name: "ลูกค้า" }));
+    fireEvent.keyDown(name(), { key: "Enter", ctrlKey: true });
+    expect(submit).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "เริ่มใหม่" }));
+    expect(name()).toBeEnabled();
+    expect(name()).toHaveValue("");
+  });
+
+  it("error ของทั้งฟอร์ม (refine ไม่มี path) → ข้อความรวม + toast + โฟกัสปุ่มบันทึก · ไม่ส่ง", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn(() => Promise.resolve("B-4"));
+    render(<DemoForm submit={submit} distinct />);
+    await user.type(name(), "สมชาย");
+    await user.type(mobile(), "081-234-0000");
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByTestId("form-error")).toHaveTextContent("เบอร์นี้ใช้ทดสอบเท่านั้น");
+    expect(await screen.findByRole("button", { name: "ปิดการแจ้งเตือน" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "บันทึก" })).toHaveFocus());
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("toast error ของฟอร์มเดียวกันไม่กองกัน · ส่งใหม่สำเร็จ = toast error หาย", async () => {
+    const user = userEvent.setup();
+    const submit = vi
+      .fn<(values: Values) => Promise<string>>()
+      .mockRejectedValueOnce(new ApiError(500, "boom", undefined, null))
+      .mockRejectedValueOnce(new ApiError(500, "boom", undefined, null))
+      .mockResolvedValueOnce("B-5");
+    render(<DemoForm submit={submit} />);
+    await fillValid(user);
+
+    await user.keyboard("{Enter}");
+    await screen.findByText("เซิร์ฟเวอร์ขัดข้อง ลองใหม่อีกครั้ง", { selector: "[data-title]" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "บันทึก" })).toHaveFocus());
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole("button", { name: "บันทึก" })).toHaveFocus());
+    expect(screen.getAllByText("เซิร์ฟเวอร์ขัดข้อง ลองใหม่อีกครั้ง", { selector: "[data-title]" })).toHaveLength(1);
+
+    await user.keyboard("{Enter}");
+    expect(await screen.findByText("บันทึกแล้ว B-5")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.queryByText("เซิร์ฟเวอร์ขัดข้อง ลองใหม่อีกครั้ง", { selector: "[data-title]" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("API ชี้ path แบบมีจุด (lines.1.weight) → error ใต้ช่อง lines[1].weight + โฟกัส", async () => {
+    const user = userEvent.setup();
+    render(
+      <LinesForm submit={() => Promise.reject(new ApiError(400, "น้ำหนักต้องมากกว่า 0", "lines.1.weight", null))} />,
+    );
+    await user.click(screen.getByRole("button", { name: "บันทึก" }));
+
+    const second = screen.getByLabelText("น้ำหนักแถว 2");
+    await waitFor(() => expect(second).toHaveFocus());
+    expect(second).toHaveAccessibleDescription("น้ำหนักต้องมากกว่า 0");
+    expect(screen.getByLabelText("น้ำหนักแถว 1")).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByTestId("form-error")).not.toBeInTheDocument();
+  });
+
+  it("API ชี้ path ที่ฟอร์มไม่มี → ข้อความรวม + โฟกัสปุ่มบันทึก (ไม่หลุดไป body)", async () => {
+    const user = userEvent.setup();
+    render(<LinesForm submit={() => Promise.reject(new ApiError(400, "แถวนี้ไม่มีแล้ว", "lines.7.weight", null))} />);
+    await user.click(screen.getByRole("button", { name: "บันทึก" }));
+
+    expect(await screen.findByTestId("form-error")).toHaveTextContent("แถวนี้ไม่มีแล้ว");
+    await waitFor(() => expect(screen.getByRole("button", { name: "บันทึก" })).toHaveFocus());
+  });
+});
+
+describe("toFieldName", () => {
+  it.each([
+    ["mobile", "mobile"],
+    ["lines.1.weight_g", "lines[1].weight_g"],
+    ["allowed_branch_ids.1", "allowed_branch_ids[1]"],
+    ["a.0.b.2", "a[0].b[2]"],
+  ])("%s → %s", (path, name) => expect(toFieldName(path)).toBe(name));
 });
