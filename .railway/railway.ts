@@ -5,7 +5,18 @@
  * Railway ไม่อ่านไฟล์นี้ตอน deploy — ต้องสั่ง `pnpm railway:plan` / `pnpm railway:apply` เอง
  * วิธีใช้ครั้งแรกและตั้งค่าลับ: .railway/README.md
  */
-import { bucket, defineRailway, github, postgres, preserve, project, ref, service } from "railway/iac";
+import {
+  bucket,
+  defineRailway,
+  github,
+  postgres,
+  preserve,
+  project,
+  ref,
+  service,
+  type ResourceNode,
+  type VariableValue,
+} from "railway/iac";
 
 const REPO = "tanasatha-mahathep/ong-lom-thong";
 /** Southeast Asia Metal (Singapore) — ใช้กับ service และ database */
@@ -16,6 +27,16 @@ const GOTENBERG_PORT = "3000";
 const APP_SERVICE = "Office";
 const PDF_SERVICE = "PDF (Gotenberg)";
 const BUCKET = "Media";
+const BACKUP_SERVICE = "Nightly Backup";
+const BACKUP_BUCKET = "Backup";
+/**
+ * สำรองข้อมูลรายคืน (services/backup) — cron ของ Railway เป็นเวลา UTC เสมอ
+ * 19:17 UTC = 02:17 น. เวลาไทย (Asia/Bangkok = UTC+7 ไม่มี daylight saving) ของวันถัดไป — ร้านปิด ไม่มีบิลค้าง
+ * นาที 17 ไม่ใช่ 00: เลี่ยงช่วงที่ cron ทั้งแพลตฟอร์มแย่งกันรันต้นชั่วโมง
+ */
+const BACKUP_CRON = "17 19 * * *";
+/** dump ที่เก็บ: ทุกไฟล์ของ 30 วันล่าสุด + ล่าสุดของแต่ละเดือน 12 เดือน (services/backup/lib.sh) */
+const BACKUP_KEEP = { BACKUP_KEEP_DAILY: "30", BACKUP_KEEP_MONTHLY: "12" };
 /**
  * หัวใบรับซื้อ — ข้อมูลกิจการที่พิมพ์บนใบทุกใบ (ไม่ใช่ค่าลับ) · ค่าจากหน้า "ข้อมูลบริษัท" ของระบบเดิม
  * ใช้ค่าเดียวกันทุก environment · แอปตรวจรูปแบบตอน start (เลขผู้เสียภาษี 13 หลัก + หลักตรวจสอบ)
@@ -53,6 +74,24 @@ function secret(name: string) {
   return { value, isSealed: true };
 }
 
+/**
+ * ตัวแปร S3 ของ Railway bucket เป็น reference (Railway สร้าง key เอง ไม่มีค่าลับใน git)
+ * Railway bucket ใช้ virtual-hosted style → force path style = false
+ */
+function s3Env<P extends string>(prefix: P, b: ResourceNode) {
+  return {
+    [`${prefix}ENDPOINT`]: ref(b, "ENDPOINT"),
+    [`${prefix}REGION`]: ref(b, "REGION"),
+    [`${prefix}BUCKET`]: ref(b, "BUCKET"),
+    [`${prefix}ACCESS_KEY`]: ref(b, "ACCESS_KEY_ID"),
+    [`${prefix}SECRET_KEY`]: ref(b, "SECRET_ACCESS_KEY"),
+    [`${prefix}FORCE_PATH_STYLE`]: "false",
+  } as Record<
+    `${P}${"ENDPOINT" | "REGION" | "BUCKET" | "ACCESS_KEY" | "SECRET_KEY" | "FORCE_PATH_STYLE"}`,
+    string | VariableValue
+  >;
+}
+
 export default defineRailway((ctx) => {
   // fail closed: ไม่รู้จักชื่อ environment (เช่น รันใน railway run/shell ที่ส่ง RAILWAY_ENVIRONMENT_ID มา) = หยุด ไม่เดา
   const environment = ctx.environment;
@@ -78,7 +117,7 @@ export default defineRailway((ctx) => {
 
   const db = postgres("Postgres", { region: REGION });
 
-  // private เสมอ (Railway bucket ไม่มี public) — สำเนา off-site รายคืนไป R2/B2 เป็นภาคบังคับ (spec §11)
+  // private เสมอ (Railway bucket ไม่มี public) · ไม่มี versioning — สำเนารายคืนเป็นภาคบังคับ (spec §11): service BACKUP_SERVICE ด้านล่าง
   const files = bucket(BUCKET, { region: "sin" });
 
   const gotenberg = service(PDF_SERVICE, {
@@ -126,13 +165,7 @@ export default defineRailway((ctx) => {
       GOTENBERG_USERNAME: "ong",
       GOTENBERG_PASSWORD: secret("GOTENBERG_PASSWORD"),
 
-      // Railway bucket ใช้ virtual-hosted style → forcePathStyle = false
-      S3_ENDPOINT: ref(files, "ENDPOINT"),
-      S3_REGION: ref(files, "REGION"),
-      S3_BUCKET: ref(files, "BUCKET"),
-      S3_ACCESS_KEY: ref(files, "ACCESS_KEY_ID"),
-      S3_SECRET_KEY: ref(files, "SECRET_ACCESS_KEY"),
-      S3_FORCE_PATH_STYLE: "false",
+      ...s3Env("S3_", files),
 
       BETTER_AUTH_SECRET: secret("BETTER_AUTH_SECRET"),
       // domain *.up.railway.app สร้างด้วย `railway domain -s api` (IaC ไม่จัดการ generated domain)
@@ -144,5 +177,28 @@ export default defineRailway((ctx) => {
     },
   });
 
-  return project("Ong Lom Thong", { resources: [db, files, gotenberg, api] });
+  // สำเนารายคืน: dump database + copy ไฟล์จาก Media — bucket แยกของตัวเอง (private) ใน project เดียวกัน
+  // ไม่กันกรณีบัญชี/project Railway หาย — สำเนานอก Railway (R2/B2) ต่อเพิ่มได้ด้วยการเปลี่ยน BACKUP_S3_* (README)
+  const backupBucket = bucket(BACKUP_BUCKET, { region: "sin" });
+
+  const backup = service(BACKUP_SERVICE, {
+    source: github(REPO, { ...source, rootDirectory: "services/backup" }),
+    build: { watchPatterns: ["/services/backup/**"] }, // Dockerfile ที่ root ของ services/backup
+    replicas: oneReplicaInRegion,
+    // cron: Railway start container ตามเวลา · สคริปต์จบเอง · รอบก่อนยังไม่จบ = ข้ามรอบนี้
+    // NEVER: รันพัง = deployment ขึ้น failed ให้เห็น ไม่ใช่วนรันซ้ำ (ไม่มี healthcheck · ไม่มี public domain)
+    deploy: { cronSchedule: BACKUP_CRON, restartPolicyType: "NEVER" },
+    env: {
+      DATABASE_URL: db.env.DATABASE_URL,
+      BACKUP_ENVIRONMENT: environment,
+      ...BACKUP_KEEP,
+      // ต้นทาง: bucket ไฟล์ (ชื่อตัวแปรเดียวกับ Office)
+      ...s3Env("S3_", files),
+      // ปลายทาง: bucket Backup — เปลี่ยนเป็น R2/B2 ได้ด้วยการแก้ 7 ค่านี้ (ไม่ต้องแก้สคริปต์)
+      BACKUP_S3_PROVIDER: "Other",
+      ...s3Env("BACKUP_S3_", backupBucket),
+    },
+  });
+
+  return project("Ong Lom Thong", { resources: [db, files, backupBucket, gotenberg, api, backup] });
 });
