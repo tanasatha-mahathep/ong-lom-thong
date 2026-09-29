@@ -223,11 +223,40 @@ describe("หน้า login — กฎฟอร์ม U0–U6", () => {
     act(() => releaseSignIn());
     const overlay = await screen.findByRole("dialog", { name: "กำลังทำงาน…" });
     expect(overlay).toHaveAttribute("aria-busy", "true");
-    expect(await screen.findByText("ยินดีต้อนรับ ทดสอบ staff")).toBeInTheDocument();
+    const welcome = await screen.findByText("ยินดีต้อนรับ ทดสอบ staff");
+    // toast อยู่นอกส่วนที่ถูกทำ inert — aria-live ยังประกาศได้ระหว่างบังหน้าจอ
+    expect(welcome.closest("[inert]")).toBeNull();
+    expect(welcome.closest('[data-slot="toaster-host"]')).not.toBeNull();
 
     act(() => releaseMetals());
     await waitFor(() => expect(router.state.location.pathname).toBe("/buy"));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "กำลังทำงาน…" })).not.toBeInTheDocument());
+  });
+
+  it("ขั้นเลือกสาขา: บันทึกสาขาไม่สำเร็จ → toast + ข้อความในฟอร์ม · อยู่ขั้นเดิม เลือกใหม่ได้ · ไม่มีชั้นบัง", async () => {
+    const me = makeMe("manager", [BRANCH_HQ, BRANCH_2]);
+    let signedIn = false;
+    const api = fakeApi({
+      "GET /api/me": () => (signedIn ? json(me) : json({ error: "unauthorized" }, 401)),
+      [SIGN_IN]: () => {
+        signedIn = true;
+        return json({ redirect: false });
+      },
+      "POST /api/me/branch": () => json({ error: "internal error" }, 500),
+    });
+    const router = renderApp("/login");
+    const user = await submitCredentials();
+    await screen.findByRole("heading", { level: 1, name: "เลือกสาขาที่ทำงาน" });
+    await user.keyboard("{Enter}");
+
+    const message = "บันทึกสาขาไม่สำเร็จ — เซิร์ฟเวอร์ขัดข้อง ลองใหม่อีกครั้ง";
+    expect(await screen.findByRole("alert")).toHaveTextContent(message);
+    expect(await screen.findByRole("button", { name: "ปิดการแจ้งเตือน" })).toBeInTheDocument();
+    expect(api.callsTo("POST", "/api/me/branch")).toHaveLength(1);
+    expect(screen.getByRole("radio", { name: "สำนักงานใหญ่ (สาขา 1)" })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "เข้าใช้งาน" })).toHaveFocus());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/login");
   });
 
   it("รหัสผิด → toast ค้าง (มีปุ่มปิด) + ข้อความเหนือช่อง · ฟอร์มเปิดให้แก้ · ไม่มีชั้นบังหน้าจอ", async () => {

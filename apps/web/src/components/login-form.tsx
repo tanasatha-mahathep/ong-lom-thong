@@ -86,7 +86,8 @@ function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => Promise<void> | vo
     defaultValues: { email: "", password: "" },
     schema,
     submit: async ({ email, password }): Promise<Me> => {
-      await signIn({ email: email.trim(), password });
+      // email มาจาก schema.parse แล้ว (trim + ตรวจรูปแบบ) — ส่งตรงได้
+      await signIn({ email, password });
       // session ใหม่ — ทิ้ง cache ของ session ก่อนหน้า แล้วอ่านผู้ใช้จากเซิร์ฟเวอร์
       queryClient.removeQueries();
       const me = await queryClient.fetchQuery({ ...meQueryOptions, staleTime: 0 });
@@ -167,8 +168,11 @@ function BranchStep({ me, onDone }: { me: Me; onDone: () => Promise<void> | void
   // ค่าเริ่มต้น = สาขาปัจจุบันของ session (สาขาหลักของบัญชี)
   const [initialId] = useState(() => me.branch?.id ?? me.branches[0]?.id ?? "");
 
+  const schema = useMemo(() => z.object({ branchId: z.string().min(1, t("branch.required")) }), [t]);
   const f = useAppForm({
     defaultValues: { branchId: initialId },
+    // ไม่มีสาขาที่เลือก = ไม่ส่ง ไม่ว่าจะมาจาก Enter · Ctrl+Enter หรือปุ่ม
+    schema,
     submit: ({ branchId }) => switchBranch(branchId),
     successMessage: (branch) => t("branch.welcome", { name: me.user.name, branch: branch.name }),
     onSuccess: async (branch) => {
@@ -185,6 +189,8 @@ function BranchStep({ me, onDone }: { me: Me; onDone: () => Promise<void> | void
   const submitOnEnter = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Enter" || event.ctrlKey || event.metaKey) return;
     event.preventDefault();
+    // ยังไม่ได้เลือกสาขา = ปุ่มบันทึกปิดอยู่ · Enter ต้องไม่ข้ามเงื่อนไขนั้น
+    if (!f.form.state.values.branchId) return;
     f.submit();
   };
 
