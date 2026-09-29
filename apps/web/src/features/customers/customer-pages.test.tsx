@@ -1,6 +1,7 @@
-import { configure, screen, waitFor, within } from "@testing-library/react";
+import { act, configure, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { CustomerListItem } from "@/features/customers/model";
 import { GOLD_PRICE, fakeApi, json, makeMe, renderApp } from "@/test/app";
 import { CUSTOMER_DETAIL, CUSTOMER_ID, CUSTOMER_ROW, EXPIRED_ROW, PNG_1X1 } from "@/test/customers";
 
@@ -20,6 +21,16 @@ const listQueries = (api: ReturnType<typeof fakeApi>) =>
   api
     .callsTo("GET", "/api/customers")
     .map((call) => Object.fromEntries(new URL(call.path, "http://test.local").searchParams));
+
+const NATIONAL_ID = "1103700123458";
+
+/** GET /api/customers ที่ตอบตามคำค้น q — q ที่ไม่ได้ระบุ = ลูกค้า CUSTOMER_ROW */
+const byQuery =
+  (rowsByQuery: Record<string, CustomerListItem[]>) =>
+  ({ path }: { path: string }) => {
+    const q = new URL(path, "http://test.local").searchParams.get("q");
+    return json({ items: (q && rowsByQuery[q]) || [CUSTOMER_ROW], page: 1, has_more: false });
+  };
 
 beforeEach(() => {
   Object.assign(URL, { createObjectURL: vi.fn(() => "blob:photo"), revokeObjectURL: vi.fn() });
@@ -124,6 +135,79 @@ describe("/customers — รายการและค้นหา", () => {
 
     await waitFor(() => expect(router.state.location.search).toEqual({ q: "0812345678" }));
     expect(listQueries(api)).toContainEqual({ q: "0812345678" });
+  });
+
+  it("ปุ่มย้อนกลับ: URL กลับมามีคำค้นของตัวเอง — ช่องและผลตาม URL ไม่ค้างเป็นเลขบัตร", async () => {
+    fakeApi({ ...shell, "GET /api/customers": byQuery({ [NATIONAL_ID]: [EXPIRED_ROW] }) });
+    const router = renderApp("/customers?q=somchai");
+    const user = userEvent.setup();
+    const box = await screen.findByLabelText("ค้นหาลูกค้า");
+    expect(box).toHaveValue("somchai");
+
+    // กดเมนู "ลูกค้า" (หน้ารายการใหม่ ไม่มีคำค้น) แล้วค้นด้วยเลขบัตร — ผลเป็นของเลขบัตร ไม่ใช่รายชื่อทั้งหมด
+    await user.click(
+      within(await screen.findByRole("navigation", { name: "เมนูหลัก" })).getByRole("link", { name: "ลูกค้า" }),
+    );
+    await waitFor(() => expect(box).toHaveValue(""));
+    await user.type(box, `${NATIONAL_ID}{Enter}`);
+    expect(await screen.findByRole("link", { name: EXPIRED_ROW.name_th })).toBeInTheDocument();
+    expect(router.state.location.search).toEqual({});
+
+    act(() => router.history.back());
+
+    await waitFor(() => expect(router.state.location.search).toEqual({ q: "somchai" }));
+    await waitFor(() => expect(box).toHaveValue("somchai"));
+    expect(await screen.findByRole("link", { name: CUSTOMER_ROW.name_th })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: EXPIRED_ROW.name_th })).not.toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "ผลค้นหาลูกค้า “somchai”" })).toBeInTheDocument();
+  });
+
+  it("ค้นด้วยเลขบัตรจากหน้า 3: ขอหน้า 1 เลย ไม่ยิง “เลขบัตร + หน้า 3” ก่อน", async () => {
+    const api = fakeApi({
+      ...shell,
+      "GET /api/customers": () => json({ items: [CUSTOMER_ROW], page: 3, has_more: false }),
+    });
+    const router = renderApp("/customers?page=3");
+    const user = userEvent.setup();
+    const box = await screen.findByLabelText("ค้นหาลูกค้า");
+    await screen.findByRole("link", { name: CUSTOMER_ROW.name_th });
+    expect(listQueries(api)).toEqual([{ page: "3" }]);
+
+    await user.type(box, `${NATIONAL_ID}{Enter}`);
+
+    await waitFor(() => expect(listQueries(api).at(-1)).toEqual({ q: NATIONAL_ID }));
+    expect(listQueries(api)).toEqual([{ page: "3" }, { q: NATIONAL_ID }]);
+    expect(router.state.location.search).toEqual({});
+  });
+
+  it("เปลี่ยนหน้าผลค้นด้วยเลขบัตร: เลขบัตรอยู่ต่อทั้งไปหน้าถัดไปและย้อนกลับ", async () => {
+    const api = fakeApi({
+      ...shell,
+      "GET /api/customers": ({ path }) =>
+        json({
+          items: [path.includes("page=2") ? EXPIRED_ROW : CUSTOMER_ROW],
+          page: 1,
+          has_more: !path.includes("page=2"),
+        }),
+    });
+    const router = renderApp("/customers");
+    const user = userEvent.setup();
+    const box = await screen.findByLabelText("ค้นหาลูกค้า");
+    await user.type(box, `${NATIONAL_ID}{Enter}`);
+    await screen.findByRole("link", { name: CUSTOMER_ROW.name_th });
+
+    await user.click(screen.getByRole("button", { name: "ถัดไป" }));
+    expect(await screen.findByRole("link", { name: EXPIRED_ROW.name_th })).toBeInTheDocument();
+    expect(listQueries(api).at(-1)).toEqual({ q: NATIONAL_ID, page: "2" });
+    expect(router.state.location.search).toEqual({ page: 2 });
+    expect(box).toHaveValue(NATIONAL_ID);
+
+    act(() => router.history.back());
+
+    expect(await screen.findByRole("link", { name: CUSTOMER_ROW.name_th })).toBeInTheDocument();
+    expect(router.state.location.search).toEqual({});
+    expect(box).toHaveValue(NATIONAL_ID);
+    expect(listQueries(api).every((query) => query.q === undefined || query.q === NATIONAL_ID)).toBe(true);
   });
 
   it("URL ?q=ตัวเลขล้วน (พิมพ์เอง) ยังค้นได้ · Esc ล้างคำค้น · ไม่พบ → บอกคำค้นที่ใช้", async () => {

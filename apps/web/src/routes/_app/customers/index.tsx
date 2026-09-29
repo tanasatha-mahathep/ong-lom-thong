@@ -34,6 +34,15 @@ export const Route = createFileRoute("/_app/customers/")({
 const DEBOUNCE_MS = 300;
 const column = createColumnHelper<CustomerListItem>();
 
+/**
+ * เลขบัตรเต็มที่กำลังค้นอยู่ — อยู่ใน state ของหน้านี้เท่านั้น ไม่ลง URL (ประวัติเบราว์เซอร์/ลิงก์ที่แชร์)
+ * URL ของการค้นแบบนี้จึงมี q ว่างเสมอ · `page` ตามหน้าที่ URL แสดง
+ */
+interface HeldQuery {
+  q: string;
+  page: number;
+}
+
 /** /customers — ค้นและเลือกลูกค้า (ชื่อไทย/อังกฤษ · เลขบัตร · เบอร์) หน้าละ 20 ล่าสุดก่อน */
 function CustomersPage() {
   const { t } = useTranslation("customers");
@@ -41,12 +50,22 @@ function CustomersPage() {
   const navigate = Route.useNavigate();
   useCustomerSync();
 
-  // เลขบัตรเต็ม 13 หลัก: ค้นได้แต่เก็บไว้ในหน้านี้เท่านั้น ไม่ลง URL (ประวัติเบราว์เซอร์/ลิงก์ที่แชร์)
-  const [sensitiveQ, setSensitiveQ] = useState<string | undefined>(undefined);
+  const [held, setHeld] = useState<HeldQuery | undefined>(undefined);
+  // URL เปลี่ยนจากภายนอก (ปุ่มย้อนกลับ/ไปข้างหน้าของ browser · ลิงก์) → คำค้นที่มากับ URL ชนะเลขบัตรที่ค้างอยู่
+  // ไม่งั้นช่องกับผลยังเป็นเลขบัตรทั้งที่ URL บอกอย่างอื่น · ที่หน้านี้ทำเอง (ค้นด้วยเลขบัตร · เปลี่ยนหน้า)
+  // URL จะมาด้วย q ว่างเสมอ จึงแค่ตามเลขหน้า · เทียบตอน URL "เปลี่ยน" เท่านั้น ไม่เทียบทุก render:
+  // ช่วงที่ router ยังไม่ทันใช้ URL ใหม่ URL ยังเป็นค่าเก่า ซึ่งไม่ใช่การเปลี่ยนจากภายนอก
+  const [seen, setSeen] = useState({ q: search.q, page: search.page });
+  if (seen.q !== search.q || seen.page !== search.page) {
+    setSeen({ q: search.q, page: search.page });
+    if (held) setHeld(search.q === "" ? { ...held, page: search.page } : undefined);
+  }
   // q 1 ตัวอักษร (พิมพ์ URL เอง) API ตอบ 400 — แสดงทั้งหมดแทน
   const urlQ = search.q.length < MIN_QUERY_LENGTH ? "" : search.q;
-  const q = sensitiveQ ?? urlQ;
-  const list = useQuery(customerListQuery({ q, page: search.page }));
+  const q = held?.q ?? urlQ;
+  // หน้าตามเลขบัตรที่ค้าง: ค้นเลขบัตรจากหน้า 3 ต้องขอหน้า 1 เลย ไม่ใช่ "เลขบัตร + หน้า 3" ก่อน URL จะทัน
+  const page = held?.page ?? search.page;
+  const list = useQuery(customerListQuery({ q, page }));
 
   const columns = useMemo(
     () => [
@@ -100,8 +119,9 @@ function CustomersPage() {
       <SearchBox
         q={q}
         onSearch={(value) => {
+          // เลขบัตรเต็ม: ค้นได้แต่ไม่ลง URL — เก็บไว้ที่หน้านี้ แล้ว URL เหลือแค่หน้า 1 ไม่มี ?q=
           const sensitive = looksLikeNationalId(value);
-          setSensitiveQ(sensitive ? value : undefined);
+          setHeld(sensitive ? { q: value, page: 1 } : undefined);
           void navigate({ search: { q: sensitive ? "" : value, page: 1 }, replace: true });
         }}
       />
@@ -121,9 +141,12 @@ function CustomersPage() {
         columns={columns}
         data={list.data?.items ?? []}
         getRowId={(customer) => customer.id}
-        page={search.page}
+        page={page}
         hasMore={list.data?.has_more ?? false}
-        onPageChange={(page) => void navigate({ search: (prev) => ({ ...prev, page }) })}
+        onPageChange={(next) => {
+          if (held) setHeld({ ...held, page: next });
+          void navigate({ search: (prev) => ({ ...prev, page: next }) });
+        }}
         onRowClick={(customer) => void navigate({ to: "/customers/$id", params: { id: customer.id } })}
         isLoading={list.isPending}
         emptyMessage={q ? t("list.emptySearch", { q }) : t("list.empty")}
