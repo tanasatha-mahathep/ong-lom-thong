@@ -29,9 +29,8 @@ describe("validateGoldReferencePrices", () => {
     });
   });
 
-  it("ขายออกเท่ากับรับซื้อได้ (ขอบ)", () => {
-    const same = { ...SAMPLE, barBuy: "71150", ornamentBuy: "71950" };
-    expect(validateGoldReferencePrices(same)).toMatchObject({ barBuy: "71150.00", ornamentBuy: "71950.00" });
+  it("ทองคำแท่งขายออกเท่ากับรับซื้อได้ (ขอบ)", () => {
+    expect(validateGoldReferencePrices({ ...SAMPLE, barBuy: "71150" }).barBuy).toBe("71150.00");
   });
 
   it.each([
@@ -40,22 +39,48 @@ describe("validateGoldReferencePrices", () => {
     [{ ornamentSell: "-71950" }, "ornamentSell: ไม่ใช่ตัวเลข"],
     [{ ornamentBuy: "1e5" }, "ornamentBuy: ไม่ใช่ตัวเลข"],
     [{ barSell: "71150.001" }, "barSell: ทศนิยมเกิน 2 ตำแหน่ง"],
-    [{ barBuy: "9999.99" }, "barBuy: อยู่นอกช่วงที่เป็นไปได้"],
+    [{ barBuy: "9999" }, "barBuy: อยู่นอกช่วงที่เป็นไปได้"],
     [{ barSell: "1000000" }, "barSell: อยู่นอกช่วงที่เป็นไปได้"],
-    [{ barBuy: "71150.01" }, "ทองคำแท่งขายออกต่ำกว่ารับซื้อ"],
-    [{ ornamentBuy: "71950.01" }, "ทองรูปพรรณขายออกต่ำกว่ารับซื้อ"],
-    // สลับช่อง/หลักหาย: ห่างจากแท่งขายออกเกิน 10%
-    [{ barBuy: "64000" }, "barBuy: ห่างจากทองคำแท่งขายออกผิดปกติ"],
-    [{ ornamentBuy: "64000" }, "ornamentBuy: ห่างจากทองคำแท่งขายออกผิดปกติ"],
-    [{ ornamentSell: "78300" }, "ornamentSell: ห่างจากทองคำแท่งขายออกผิดปกติ"],
+    // ทองคำแท่งประกาศเป็นบาทเต็มเสมอ
+    [{ barBuy: "70950.50" }, "barBuy: ทองคำแท่งต้องเป็นบาทเต็ม"],
+    [{ barSell: "71150.50" }, "barSell: ทองคำแท่งต้องเป็นบาทเต็ม"],
+    [{ barBuy: "71151" }, "ทองคำแท่งขายออกต่ำกว่ารับซื้อ"],
+    // ส่วนต่างแท่ง 1% ของ 71,150 = 711.50 → 70,439 ผ่าน (ดูเทสต์ขอบ) · 70,438 ไม่ผ่าน
+    [{ barBuy: "70438" }, "ส่วนต่างทองคำแท่งกว้างผิดปกติ"],
+    [{ ornamentSell: "71150" }, "ทองรูปพรรณขายออกต้องสูงกว่าทองคำแท่งขายออก"],
+    [{ ornamentBuy: "70950" }, "ทองรูปพรรณรับซื้อต้องต่ำกว่าทองคำแท่งรับซื้อ"],
+    // รูปพรรณห่างจากแท่งขายออก 5% ของ 71,150 = 3,557.50
+    [{ ornamentBuy: "67592.49" }, "ornamentBuy: ห่างจากทองคำแท่งขายออกผิดปกติ"],
+    [{ ornamentSell: "74707.51" }, "ornamentSell: ห่างจากทองคำแท่งขายออกผิดปกติ"],
   ])("ปฏิเสธ %o", (patch, message) => {
     expect(errorOf(() => validateGoldReferencePrices({ ...SAMPLE, ...patch }))).toBe(message);
   });
 
-  it("ห่าง 10% พอดียังรับ (ขอบบน)", () => {
-    // 71,150 × 10% = 7,115 → 64,035 / 78,265
-    const edge = { ...SAMPLE, barBuy: "64035", ornamentBuy: "64035", ornamentSell: "78265" };
-    expect(validateGoldReferencePrices(edge).ornamentSell).toBe("78265.00");
+  it("ขอบบนพอดียังรับ — ส่วนต่างแท่ง 1% · รูปพรรณ ±5%", () => {
+    const edge = { ...SAMPLE, barBuy: "70439", ornamentBuy: "67592.50", ornamentSell: "74707.50" };
+    expect(validateGoldReferencePrices(edge)).toEqual({
+      barBuy: "70439.00",
+      barSell: "71150.00",
+      ornamentBuy: "67592.50",
+      ornamentSell: "74707.50",
+    });
+  });
+
+  it("แถวแท่ง/รูปพรรณสลับกัน หรือรับซื้อ/ขายออกสลับกัน = ปฏิเสธทุกแบบ", () => {
+    const rowsSwapped = {
+      barBuy: "69,523.76",
+      barSell: "71,950.00",
+      ornamentBuy: "70,950.00",
+      ornamentSell: "71,150.00",
+    };
+    expect(errorOf(() => validateGoldReferencePrices(rowsSwapped))).toBe("barBuy: ทองคำแท่งต้องเป็นบาทเต็ม");
+    // รูปพรรณรับซื้อที่บังเอิญเป็นบาทเต็มก็ยังไม่ผ่าน (ส่วนต่างแท่งกว้างเกิน)
+    const wholeSwapped = { ...rowsSwapped, barBuy: "69,500.00" };
+    expect(errorOf(() => validateGoldReferencePrices(wholeSwapped))).toBe("ส่วนต่างทองคำแท่งกว้างผิดปกติ");
+    const barBuySell = { ...SAMPLE, barBuy: "71,150.00", barSell: "70,950.00" };
+    expect(errorOf(() => validateGoldReferencePrices(barBuySell))).toBe("ทองคำแท่งขายออกต่ำกว่ารับซื้อ");
+    const ornBuySell = { ...SAMPLE, ornamentBuy: "71,950.00", ornamentSell: "69,523.76" };
+    expect(errorOf(() => validateGoldReferencePrices(ornBuySell))).toBe("ทองรูปพรรณขายออกต้องสูงกว่าทองคำแท่งขายออก");
   });
 });
 

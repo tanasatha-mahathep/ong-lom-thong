@@ -35,10 +35,14 @@ export class GoldReferenceError extends Error {}
 export const GOLD_REFERENCE_MIN = "10000";
 export const GOLD_REFERENCE_MAX = "999999.99";
 /**
- * ทุกราคาต้องห่างจากทองแท่งขายออกไม่เกิน % นี้ — ส่วนต่างจริงราว 0.3% (แท่ง) และ ~5% (รูปพรรณรับซื้อ)
- * ไกลกว่านี้ = สลับช่อง / หลักเกิน / ข้อมูลขยะ
+ * ส่วนต่างทองคำแท่ง (ขายออก − รับซื้อ) ไม่เกิน % ของขายออก — ประกาศจริงห่าง 100–200 บาท (~0.3%)
+ * กว้างกว่านี้ = อ่านผิดแถว/ผิดช่อง
  */
-export const GOLD_REFERENCE_MAX_SPREAD_PERCENT = "10";
+export const GOLD_REFERENCE_MAX_BAR_SPREAD_PERCENT = "1";
+/**
+ * ราคาทองรูปพรรณห่างจากทองคำแท่งขายออกไม่เกิน % นี้ — ประกาศจริง: ขายออก +~1.1% (ค่ากำเหน็จ) · รับซื้อ −~2.3%
+ */
+export const GOLD_REFERENCE_MAX_ORNAMENT_SPREAD_PERCENT = "5";
 
 const PRICE_FIELDS = ["barBuy", "barSell", "ornamentBuy", "ornamentSell"] as const;
 
@@ -57,9 +61,15 @@ function price(field: string, raw: string): Decimal {
   return v;
 }
 
+const percentOf = (diff: Decimal, base: Decimal) => diff.abs().div(base).times(100);
+
 /**
  * ตรวจราคา 4 ค่าจากแหล่งภายนอกอย่างเข้ม — รับ "71,150.00" (คั่นหลักพัน) · คืนเงิน 2 ตำแหน่งเป็น string
- * ขายออก ≥ รับซื้อ ทั้งแท่งและรูปพรรณ · ทุกค่าห่างจากแท่งขายออกไม่เกิน GOLD_REFERENCE_MAX_SPREAD_PERCENT
+ * เงื่อนไขที่ประกาศจริงเป็นเสมอ (README ของ thai-gold-api: แท่ง 70,950/71,150 · รูปพรรณ 69,523.76/71,950):
+ * - ทองคำแท่งเป็นบาทเต็ม (ไม่มีสตางค์) · ขายออก ≥ รับซื้อ · ส่วนต่าง ≤ GOLD_REFERENCE_MAX_BAR_SPREAD_PERCENT
+ * - รูปพรรณขายออก > แท่งขายออก (บวกค่ากำเหน็จ) · รูปพรรณรับซื้อ < แท่งรับซื้อ
+ * - รูปพรรณห่างจากแท่งขายออก ≤ GOLD_REFERENCE_MAX_ORNAMENT_SPREAD_PERCENT
+ * แถวแท่ง/รูปพรรณสลับกัน (ค่าที่จะถูกเติมเป็นราคาร้านผิดโดยไม่ติดด่านกันพิมพ์ผิด) ไม่ผ่านทุกกรณี
  */
 export function validateGoldReferencePrices(raw: Record<(typeof PRICE_FIELDS)[number], string>): GoldReferencePrices {
   const [barBuy, barSell, ornamentBuy, ornamentSell] = PRICE_FIELDS.map((f) => price(f, raw[f])) as [
@@ -68,14 +78,19 @@ export function validateGoldReferencePrices(raw: Record<(typeof PRICE_FIELDS)[nu
     Decimal,
     Decimal,
   ];
+  if (!barBuy.isInteger()) throw new GoldReferenceError("barBuy: ทองคำแท่งต้องเป็นบาทเต็ม");
+  if (!barSell.isInteger()) throw new GoldReferenceError("barSell: ทองคำแท่งต้องเป็นบาทเต็ม");
   if (barSell.lt(barBuy)) throw new GoldReferenceError("ทองคำแท่งขายออกต่ำกว่ารับซื้อ");
-  if (ornamentSell.lt(ornamentBuy)) throw new GoldReferenceError("ทองรูปพรรณขายออกต่ำกว่ารับซื้อ");
+  if (percentOf(barSell.minus(barBuy), barSell).gt(GOLD_REFERENCE_MAX_BAR_SPREAD_PERCENT)) {
+    throw new GoldReferenceError("ส่วนต่างทองคำแท่งกว้างผิดปกติ");
+  }
+  if (!ornamentSell.gt(barSell)) throw new GoldReferenceError("ทองรูปพรรณขายออกต้องสูงกว่าทองคำแท่งขายออก");
+  if (!ornamentBuy.lt(barBuy)) throw new GoldReferenceError("ทองรูปพรรณรับซื้อต้องต่ำกว่าทองคำแท่งรับซื้อ");
   for (const [field, v] of [
-    ["barBuy", barBuy],
     ["ornamentBuy", ornamentBuy],
     ["ornamentSell", ornamentSell],
   ] as const) {
-    if (v.minus(barSell).abs().div(barSell).times(100).gt(GOLD_REFERENCE_MAX_SPREAD_PERCENT)) {
+    if (percentOf(v.minus(barSell), barSell).gt(GOLD_REFERENCE_MAX_ORNAMENT_SPREAD_PERCENT)) {
       throw new GoldReferenceError(`${field}: ห่างจากทองคำแท่งขายออกผิดปกติ`);
     }
   }
