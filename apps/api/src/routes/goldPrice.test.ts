@@ -114,6 +114,12 @@ describe.skipIf(!available)("ราคาทองวันนี้ (R7 · R8 �
     });
   });
 
+  it("F5: confirm_typo ผิดชนิด → 400 ชี้ confirm_typo ไม่ใช่ bar_sell (bar_sell เองถูกต้องอยู่แล้ว)", async () => {
+    const res = await put("manager", { bar_sell: "67850", confirm_typo: "yes" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "confirm_typo ต้องเป็นจริงหรือเท็จ", field: "confirm_typo" });
+  });
+
   it("ราคากลางเห็นทุกสาขา", async () => {
     for (const who of ["staff", "staff2"]) {
       expect(await (await today(who)).json()).toMatchObject({ bar_sell: "67850.00", source: "central" });
