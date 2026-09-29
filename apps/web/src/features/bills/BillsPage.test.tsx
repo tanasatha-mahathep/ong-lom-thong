@@ -300,6 +300,41 @@ describe("หน้าค้นบิล — ช่องค้นหา", { tim
     expect(screen.queryByRole("link", { name: VOID_BILL.doc_no })).not.toBeInTheDocument();
   });
 
+  it("ค้นด้วยเลขบัตรจากหน้า 3: ขอหน้า 1 เลย ไม่ยิง “เลขบัตร + หน้า 3” ก่อน", async () => {
+    const { api, user, router } = openBills({ path: "/bills?page=3", list: () => buyList([BILL], { page: 3 }) });
+    await waitForRows();
+    expect(listRequests(api)).toEqual([{ page: "3" }]);
+
+    await user.type(searchBox(), "1103700123458{Enter}");
+
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: "1103700123458" }));
+    expect(listRequests(api)).toEqual([{ page: "3" }, { q: "1103700123458" }]);
+    expect(router.state.location.search).toEqual({});
+  });
+
+  it("เปลี่ยนหน้าผลค้นด้วยเลขบัตร: เลขบัตรอยู่ต่อ · เปลี่ยนตัวกรองแล้วกลับหน้า 1 โดยไม่ยิงคำขอหน้าเก่า", async () => {
+    const { api, user, router } = openBills({
+      list: ({ path }) =>
+        path.includes("page=2") ? buyList([VOID_BILL], { page: 2 }) : buyList([BILL], { has_more: true }),
+    });
+    await waitForRows();
+    await user.type(searchBox(), "1103700123458{Enter}");
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: "1103700123458" }));
+
+    await user.click(screen.getByRole("button", { name: "ถัดไป" }));
+    expect(await screen.findByRole("link", { name: VOID_BILL.doc_no })).toBeInTheDocument();
+    expect(listRequests(api).at(-1)).toEqual({ q: "1103700123458", page: "2" });
+    expect(router.state.location.search).toEqual({ page: 2 });
+    expect(searchBox()).toHaveValue("1103700123458");
+
+    await screen.findByRole("option", { name: "ทอง" });
+    await user.selectOptions(screen.getByRole("combobox", { name: t("filters.metal") }), "ทอง");
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: "1103700123458", metal: "gold" }));
+    expect(listRequests(api)).not.toContainEqual({ q: "1103700123458", metal: "gold", page: "2" });
+    expect(router.state.location.search).toEqual({ metal: "gold" });
+    expect(searchBox()).toHaveValue("1103700123458");
+  });
+
   it("เบอร์โทร 10 หลักและเลขที่บิลไม่ใช่เลขบัตร: ลงใน URL ตามเดิม", async () => {
     const { user, router } = openBills();
     await waitForRows();

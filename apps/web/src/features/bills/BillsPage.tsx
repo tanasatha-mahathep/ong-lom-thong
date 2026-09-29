@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
-import { type KeyboardEvent, useEffect, useEffectEvent, useId, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useEffectEvent, useId, useMemo, useRef } from "react";
 import { DataTable } from "@/components/data-table";
 import { PageHeader } from "@/components/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -15,6 +15,7 @@ import { formatInteger, formatMoney, formatWeight } from "@/lib/format";
 import { type Branch, useMe } from "@/lib/queries";
 import { looksLikeNationalId } from "@/lib/sensitive-query";
 import { isoToThaiInput, todayIso } from "@/lib/thai-date";
+import { useHeldQuery } from "@/lib/use-held-query";
 import { cn } from "@/lib/utils";
 import { type BillListTotals, buyListQuery } from "./api";
 import { makeBillColumns } from "./bill-columns";
@@ -75,25 +76,17 @@ export function BillsPage() {
   const me = useMe();
   const search = route.useSearch();
   const navigate = route.useNavigate();
-  // เลขบัตรประชาชนที่พิมพ์ค้น: ใช้ค้นได้แต่ไม่เก็บลง URL (ต่างจากตัวกรองอื่นที่อยู่ใน URL ทั้งหมด)
-  // ลิงก์เก่า/บุ๊กมาร์กที่มีเลขบัตรอยู่ใน ?q= — ค้นตามนั้นต่อ (เก็บเป็น state) แล้ว effect ด้านล่างแทนที่ URL ด้วยฉบับที่ไม่มี q
-  const urlHoldsId = search.q !== undefined && looksLikeNationalId(search.q);
-  const [sensitiveQuery, setSensitiveQuery] = useState<string | undefined>(() => (urlHoldsId ? search.q : undefined));
-  // URL เปลี่ยนมาพร้อม q จากภายนอก (ปุ่มย้อนกลับ/ไปข้างหน้าของ browser · ลิงก์) → q ใน URL ชนะเลขบัตรที่ค้างอยู่
-  // ไม่งั้นช่องกับผลยังเป็นเลขบัตรทั้งที่ URL บอกอย่างอื่น · q ที่หายไปจาก URL เพราะหน้านี้ล้างเอง (ค้นด้วยเลขบัตร) ไม่นับ
-  // เทียบตอน URL "เปลี่ยน" เท่านั้น ไม่เทียบทุก render — ช่วงที่ router ยังไม่ทันใช้ URL ใหม่ URL ยังเป็นค่าเก่า
-  const [seenQ, setSeenQ] = useState(search.q);
-  if (seenQ !== search.q) {
-    setSeenQ(search.q);
-    if (search.q !== undefined) setSensitiveQuery(urlHoldsId ? search.q : undefined);
-  }
+  // เลขบัตรประชาชนที่พิมพ์ค้น: ใช้ค้นได้แต่ไม่เก็บลง URL (ต่างจากตัวกรองอื่นที่อยู่ใน URL ทั้งหมด) · เลขบัตรจากลิงก์เก่า/บุ๊กมาร์ก
+  // ที่มีอยู่ใน ?q= ก็ถูกเก็บไว้แบบนี้ แล้ว effect ด้านล่างแทนที่ URL ด้วยฉบับที่ไม่มี q
+  const { held, hold, release, setPage } = useHeldQuery({ q: search.q ?? "", page: search.page ?? 1 });
   const scrubLegacyLink = useEffectEvent(() => {
     void navigate({ search: (prev) => ({ ...prev, q: undefined }), replace: true });
   });
   useEffect(() => {
-    if (urlHoldsId) scrubLegacyLink();
-  }, [urlHoldsId, search.q]);
-  const effectiveSearch = sensitiveQuery === undefined ? search : { ...search, q: sensitiveQuery };
+    if (looksLikeNationalId(search.q ?? "")) scrubLegacyLink();
+  }, [search.q]);
+  // ค้นด้วยเลขบัตร = หน้า 1 ทันที (ไม่รอ URL) ไม่งั้นค้นจากหน้า 3 จะยิง "เลขบัตร + หน้า 3" ก่อน
+  const effectiveSearch = held ? { ...search, q: held.q, page: held.page > 1 ? held.page : undefined } : search;
   // ค้างผลของตัวกรองก่อนหน้าไว้ระหว่างโหลด ตารางไม่กระพริบ — ยอดรวมขึ้น "กำลังค้นหา…" แทนยอดเก่า
   const list = useQuery({ ...buyListQuery(toListParams(effectiveSearch)), placeholderData: keepPreviousData });
 
@@ -107,21 +100,23 @@ export function BillsPage() {
   // เฉพาะคำค้นปกติ (patch มี q — รวมถึงล้างช่องว่าง) ที่ทับเลขบัตรที่ค้างในหน้านี้ · ตัวกรองอื่น (วันที่ · โลหะ · สาขา)
   // ต้องคงเลขบัตรไว้ ไม่งั้นช่องยังโชว์เลขบัตรอยู่แต่ผลกลายเป็นของลูกค้าทุกคนโดยไม่แจ้ง
   const applyFilters = (patch: FilterPatch) => {
-    if ("q" in patch) setSensitiveQuery(undefined);
+    if ("q" in patch) release();
     void navigate({ search: (prev) => withFilters(prev, patch), replace: true });
   };
   const clearFilters = () => {
-    setSensitiveQuery(undefined);
+    release();
     void navigate({ search: {}, replace: true });
   };
   // เลขบัตรประชาชน: เก็บไว้ในหน้านี้เท่านั้น · คำค้นที่หน่วงเวลาส่งเข้า URL ไปก่อนหน้านี้ (พิมพ์ยังไม่ครบ)
   // ต้องถูกล้างออกด้วย ไม่งั้นเลขบัตรส่วนที่พิมพ์ไปแล้วค้างใน URL · เลขหน้าล้างเหมือนตัวกรองอื่นเปลี่ยน
   const applySensitiveQuery = (q: string) => {
-    setSensitiveQuery(q);
+    hold(q);
     void navigate({ search: (prev) => ({ ...prev, q: undefined, page: undefined }), replace: true });
   };
-  const goToPage = (page: number) =>
+  const goToPage = (page: number) => {
+    setPage(page);
     void navigate({ search: (prev) => ({ ...prev, page: page > 1 ? page : undefined }), replace: true });
+  };
 
   const problem = fieldProblem(list.error);
 
@@ -154,7 +149,7 @@ export function BillsPage() {
             columns={columns}
             data={list.data?.items ?? []}
             caption={t("results.caption")}
-            page={list.data?.page ?? search.page ?? 1}
+            page={list.data?.page ?? effectiveSearch.page ?? 1}
             hasMore={list.data?.has_more ?? false}
             onPageChange={goToPage}
             isLoading={list.isPending}
