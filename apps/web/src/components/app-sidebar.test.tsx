@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { BRANCH_2, BRANCH_HQ, GOLD_PRICE, fakeApi, json, makeMe, renderApp } from "@/test/app";
@@ -202,5 +202,9 @@ describe("sidebar ย่อเป็นแถบไอคอน (sidebar-07 coll
     await user.click(within(screen.getByRole("banner")).getByRole("button", { name: "แสดง/ซ่อนเมนู" }));
     await waitFor(() => expect(sidebarRoot()).toHaveAttribute("data-state", "expanded"));
     expect(document.cookie).toContain("sidebar_state=true");
+
+    // แป้นภาษาไทย: ปุ่มเดียวกันได้ key "ิ" — ใช้ตำแหน่งปุ่ม (code KeyB)
+    fireEvent.keyDown(document.body, { key: "ิ", code: "KeyB", ctrlKey: true });
+    await waitFor(() => expect(sidebarRoot()).toHaveAttribute("data-state", "collapsed"));
   });
 });
