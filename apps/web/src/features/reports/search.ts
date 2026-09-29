@@ -1,8 +1,8 @@
-import { parseThaiDate } from "@ong/core";
 import { z } from "zod";
+import { MIN_INPUT_DATE } from "@/lib/thai-date";
 
 /** API รับวันที่ตั้งแต่ ค.ศ. 2000 (reports.ts isoDate) — ปีก่อนหน้านั้นไม่มีข้อมูลของร้าน */
-export const MIN_REPORT_DATE = "2000-01-01";
+export const MIN_REPORT_DATE = MIN_INPUT_DATE;
 
 /** "YYYY-MM-DD" ที่มีจริงและไม่ก่อน MIN_REPORT_DATE — รูปเดียวกับที่ API ตรวจ */
 const isoDate = z.iso.date().refine((date) => date >= MIN_REPORT_DATE);
@@ -52,22 +52,5 @@ export function presetRange(preset: DatePreset, today: string): { from: string; 
   return lastMonth(today);
 }
 
-/** ISO ค.ศ. → ข้อความในช่อง วว/ดด/ปปปป พ.ศ.: "2026-09-01" → "01/09/2569" */
-export function isoToThaiInput(iso: string): string {
-  const [year = "", month = "", day = ""] = iso.split("-");
-  return `${day}/${month}/${Number(year) + 543}`;
-}
-
-export type DateInputError = "required" | "invalid" | "tooEarly";
-
-/**
- * ข้อความในช่องวันที่ → ISO ค.ศ. ด้วย parseThaiDate ของ @ong/core (ตัวเดียวกับช่องวันที่ของ Siam ID)
- * รับ 01/09/2569 · 1/9/2569 · 1 ก.ย. 2569 · 2026-09-01 ฯลฯ
- */
-export function parseDateInput(text: string): { iso: string } | { error: DateInputError } {
-  if (text.trim() === "") return { error: "required" };
-  const iso = parseThaiDate(text);
-  if (!iso) return { error: "invalid" };
-  if (iso < MIN_REPORT_DATE) return { error: "tooEarly" };
-  return { iso };
-}
+export { isoToThaiInput, parseDateField as parseDateInput } from "@/lib/thai-date";
+export type { DateInputError } from "@/lib/thai-date";

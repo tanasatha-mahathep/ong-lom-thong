@@ -42,9 +42,9 @@ function AppLayout() {
     >
       <SkipLink />
       <AppSidebar variant="inset" />
-      <SidebarInset>
+      <SidebarInset className="min-w-0">
         <SiteHeader />
-        <main id="main" tabIndex={-1} className="flex flex-1 flex-col gap-4 p-4 md:gap-6 md:p-6">
+        <main id="main" tabIndex={-1} className="flex min-w-0 flex-1 flex-col gap-4 p-4 md:gap-6 md:p-6 [&>*]:min-w-0">
           <Outlet />
         </main>
       </SidebarInset>

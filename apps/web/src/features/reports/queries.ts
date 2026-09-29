@@ -106,8 +106,10 @@ function exportQuery(p: ExportParams): string {
 }
 
 /** ลิงก์ดาวน์โหลด CSV (UTF-8 + BOM) — origin เดียวกัน cookie session ไปเอง · ไม่มี public URL */
-export const purchaseCsvHref = (p: PurchaseParams) => `/api/reports/purchase?${purchaseQuery(p, "csv")}`;
-export const stockCsvHref = (p: StockParams) => `/api/reports/stock?${stockQuery(p, "csv")}`;
+export const purchaseCsvHref = (p: PurchaseParams): `/api/reports/purchase?${string}` =>
+  `/api/reports/purchase?${purchaseQuery(p, "csv")}`;
+export const stockCsvHref = (p: StockParams): `/api/reports/stock?${string}` =>
+  `/api/reports/stock?${stockQuery(p, "csv")}`;
 
 /**
  * URL ของ GET /api/reports/export (zip) — type เป็น template literal ตรงกับ `ApiPath` ของ apiFetch โดยไม่ต้อง import
