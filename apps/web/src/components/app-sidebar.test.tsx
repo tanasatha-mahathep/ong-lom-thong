@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { BRANCH_2, BRANCH_HQ, GOLD_PRICE, fakeApi, json, makeMe, renderApp } from "@/test/app";
-import { navFor } from "@/lib/nav";
+import { activeNavPath, navFor } from "@/lib/nav";
 import type { Me, Role } from "@/lib/queries";
 
 const titles = (role: Role) => navFor(role).flatMap((group) => group.items.map((item) => item.title));
@@ -209,5 +209,45 @@ describe("sidebar ย่อเป็นแถบไอคอน (sidebar-07 coll
     // แป้นภาษาไทย: ปุ่มเดียวกันได้ key "ิ" — ใช้ตำแหน่งปุ่ม (code KeyB)
     fireEvent.keyDown(document.body, { key: "ิ", code: "KeyB", ctrlKey: true });
     await waitFor(() => expect(sidebarRoot()).toHaveAttribute("data-state", "collapsed"));
+  });
+});
+
+describe("เมนูที่เลือกอยู่ตามหน้า (มีได้เมนูเดียว)", () => {
+  it.each([
+    ["/", "/"],
+    ["/buy", "/buy"],
+    ["/buy/7f1c2d3e-0000-4000-8000-000000000001", "/bills"],
+    ["/bills", "/bills"],
+    ["/customers", "/customers"],
+    ["/customers/new", "/customers"],
+    ["/customers/abc", "/customers"],
+    ["/reports/purchase", "/reports/purchase"],
+    ["/reports/stock", "/reports/stock"],
+    ["/reports/export", "/reports/export"],
+    ["/settings/gold-price", "/settings/gold-price"],
+    ["/settings/branches", "/settings/branches"],
+    ["/settings/users/", "/settings/users"],
+  ])("%s → %s", (pathname, expected) => {
+    expect(activeNavPath(pathname, "admin")).toBe(expected);
+  });
+
+  it.each([
+    ["/bills", "ค้นบิล"],
+    ["/buy/7f1c2d3e-0000-4000-8000-000000000001", "ค้นบิล"],
+    ["/customers/new", "ลูกค้า"],
+    ["/buy", "ซื้อเข้า"],
+  ])("เปิด %s → เมนู %s เท่านั้นที่ active + aria-current (ซื้อเข้าไม่ติดสีค้าง)", async (path, label) => {
+    fakeApi({ "GET /api/me": () => json(makeMe("manager")), "GET /api/gold-price/today": () => json(GOLD_PRICE) });
+    renderApp(path);
+    const nav = await screen.findByRole("navigation", { name: "เมนูหลัก" });
+    await waitFor(() => expect(within(nav).getByRole("link", { name: label })).toHaveAttribute("aria-current", "page"));
+    const links = within(nav).getAllByRole("link");
+    expect(links.filter((link) => link.getAttribute("aria-current") === "page")).toHaveLength(1);
+    expect(links.filter((link) => link.getAttribute("data-active") === "true").map((l) => l.textContent)).toEqual([
+      label,
+    ]);
+    const buy = within(nav).getByRole("link", { name: "ซื้อเข้า" });
+    // ซื้อเข้าเป็นเมนูธรรมดา — ไม่มีพื้นสีหลักถาวร
+    expect(buy.className).not.toMatch(/(^|\s)bg-primary(\s|$)/);
   });
 });
