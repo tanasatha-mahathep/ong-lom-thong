@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Info, LoaderCircle } from "lucide-react";
-import { useId, useRef } from "react";
+import { ClipboardPaste, Info, LoaderCircle } from "lucide-react";
+import { useEffect, useId, useRef } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -19,11 +19,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useBusinessDate } from "@/hooks/use-business-date";
 import { formatBoardPrice, formatThaiDate } from "@/lib/format";
 import { canSetGoldPrice } from "@/lib/nav";
-import { goldPriceTodayQueryOptions, useMe } from "@/lib/queries";
+import { goldPriceTodayQueryOptions, goldReferenceQueryOptions, useMe } from "@/lib/queries";
 import { BranchPricesCard } from "./branch-prices";
 import { useTranslation } from "./i18n";
 import { PriceFormError, PriceInputField, PriceList, QuotePreview, TypoConfirmDialog } from "./price-form";
 import { saveGoldPrice } from "./queries";
+import { ReferencePricePanel } from "./reference-price";
 import { usePriceForm } from "./use-price-form";
 
 /**
@@ -61,6 +62,8 @@ function ManagersOnlyNotice() {
 /**
  * ราคากลางของวัน: พิมพ์ → quote สดจากเซิร์ฟเวอร์ → Enter บันทึก
  * ด่านกันพิมพ์ผิด (409) → AlertDialog โฟกัสที่ "กลับไปแก้ไข" ก่อน — Enter ซ้ำโดยไม่ได้อ่านจึงไม่ผ่านด่าน
+ * ราคาสมาคม (อ้างอิง): ปุ่มเติมค่าเริ่มต้น (ไม่บันทึก) · วันนี้ยังไม่มีราคา → เติมให้เองครั้งเดียว (ยกเว้นประกาศเก่า)
+ * — ระบบไม่ตั้งราคาร้านเอง ผู้จัดการต้องกดบันทึก
  */
 function SetPriceCard() {
   const { t } = useTranslation("goldPrice");
@@ -81,6 +84,17 @@ function SetPriceCard() {
     },
   });
 
+  // วันนี้ยังไม่ได้ตั้งราคา (null — ไม่ใช่ยังโหลด/โหลดล้ม) + มีราคาสมาคมของวันนี้ + ช่องยังว่าง → เติมให้ครั้งเดียว
+  const { data: todayPrice } = useQuery(goldPriceTodayQueryOptions);
+  const { data: reference } = useQuery(goldReferenceQueryOptions);
+  const autoFilled = useRef(false);
+  const { prefill, text } = form;
+  useEffect(() => {
+    if (autoFilled.current || todayPrice !== null || !reference || reference.stale || text !== "") return;
+    autoFilled.current = true;
+    prefill(reference.bar_sell, { focus: false });
+  }, [todayPrice, reference, text, prefill]);
+
   return (
     <Card>
       <CardHeader>
@@ -92,7 +106,28 @@ function SetPriceCard() {
       <form noValidate onSubmit={form.submit} aria-labelledby={titleId} className="grid gap-6">
         <CardContent className="grid gap-6">
           <PriceFormError form={form} />
+          <ReferencePricePanel
+            action={(ref) => (
+              <Button
+                type="button"
+                variant="outline"
+                className="justify-self-start"
+                onClick={() => prefill(ref.bar_sell)}
+              >
+                <ClipboardPaste aria-hidden="true" />
+                {t("reference.use")}
+              </Button>
+            )}
+          />
           <PriceInputField form={form} inputRef={inputRef} label={t("barSellLabel")} autoFocus />
+          {/* live region อยู่ก่อนเสมอ — ข้อความที่เพิ่มเข้ามาภายหลังจึงถูกประกาศ */}
+          <div role="status">
+            {form.fromReference && (
+              <p className="rounded-md border border-warning-border bg-warning px-3 py-2 text-sm text-warning-foreground">
+                {t("reference.prefilled")}
+              </p>
+            )}
+          </div>
           <QuotePreview form={form} />
         </CardContent>
         <CardFooter>

@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { ReferencePriceLine } from "@/features/gold-price/reference-price";
 import { formatBoardPrice, formatThaiDate } from "@/lib/format";
 import { canSetGoldPrice } from "@/lib/nav";
 import { useTranslation } from "../i18n";
@@ -57,6 +58,9 @@ export function BillHeaderCard({ c }: { c: BuyController }) {
           </HeaderItem>
           <HeaderItem label={t("header.branch")}>{quote?.branch.name ?? c.me.branch?.name ?? null}</HeaderItem>
         </dl>
+
+        {/* ราคาสมาคม (อ้างอิง) อ่านอย่างเดียว — บิลใช้ราคาที่ร้านบันทึกด้านบนเท่านั้น */}
+        <ReferencePriceLine />
 
         {backdate.enabled && <BackdateFields c={c} />}
 

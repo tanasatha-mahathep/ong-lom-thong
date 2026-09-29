@@ -32,6 +32,8 @@ export interface SaveGoldPriceBody {
   bar_sell: string;
   /** ยืนยันราคาที่ด่านกันพิมพ์ผิดเตือนไว้ (ส่งหลังได้ 409) */
   confirm_typo?: boolean;
+  /** ราคาในช่องมาจากปุ่ม "ใช้ราคาสมาคมเป็นค่าเริ่มต้น" และไม่ได้แก้ — ลง audit ฝั่งเซิร์ฟเวอร์ */
+  from_reference?: boolean;
 }
 
 /** ตั้งราคากลางของวันนี้ — PUT /api/gold-price/today (manager · admin) · audit ฝั่งเซิร์ฟเวอร์ (R12) */

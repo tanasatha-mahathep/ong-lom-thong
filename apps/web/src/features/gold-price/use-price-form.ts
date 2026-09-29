@@ -23,6 +23,7 @@ export function requestErrorMessage(t: GoldPriceT, error: unknown, action: "save
 interface TypoWarning {
   barSell: string;
   warning: string;
+  fromReference: boolean;
 }
 
 interface PriceFormOptions<TSaved> {
@@ -53,8 +54,11 @@ export function usePriceForm<TSaved>({
   const [text, setText] = useState("");
   const [missing, setMissing] = useState(false);
   const [typo, setTypo] = useState<TypoWarning | null>(null);
+  /** ข้อความที่เติมจากราคาสมาคม (อ้างอิง) — ยังไม่ได้บันทึก · พิมพ์แก้แล้วไม่นับว่ามาจากราคาสมาคม */
+  const [prefilled, setPrefilled] = useState<string | null>(null);
 
   const barSell = normalizeDecimalInput(text);
+  const fromReference = prefilled !== null && text === prefilled;
   const debounced = useDebouncedValue(barSell, QUOTE_DEBOUNCE_MS);
   const quote = useQuery({ ...goldPriceQuoteQueryOptions(debounced, branchId), placeholderData: keepPreviousData });
 
@@ -68,12 +72,13 @@ export function usePriceForm<TSaved>({
     mutationFn: saveFn,
     onSuccess: async (saved) => {
       setText("");
+      setPrefilled(null);
       await onSaved(saved);
     },
     onError: (error, body) => {
       const warning = typoWarningOf(error);
       if (warning && !body.confirm_typo) {
-        setTypo({ barSell: body.bar_sell, warning });
+        setTypo({ barSell: body.bar_sell, warning, fromReference: !!body.from_reference });
         return;
       }
       onFailed?.(error);
@@ -108,6 +113,19 @@ export function usePriceForm<TSaved>({
       setMissing(false);
       save.reset();
     },
+    /**
+     * เติมช่องราคาด้วยราคาสมาคม (อ้างอิง) — **ไม่บันทึก** ผู้จัดการต้องกดบันทึกเอง (ด่านกันพิมพ์ผิดยังทำงาน)
+     * `focus` = ย้ายโฟกัสไปช่องราคา (กดปุ่มเติมเอง) · เติมอัตโนมัติตอนเปิดหน้าไม่ย้ายโฟกัส
+     */
+    prefill: (value: string, { focus = true }: { focus?: boolean } = {}) => {
+      setText(value);
+      setPrefilled(value);
+      setMissing(false);
+      save.reset();
+      if (focus) focusInput();
+    },
+    /** ข้อความในช่องยังเป็นค่าที่เติมจากราคาสมาคม (ยังไม่ได้บันทึก) */
+    fromReference,
     idle,
     busy,
     preview: idle ? undefined : quote.data,
@@ -125,12 +143,18 @@ export function usePriceForm<TSaved>({
         inputRef.current?.focus();
         return;
       }
-      save.mutate({ bar_sell: barSell });
+      save.mutate(fromReference ? { bar_sell: barSell, from_reference: true } : { bar_sell: barSell });
     },
     typo,
     dismissTypo: () => setTypo(null),
     confirmTypo: () => {
-      if (typo) save.mutate({ bar_sell: typo.barSell, confirm_typo: true });
+      if (typo) {
+        save.mutate({
+          bar_sell: typo.barSell,
+          confirm_typo: true,
+          ...(typo.fromReference ? { from_reference: true } : {}),
+        });
+      }
     },
     /** ปิดด่านกันพิมพ์ผิดแล้ว — กลับไปที่ช่องราคา (ตัวเลขเดิมยังอยู่) */
     returnToInput: () => inputRef.current?.focus(),
