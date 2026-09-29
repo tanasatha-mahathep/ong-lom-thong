@@ -1285,6 +1285,19 @@ describe("quoteBuy — index · ราคาเฉลี่ย/กรัม · �
       { index: 1, method: "transfer", bank: "KBANK", amount: "30.00" },
     ]);
   });
+
+  it("payments: index = ตำแหน่งใน input แม้แถวก่อนหน้าผิดและถูกข้าม (เหมือน lines)", () => {
+    const r = quoteBuy(
+      base({
+        payments: [
+          { method: "cheque", amount: "999" }, // วิธีไม่รู้จัก — ถูกข้าม
+          { method: "cash", amount: "20030" },
+        ],
+      }),
+    );
+    expect(r.payments).toEqual([{ index: 1, method: "cash", bank: null, amount: "20030.00" }]);
+    expect(r.errors.map((e) => e.field)).toEqual(["payments.0.method"]);
+  });
 });
 
 describe("quoteBuy — วิธีชำระ", () => {

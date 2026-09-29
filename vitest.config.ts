@@ -41,7 +41,7 @@ if (stale.length > 0) throw new Error(`vitest.config.ts: ข้อยกเว�
 export default defineConfig({
   test: {
     // แต่ละแพ็กเกจมี vitest.config.ts ของตัวเอง — `pnpm test` ที่ root รันทุกตัวในรอบเดียว
-    projects: ["packages/*/vitest.config.ts", "apps/*/vitest.config.ts"],
+    projects: ["packages/*/vitest.config.ts", "apps/*/vitest.config.ts", "services/*/vitest.config.ts"],
     // coverage ตั้งได้ที่ config root เท่านั้น · ปิดไว้ให้ `pnpm test` เร็วเท่าเดิม · `pnpm test:coverage` เปิด
     coverage: {
       enabled: false,

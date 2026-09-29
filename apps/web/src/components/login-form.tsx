@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, useId, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { BrandMark } from "@/components/brand-mark";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -19,8 +20,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { errorMessage } from "@/lib/api";
-import { type Me, meQueryOptions } from "@/lib/queries";
-import { SHOP_NAME } from "@/lib/shop";
+import { type Me, canSwitchBranch, meQueryOptions } from "@/lib/queries";
 import { signIn, signInErrorMessage, switchBranch } from "@/lib/session";
 
 /**
@@ -37,7 +37,7 @@ export function LoginForm({ onDone }: { onDone: () => void }) {
         {me ? (
           <BranchStep me={me} onDone={onDone} />
         ) : (
-          <SignInStep onSignedIn={(signedIn) => (signedIn.branches.length > 1 ? setMe(signedIn) : onDone())} />
+          <SignInStep onSignedIn={(signedIn) => (canSwitchBranch(signedIn) ? setMe(signedIn) : onDone())} />
         )}
         <BrandPanel />
       </CardContent>
@@ -67,6 +67,7 @@ function FormAlert({ id, message }: { id: string; message: string }) {
 type FieldErrors = { email?: string; password?: string };
 
 function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
+  const { t } = useTranslation("auth");
   const queryClient = useQueryClient();
   const ids = useId();
   const emailRef = useRef<HTMLInputElement>(null);
@@ -74,11 +75,18 @@ function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const mutation = useMutation({
-    mutationFn: async (credentials: { email: string; password: string }) => {
+    mutationFn: async (credentials: { email: string; password: string }): Promise<Me> => {
       await signIn(credentials);
       // session ใหม่ — ทิ้ง cache ของ session ก่อนหน้า แล้วอ่านผู้ใช้จากเซิร์ฟเวอร์
       queryClient.removeQueries();
-      return queryClient.fetchQuery({ ...meQueryOptions, staleTime: 0 });
+      const me = await queryClient.fetchQuery({ ...meQueryOptions, staleTime: 0 });
+      // มีสิทธิ์สาขาเดียวแต่ session ยังไม่มีสาขา (สาขาหลักถูกปิด / สร้างด้วย --allow) → ตั้งให้เลย ไม่ต้องถาม
+      const [only] = me.branches;
+      if (me.branch || !only || me.branches.length > 1) return me;
+      const branch = await switchBranch(only.id);
+      const withBranch = { ...me, branch };
+      queryClient.setQueryData(meQueryOptions.queryKey, withBranch);
+      return withBranch;
     },
     // 401 = รหัสผิด แสดงในฟอร์ม ไม่ใช่ session หมดอายุ
     meta: { handlesUnauthorized: true },
@@ -96,8 +104,8 @@ function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
     const email = read("email").trim();
     const password = read("password");
     const errors: FieldErrors = {
-      ...(email ? {} : { email: "กรอกอีเมล" }),
-      ...(password ? {} : { password: "กรอกรหัสผ่าน" }),
+      ...(email ? {} : { email: t("signIn.missingEmail") }),
+      ...(password ? {} : { password: t("signIn.missingPassword") }),
     };
     setFieldErrors(errors);
     if (errors.email) return emailRef.current?.focus();
@@ -113,10 +121,13 @@ function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
   return (
     <form noValidate onSubmit={submit} className="p-6 md:p-8">
       <FieldGroup>
-        <StepHeading title="เข้าสู่ระบบ" description={`บัญชีพนักงานร้าน${SHOP_NAME}`} />
+        <StepHeading
+          title={t("signIn.title")}
+          description={t("signIn.description", { shop: t("shopName", { ns: "common" }) })}
+        />
         {formError && <FormAlert id={`${ids}-form-error`} message={formError} />}
         <Field data-invalid={!!fieldErrors.email}>
-          <FieldLabel htmlFor={`${ids}-email`}>อีเมล</FieldLabel>
+          <FieldLabel htmlFor={`${ids}-email`}>{t("signIn.email")}</FieldLabel>
           <Input
             ref={emailRef}
             id={`${ids}-email`}
@@ -131,7 +142,7 @@ function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
           <FieldError id={`${ids}-email-error`}>{fieldErrors.email}</FieldError>
         </Field>
         <Field data-invalid={!!fieldErrors.password}>
-          <FieldLabel htmlFor={`${ids}-password`}>รหัสผ่าน</FieldLabel>
+          <FieldLabel htmlFor={`${ids}-password`}>{t("signIn.password")}</FieldLabel>
           <Input
             ref={passwordRef}
             id={`${ids}-password`}
@@ -146,9 +157,9 @@ function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
         </Field>
         <Field>
           <Button type="submit" disabled={mutation.isPending}>
-            {mutation.isPending ? "กำลังเข้าสู่ระบบ…" : "เข้าสู่ระบบ"}
+            {mutation.isPending ? t("signIn.submitting") : t("signIn.submit")}
           </Button>
-          <FieldDescription className="text-center">ลืมรหัสผ่านหรือยังไม่มีบัญชี ติดต่อผู้ดูแลระบบ</FieldDescription>
+          <FieldDescription className="text-center">{t("signIn.help")}</FieldDescription>
         </Field>
       </FieldGroup>
     </form>
@@ -156,6 +167,7 @@ function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => void }) {
 }
 
 function BranchStep({ me, onDone }: { me: Me; onDone: () => void }) {
+  const { t } = useTranslation("auth");
   const queryClient = useQueryClient();
   const ids = useId();
   const formRef = useRef<HTMLFormElement>(null);
@@ -178,7 +190,7 @@ function BranchStep({ me, onDone }: { me: Me; onDone: () => void }) {
     formRef.current?.requestSubmit();
   };
 
-  const formError = mutation.isError ? `บันทึกสาขาไม่สำเร็จ — ${errorMessage(mutation.error)}` : null;
+  const formError = mutation.isError ? t("branch.saveFailed", { reason: errorMessage(mutation.error) }) : null;
 
   return (
     <form
@@ -191,12 +203,12 @@ function BranchStep({ me, onDone }: { me: Me; onDone: () => void }) {
     >
       <FieldGroup>
         <StepHeading
-          title="เลือกสาขาที่ทำงาน"
-          description={`สวัสดี ${me.user.name} — บัญชีนี้ใช้ได้ ${me.branches.length} สาขา`}
+          title={t("branch.title")}
+          description={t("branch.greeting", { name: me.user.name, count: me.branches.length })}
         />
         {formError && <FormAlert id={`${ids}-form-error`} message={formError} />}
         <FieldSet>
-          <FieldLegend variant="label">สาขาสำหรับบิลและรายงานในรอบนี้</FieldLegend>
+          <FieldLegend variant="label">{t("branch.legend")}</FieldLegend>
           <RadioGroup
             value={branchId}
             onValueChange={setBranchId}
@@ -211,7 +223,7 @@ function BranchStep({ me, onDone }: { me: Me; onDone: () => void }) {
                     <FieldContent>
                       <FieldTitle id={`${id}-name`}>{branch.name}</FieldTitle>
                       <FieldDescription id={`${id}-code`} className="tabular-nums">
-                        รหัสสาขา {branch.code}
+                        {t("branchCode", { ns: "common", code: branch.code })}
                       </FieldDescription>
                     </FieldContent>
                     {/* radio ของ Radix เป็น <button> — label[for] ไม่ถูกนับเป็นชื่อในเครื่องมือตรวจ จึงผูกชื่อตรง ๆ */}
@@ -227,11 +239,11 @@ function BranchStep({ me, onDone }: { me: Me; onDone: () => void }) {
               );
             })}
           </RadioGroup>
-          <FieldDescription>เปลี่ยนภายหลังได้ที่เมนูผู้ใช้ท้ายแถบเมนู</FieldDescription>
+          <FieldDescription>{t("branch.hint")}</FieldDescription>
         </FieldSet>
         <Field>
           <Button type="submit" disabled={mutation.isPending || !branchId}>
-            {mutation.isPending ? "กำลังบันทึก…" : "เข้าใช้งาน"}
+            {mutation.isPending ? t("saving", { ns: "common" }) : t("branch.submit")}
           </Button>
         </Field>
       </FieldGroup>
@@ -239,8 +251,9 @@ function BranchStep({ me, onDone }: { me: Me; onDone: () => void }) {
   );
 }
 
-/** แทนรูปของ login-04 — วาดด้วย CSS + SVG ล้วน (ไม่มีไฟล์รูปภายนอก) */
+/** แทนรูปของ login-04 — วาดด้วย CSS + SVG ล้วน (ไม่มีไฟล์รูปภายนอก) · สีแบรนด์ตายตัว (พื้นเข้มทองเหมือนกันทั้งสองธีม) */
 function BrandPanel() {
+  const { t } = useTranslation("auth");
   return (
     <div className="relative hidden flex-col justify-between gap-10 overflow-hidden bg-neutral-950 p-10 text-neutral-50 md:flex">
       <div
@@ -253,8 +266,8 @@ function BrandPanel() {
       />
       <BrandMark className="relative size-16 ring-1 ring-amber-200/20" />
       <div className="relative space-y-3">
-        <p className="text-4xl leading-tight font-bold text-amber-100">{SHOP_NAME}</p>
-        <p className="text-lg text-neutral-300">ระบบซื้อเข้าหน้าร้าน · สมาชิก</p>
+        <p className="text-4xl leading-tight font-bold text-amber-100">{t("shopName", { ns: "common" })}</p>
+        <p className="text-lg text-neutral-300">{t("brandTagline")}</p>
       </div>
     </div>
   );

@@ -3,6 +3,13 @@ import { type Context, Hono } from "hono";
 import type { z } from "zod";
 import { type AppEnv, apiError, requireRole, requireSession } from "../lib/context";
 import {
+  ExportQuery,
+  exportFilename,
+  exportPeriod,
+  prepareMonthlyExport,
+  streamMonthlyExport,
+} from "../services/monthlyExport";
+import {
   PurchaseQuery,
   StockQuery,
   purchaseCsv,
@@ -38,7 +45,7 @@ const branchSuffix = (branchId: string | undefined, scope: { code: string }[]) =
   branchId !== undefined && scope[0] ? `_${scope[0].code.replace(/[^A-Za-z0-9-]/g, "")}` : "";
 
 /**
- * รายงาน (spec §3 /reports/* · M3.6) — manager/accounting/admin · staff = 403
+ * รายงาน (spec §3 /reports/* · M3.6) — manager/accounting/admin · staff = 403 · /export = accounting/admin
  * ขอบเขตสาขามาจาก reportBranches() จุดเดียว (fail-closed: ไม่มีสาขาที่อ่านได้ = 403 · branch_id ที่อ่านไม่ได้ = ว่าง)
  * ?format=csv = ไฟล์ CSV (UTF-8 + BOM) ตัวเลขชุดเดียวกับ JSON
  */
@@ -77,4 +84,39 @@ export const reportRoutes = new Hono<AppEnv>()
     }
     c.header("Cache-Control", "no-store");
     return c.json(report);
+  })
+  /**
+   * ส่งบัญชีรายเดือน (spec §9.4) — accounting/admin เท่านั้น · ?year=YYYY&month=MM&branch_id=
+   * zip แบบ stream: PDF ทุกบิลของเดือน (รวมฉบับยกเลิก) + purchase-report.csv (ตัวเดียวกับ /purchase?format=csv)
+   * + manifest.json (sha256 ที่ตรวจแล้ว) + README.txt · สำเนาบัตรไม่รวม
+   * branch_id ที่อ่านไม่ได้/ไม่มี = 404 · ไม่ส่ง = ทุกสาขาที่อ่านได้ · audit export.monthly ก่อนเริ่มส่ง
+   */
+  .get("/export", requireRole("accounting", "admin"), async (c) => {
+    const readable = await reportBranches(c.var.db, c.var.viewer);
+    if (readable.length === 0) return c.json(apiError("forbidden"), 403);
+    const query = ExportQuery.safeParse(filledOnly(c.req.query()));
+    if (!query.success) return c.json(invalid(query.error), 400);
+    const { year, month, branch_id: branchId } = query.data;
+    const period = exportPeriod(year, month);
+    // เดือนที่ยังไม่ถึง (ตามเวลาไทย) ไม่มีบิล — บอกตรง ๆ ดีกว่าได้ zip ว่าง
+    const thisMonth = businessDate(c.var.now()).slice(0, 7);
+    if (period.label > thisMonth) {
+      const field = year > Number(thisMonth.slice(0, 4)) ? "year" : "month";
+      return c.json(apiError("ยังไม่ถึงเดือนนี้ — export ได้ถึงเดือนปัจจุบัน", field), 400);
+    }
+    // branch_id ที่อ่านไม่ได้/ไม่มีจริง/ผิดรูป = 404 (ไม่บอกว่ามี · ไม่ตกไปเป็นทุกสาขา)
+    const scope = scopeTo(readable, branchId);
+    const only = branchId === undefined ? null : (scope[0] ?? null);
+    if (scope.length === 0) return c.json(apiError("not found"), 404);
+
+    const headers = {
+      "Content-Type": "application/zip",
+      "Content-Disposition": `attachment; filename="${exportFilename(period, only)}"`,
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    };
+    // HEAD (Hono ส่งเข้า handler ของ GET) — ตอบ header อย่างเดียว ไม่อ่านบิล ไม่ลง audit ไม่ดึงไฟล์
+    if (c.req.method === "HEAD") return c.body(null, 200, headers);
+    const plan = await prepareMonthlyExport(c.var.db, scope, period, c.var.viewer.userId);
+    return c.body(streamMonthlyExport(plan, c.var.storage), 200, headers);
   });

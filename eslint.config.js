@@ -78,5 +78,10 @@ export default defineConfig(
     },
   },
   { files: ["**/*.js"], extends: [tseslint.configs.disableTypeChecked] },
+  {
+    // สคริปต์ที่ browser โหลดตรง ๆ ก่อนแอป (ตั้งธีมกันจอวาบ) — ไม่ผ่าน Vite
+    files: ["apps/web/public/**/*.js"],
+    languageOptions: { globals: globals.browser, sourceType: "script" },
+  },
   prettier,
 );

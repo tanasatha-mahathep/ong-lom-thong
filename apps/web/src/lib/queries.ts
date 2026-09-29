@@ -6,25 +6,26 @@ import { ApiError, apiFetch, decimalString } from "@/lib/api";
 export const ROLES = ["staff", "manager", "accounting", "admin"] as const;
 export type Role = (typeof ROLES)[number];
 
-export const ROLE_LABEL: Record<Role, string> = {
-  staff: "พนักงาน",
-  manager: "ผู้จัดการ",
-  accounting: "บัญชี",
-  admin: "ผู้ดูแลระบบ",
-};
-
 export const BranchSchema = z.object({ id: z.string(), code: z.string(), name: z.string() });
 export type Branch = z.infer<typeof BranchSchema>;
 
 const MeSchema = z.object({
   user: z.object({ id: z.string(), name: z.string(), email: z.string() }),
   role: z.enum(ROLES),
-  /** สาขาที่กำลังทำงาน — null = ยังไม่ได้เลือก หรือสิทธิ์ถูกถอน */
+  /** สาขาที่กำลังทำงาน — null = ยังไม่ได้เลือก หรือสิทธิ์ถูกถอน (ดู branch_closed แยกจากกรณีนี้) */
   branch: BranchSchema.nullable(),
+  /** ไม่ null เฉพาะตอน session ชี้สาขาที่ปิดไปแล้ว (ต่างจาก "ยังไม่ได้เลือกสาขา" ที่ branch เป็น null เฉย ๆ) */
+  branch_closed: BranchSchema.nullable().optional(),
   branches: z.array(BranchSchema),
   can_view_all: z.boolean(),
 });
 export type Me = z.infer<typeof MeSchema>;
+
+/**
+ * มีสาขาให้เลือก — มีสิทธิ์หลายสาขา หรือมีสิทธิ์แต่ session ยังไม่มีสาขาปัจจุบัน
+ * (บัญชีสร้างด้วย `--allow` อย่างเดียว / สาขาหลักถูกปิด) · ใช้ทั้งขั้นเลือกสาขาตอน login และเมนูสลับสาขา
+ */
+export const canSwitchBranch = (me: Me) => me.branches.length > 1 || (!me.branch && me.branches.length > 0);
 
 /**
  * ผู้ใช้ที่ login อยู่ — GET /api/me
@@ -52,11 +53,6 @@ export const GoldPriceTodaySchema = z.object({
   source: z.enum(["branch", "central"]),
 });
 export type GoldPriceToday = z.infer<typeof GoldPriceTodaySchema>;
-
-export const GOLD_PRICE_SOURCE_LABEL: Record<GoldPriceToday["source"], string> = {
-  central: "ราคากลาง",
-  branch: "ราคาเฉพาะสาขา",
-};
 
 /** ราคาทองวันนี้ของสาขาปัจจุบัน — GET /api/gold-price/today · 404 = ยังไม่ได้ตั้ง → null */
 export const goldPriceTodayQueryOptions = queryOptions({

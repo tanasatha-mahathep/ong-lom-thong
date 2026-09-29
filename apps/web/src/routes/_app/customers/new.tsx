@@ -11,7 +11,7 @@ const SearchSchema = z.object({ from: z.enum(["buy"]).optional().catch(undefined
 
 export const Route = createFileRoute("/_app/customers/new")({
   validateSearch: SearchSchema,
-  staticData: { title: "เพิ่มลูกค้า", crumbs: [{ title: "ลูกค้า", to: "/customers" }] },
+  staticData: { title: "customerNew", crumbs: [{ title: "customers", to: "/customers" }] },
   component: NewCustomerPage,
 });
 

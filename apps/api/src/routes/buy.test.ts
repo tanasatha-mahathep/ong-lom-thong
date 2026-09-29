@@ -44,6 +44,7 @@ interface QuoteRes {
   branch: { id: string; code: string; name: string };
   gold_price_snapshot: string | null;
   lines: { index: number; metal_id: string; weight_g: string; amount: string; price_per_g: string }[];
+  payments: { index: number; method: string; bank: string | null; amount: string }[];
   total_weight: string;
   total_amount: string;
   avg_price_per_g: string;
@@ -382,6 +383,7 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       branch: { id: t.branches["00000"], code: "00000", name: "สำนักงานใหญ่ (สาขา 1)" },
       gold_price_snapshot: "67850.00",
       lines: [{ index: 0, metal_id: metals.gold, weight_g: "5.860", amount: "20030.00", price_per_g: "3418.09" }],
+      payments: [{ index: 0, method: "cash", bank: null, amount: "20030.00" }],
       total_weight: "5.860",
       total_amount: "20030.00",
       avg_price_per_g: "3418.09",
@@ -648,6 +650,11 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     const q = (await (await quote(body)).json()) as QuoteRes;
     expect(q).toMatchObject({ ok: true, total_weight: "269.033", total_amount: "64787.50", avg_price_per_g: "240.82" });
     expect(q.lines.map((l) => l.price_per_g)).toEqual(["3421.09", "2333.33", "20.00"]);
+    // payments รูปมาตรฐาน (คอมมาถูกตัด · ธนาคารตัดช่องว่าง) ตามลำดับที่กรอก — จอใช้แทนค่าที่พิมพ์เอง
+    expect(q.payments).toEqual([
+      { index: 0, method: "transfer", bank: "KBANK", amount: "50000.00" },
+      { index: 1, method: "cash", bank: null, amount: "14787.50" },
+    ]);
 
     const res = await save({ ...body, time: "09:15", detail: "  สร้อยขาด 1 เส้น แหวนเงิน  ", full_tax: true });
     expect(res.status).toBe(201);
@@ -1078,13 +1085,19 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
         expect(((await d.json()) as DetailRes).branch.code).toBe("00002");
       }
       // เขียนไม่ได้: สาขาที่ทำงานต้องยังเปิดอยู่ · เลือกสาขาที่ปิดเป็นสาขาที่ทำงานไม่ได้
+      // ทั้งคู่มีสิทธิ์สาขานี้มาก่อน (acct2 = สาขาหลัก · boss = canViewAll) → ข้อความบอกว่า "ปิดแล้ว" ไม่ใช่ "ยังไม่ได้เลือก"
       for (const who of ["acct2", "boss"]) {
         const q = await quote(bill(), who);
         expect(q.status).toBe(403);
-        expect(await q.json()).toEqual({ error: "ยังไม่ได้เลือกสาขาที่ทำงาน", field: "branch" });
+        expect(await q.json()).toEqual({ error: "สาขาที่เลือกไว้ถูกปิดแล้ว — กรุณาเลือกสาขาอื่น", field: "branch" });
       }
-      expect((await save(bill(), "boss")).status).toBe(403);
-      expect((await save(bill(), "acct2")).status).toBe(403); // accounting อ่านอย่างเดียว
+      const savedBoss = await save(bill(), "boss");
+      expect(savedBoss.status).toBe(403);
+      expect(await savedBoss.json()).toEqual({
+        error: "สาขาที่เลือกไว้ถูกปิดแล้ว — กรุณาเลือกสาขาอื่น",
+        field: "branch",
+      });
+      expect((await save(bill(), "acct2")).status).toBe(403); // accounting อ่านอย่างเดียว — ติด role ก่อนถึงสาขา
       expect((await t.request("/api/me/branch", { cookie: cookies.boss, body: { branch_id: b2 } })).status).toBe(404);
       expect(await t.db.select().from(buyReceipt).where(eq(buyReceipt.branchId, b2))).toHaveLength(1);
     } finally {
@@ -1093,6 +1106,22 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
         .update(session)
         .set({ currentBranchId: null })
         .where(eq(session.userId, userIds.boss ?? ""));
+    }
+  });
+
+  it("scoping: currentBranchId ชี้สาขาที่ไม่เคยมีสิทธิ์แล้วถูกปิด — เหมือนยังไม่ได้เลือก ไม่ใช่ 'ปิดแล้ว' (ไม่รั่วว่าสาขานั้นมีอยู่)", async () => {
+    const mine = eq(session.userId, userIds.staff ?? "");
+    // staff มีสิทธิ์แค่ 00000 — จำลอง session ที่หลุดไปชี้สาขาอื่นที่ไม่เคยมีสิทธิ์ (ทำตรง ๆ ผ่าน DB เหมือนเทสต์ข้างบน)
+    await t.db.update(session).set({ currentBranchId: t.branches["00002"] }).where(mine);
+    await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00002"));
+    try {
+      for (const res of [await quote(bill(), "staff"), await save(bill(), "staff")]) {
+        expect(res.status).toBe(403);
+        expect(await res.json()).toEqual({ error: "ยังไม่ได้เลือกสาขาที่ทำงาน", field: "branch" });
+      }
+    } finally {
+      await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00002"));
+      await t.db.update(session).set({ currentBranchId: t.branches["00000"] }).where(mine);
     }
   });
 
