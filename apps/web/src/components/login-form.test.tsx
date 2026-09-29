@@ -164,7 +164,7 @@ describe("หน้า login", () => {
 });
 
 describe("หน้า login — กฎฟอร์ม U0–U6", () => {
-  it("floating label + placeholder ตัวอย่าง · ป้ายเป็น <label for>", async () => {
+  it("ป้ายเหนือช่อง + placeholder ตัวอย่าง · ป้ายเป็น <label for>", async () => {
     signInServer(makeMe("staff"));
     renderApp("/login");
     const email = await screen.findByLabelText("อีเมล");
