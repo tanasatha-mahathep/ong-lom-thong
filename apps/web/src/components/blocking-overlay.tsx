@@ -29,8 +29,13 @@ function BlockingLayer() {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     // ทุกอย่างนอกชั้นนี้ inert = คลิก/โฟกัส/อ่านด้วย screen reader ไม่ได้ (browser จริง)
+    // ยกเว้น toaster (portal ที่ body) — aria-live ต้องประกาศ toast "บันทึกแล้ว" ระหว่างพาไปหน้าถัดไป
     const outside = [...document.body.children].filter(
-      (el): el is HTMLElement => el instanceof HTMLElement && !el.contains(layer) && !el.hasAttribute("inert"),
+      (el): el is HTMLElement =>
+        el instanceof HTMLElement &&
+        !el.contains(layer) &&
+        !el.hasAttribute("inert") &&
+        !el.matches('[data-slot="toaster-host"]'),
     );
     for (const el of outside) el.setAttribute("inert", "");
     layer.focus();
