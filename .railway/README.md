@@ -138,12 +138,21 @@ rclone size "backup:$BACKUP_S3_BUCKET/production/files/"     # จำนวน�
 
 ค่าจาก `railway variable list --service "Nightly Backup" --kv` (environment ที่ link อยู่) · ใส่ใน shell เท่านั้น ห้ามเขียนลงไฟล์ใน repo
 
+Railway bucket เป็น virtual-hosted style — ต้องตั้ง `FORCE_PATH_STYLE=false` (provider `Other` ของ rclone ใช้ path style เป็นค่าเริ่มต้น · service เองก็ตั้ง `false`)
+
 ```bash
+export RCLONE_CONFIG=/dev/null   # ไม่ใช้/ไม่เขียน rclone.conf
 export RCLONE_CONFIG_BACKUP_TYPE=s3 RCLONE_CONFIG_BACKUP_PROVIDER=Other RCLONE_CONFIG_BACKUP_NO_CHECK_BUCKET=true
+export RCLONE_CONFIG_BACKUP_FORCE_PATH_STYLE=false
 export RCLONE_CONFIG_BACKUP_ENDPOINT=<BACKUP_S3_ENDPOINT> RCLONE_CONFIG_BACKUP_REGION=<BACKUP_S3_REGION>
 export RCLONE_CONFIG_BACKUP_ACCESS_KEY_ID=<BACKUP_S3_ACCESS_KEY> RCLONE_CONFIG_BACKUP_SECRET_ACCESS_KEY=<BACKUP_S3_SECRET_KEY>
 export BACKUP_S3_BUCKET=<BACKUP_S3_BUCKET>
-# Media: แบบเดียวกันด้วยชื่อ RCLONE_CONFIG_MEDIA_* จาก S3_* · export S3_BUCKET=<S3_BUCKET>
+# Media (ค่า S3_* ของ service เดียวกัน)
+export RCLONE_CONFIG_MEDIA_TYPE=s3 RCLONE_CONFIG_MEDIA_PROVIDER=Other RCLONE_CONFIG_MEDIA_NO_CHECK_BUCKET=true
+export RCLONE_CONFIG_MEDIA_FORCE_PATH_STYLE=false
+export RCLONE_CONFIG_MEDIA_ENDPOINT=<S3_ENDPOINT> RCLONE_CONFIG_MEDIA_REGION=<S3_REGION>
+export RCLONE_CONFIG_MEDIA_ACCESS_KEY_ID=<S3_ACCESS_KEY> RCLONE_CONFIG_MEDIA_SECRET_ACCESS_KEY=<S3_SECRET_KEY>
+export S3_BUCKET=<S3_BUCKET>
 ```
 
 ### กู้คืน database (ซ้อมใน scratch DB — ทดสอบแล้วกับ Postgres 18 + migration จริง: จำนวนแถวทุกตาราง ฟังก์ชัน และ migration ตรงกับต้นทาง)
