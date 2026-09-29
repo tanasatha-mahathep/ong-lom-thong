@@ -126,8 +126,8 @@ describe("หน้า login", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "ค้นบิล" })).toBeInTheDocument();
     expect(api.callsTo("POST", "/api/me/branch").map((c) => c.body)).toEqual([{ branch_id: BRANCH_2.id }]);
     expect(router.state.location.pathname).toBe("/bills");
-    // หัวหน้าแสดงสาขาที่เพิ่งเลือก
-    expect(screen.getByText("สาขาปัจจุบัน").parentElement).toHaveTextContent(BRANCH_2.name);
+    // หัว sidebar แสดงสาขาที่เพิ่งเลือก
+    expect(screen.getByRole("button", { name: /^สาขาปัจจุบัน/ })).toHaveTextContent(BRANCH_2.name);
   });
 
   it("หลายสาขาแต่ยังไม่มีสาขาปัจจุบัน → ขั้นเลือกสาขา ค่าเริ่มต้นเป็นสาขาแรก", async () => {
@@ -151,7 +151,7 @@ describe("หน้า login", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "หน้าแรก" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "เลือกสาขาที่ทำงาน" })).not.toBeInTheDocument();
     expect(api.callsTo("POST", "/api/me/branch").map((c) => c.body)).toEqual([{ branch_id: BRANCH_2.id }]);
-    expect(screen.getByText("สาขาปัจจุบัน").parentElement).toHaveTextContent(BRANCH_2.name);
+    expect(screen.getByRole("link", { name: /^สาขาปัจจุบัน/ })).toHaveTextContent(BRANCH_2.name);
   });
 
   it("login อยู่แล้ว → เปิด /login แล้วเข้าแอปเลย", async () => {

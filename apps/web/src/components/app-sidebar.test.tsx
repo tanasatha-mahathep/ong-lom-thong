@@ -90,7 +90,7 @@ describe("sidebar ของแอป", () => {
     expect(warning).toHaveAttribute("href", "/settings/gold-price");
   });
 
-  it("มีสาขาเดียว → เมนูผู้ใช้ไม่มีสลับสาขา แต่ออกจากระบบได้", async () => {
+  it("เมนูผู้ใช้ออกจากระบบได้", async () => {
     const { api, router } = renderShell("staff");
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: /ทดสอบ staff/ }));
@@ -105,70 +105,16 @@ describe("sidebar ของแอป", () => {
     expect(router.state.location.pathname).toBe("/login");
   });
 
-  it("ยังไม่มีสาขาปัจจุบัน (สาขาหลักถูกปิด) → เมนูผู้ใช้มีสลับสาขาแม้มีสิทธิ์สาขาเดียว", async () => {
-    const { api } = renderShell("staff", [BRANCH_2], { ...makeMe("staff", [BRANCH_2]), branch: null });
+  it("หลายสาขา → สลับสาขาอยู่ที่หัว sidebar ไม่อยู่ในเมนูผู้ใช้", async () => {
+    renderShell("manager", [BRANCH_HQ, BRANCH_2]);
     const user = userEvent.setup();
-    (await screen.findByRole("button", { name: /ทดสอบ staff/ })).focus();
-    expect(screen.getByText("สาขาปัจจุบัน").parentElement).toHaveTextContent("ยังไม่ได้เลือกสาขา");
-    await user.keyboard("{Enter}");
-    await waitFor(() => expect(screen.getByRole("menuitem", { name: "สลับสาขา" })).toHaveFocus());
-    await user.keyboard("{ArrowRight}");
-    await waitFor(() => expect(screen.getByRole("menuitemradio", { name: /สาขา 2/ })).toHaveFocus());
-    await user.keyboard("{Enter}");
+    const sidebar = await screen.findByRole("complementary", { name: "แถบเมนู" });
+    expect(within(sidebar).getByRole("button", { name: /^สาขาปัจจุบัน/ })).toHaveAttribute("aria-haspopup", "menu");
+    await user.click(screen.getByRole("button", { name: /ทดสอบ manager/ }));
 
-    await waitFor(() =>
-      expect(api.callsTo("POST", "/api/me/branch").map((c) => c.body)).toEqual([{ branch_id: BRANCH_2.id }]),
-    );
-  });
-
-  it("สลับสาขา → ข้อมูลของสาขาเดิมหายทันที ไม่ค้างใต้หัวสาขาใหม่ระหว่างโหลด", async () => {
-    let current = BRANCH_HQ;
-    let releasePrice = () => {};
-    const newPrice = new Promise<void>((resolve) => (releasePrice = resolve));
-    fakeApi({
-      "GET /api/me": () => json({ ...makeMe("manager", [BRANCH_HQ, BRANCH_2]), branch: current }),
-      "GET /api/gold-price/today": async () => {
-        if (current.id === BRANCH_HQ.id) return json(GOLD_PRICE);
-        await newPrice;
-        return json({ ...GOLD_PRICE, bar_sell: "68000.00" });
-      },
-      "POST /api/me/branch": () => {
-        current = BRANCH_2;
-        return json({ branch: BRANCH_2 });
-      },
-    });
-    renderApp("/");
-    const user = userEvent.setup();
-    expect(await screen.findByText("67,850.00")).toBeInTheDocument();
-    (await screen.findByRole("button", { name: /ทดสอบ manager/ })).focus();
-    await user.keyboard("{Enter}");
-    await waitFor(() => expect(screen.getByRole("menuitem", { name: "สลับสาขา" })).toHaveFocus());
-    await user.keyboard("{ArrowRight}");
-    await waitFor(() => expect(screen.getByRole("menuitemradio", { name: /สำนักงานใหญ่/ })).toHaveFocus());
-    await user.keyboard("{ArrowDown}{Enter}");
-
-    // หัวเป็นสาขาใหม่แล้ว แต่ราคาของสาขาเดิมต้องไม่ค้างอยู่ระหว่างรอราคาใหม่
-    await waitFor(() => expect(screen.getByText("สาขาปัจจุบัน").parentElement).toHaveTextContent(BRANCH_2.name));
-    expect(screen.queryByText("67,850.00")).not.toBeInTheDocument();
-    releasePrice();
-    expect(await screen.findByText("68,000.00")).toBeInTheDocument();
-  });
-
-  it("หลายสาขา → สลับสาขาจากเมนูผู้ใช้ด้วยคีย์บอร์ด แล้วโหลดข้อมูลใหม่", async () => {
-    const { api } = renderShell("manager", [BRANCH_HQ, BRANCH_2]);
-    const user = userEvent.setup();
-    (await screen.findByRole("button", { name: /ทดสอบ manager/ })).focus();
-    // Enter เปิดเมนู (โฟกัส "สลับสาขา") · → เปิดเมนูย่อย · ↓ ไปสาขา 2 · Enter เลือก
-    await user.keyboard("{Enter}");
-    await waitFor(() => expect(screen.getByRole("menuitem", { name: "สลับสาขา" })).toHaveFocus());
-    await user.keyboard("{ArrowRight}");
-    await waitFor(() => expect(screen.getByRole("menuitemradio", { name: /สำนักงานใหญ่/ })).toHaveFocus());
-    await user.keyboard("{ArrowDown}{Enter}");
-
-    expect(await screen.findByText("สลับสาขาแล้ว — สาขา 2")).toBeInTheDocument();
-    expect(api.callsTo("POST", "/api/me/branch").map((c) => c.body)).toEqual([{ branch_id: BRANCH_2.id }]);
-    // invalidate ทุก query → ถามผู้ใช้และราคาทองใหม่
-    expect(api.callsTo("GET", "/api/me").length).toBeGreaterThanOrEqual(2);
+    expect(await screen.findByRole("menuitem", { name: "ออกจากระบบ" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "สลับสาขา" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitemradio")).not.toBeInTheDocument();
   });
 });
 

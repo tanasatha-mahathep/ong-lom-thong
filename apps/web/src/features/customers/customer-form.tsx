@@ -30,6 +30,7 @@ import {
   fieldElementId,
   isTextField,
 } from "./fields";
+import { useUnsavedChanges } from "@/lib/unsaved-changes";
 import { type CustomersKey, isCustomersKey, useTranslation } from "./i18n";
 import { type CustomerFormValues, EMPTY_CUSTOMER } from "./model";
 import { photoProblem } from "./photo";
@@ -132,6 +133,8 @@ export function CustomerForm({
   });
   const submitting = useStore(form.store, (state) => state.isSubmitting);
   const dirty = useStore(form.store, (state) => state.isDirty);
+  // สลับสาขาล้างฟอร์มนี้ — ถามยืนยันก่อน (components/branch-switcher.tsx)
+  useUnsavedChanges(dirty);
 
   /** กดซ้ำ/Ctrl+Enter ซ้ำระหว่างส่ง = ส่งครั้งเดียว */
   const submit = async () => {
