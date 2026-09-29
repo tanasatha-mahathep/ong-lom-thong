@@ -399,7 +399,7 @@ esac`,
     const r = run(baseEnv());
     expect(r.stderr).toBe("");
     expect(r.status).toBe(0);
-    expect(r.stdout).toMatch(/all done/);
+    expect(r.stdout).toMatch(/all done — database: ok \(staging-\d{8}T\d{6}Z\.dump\) · files: ok$/m);
 
     const pgDump = lines(read("pg_dump.log")).find((l) => l.includes("--format=custom"));
     expect(pgDump).toBeDefined();
@@ -446,7 +446,7 @@ esac`,
     seedRemote(dailyNames("staging", new Date(Date.now() - 86_400_000), 60));
     const r = run({ ...baseEnv(), STUB_FAIL_UPLOAD: "1" });
     expect(r.status).not.toBe(0);
-    expect(r.stderr).toMatch(/FAILED database=1 files=0/);
+    expect(r.stderr).toMatch(/backup: FAILED — database: FAILED \(exit 1\) · files: ok$/m);
     const calls = rcloneCalls();
     expect(calls.some((c) => c.startsWith("deletefile") || c.startsWith("lsf"))).toBe(false);
     expect(read("deleted.txt")).toBe("");
@@ -486,11 +486,16 @@ esac`,
     expect(rcloneCalls().some((c) => c.startsWith("copyto"))).toBe(false);
   });
 
-  it("copy ไฟล์พัง → database ยังสำรองครบ · exit ≠ 0", () => {
+  it("copy ไฟล์พัง → database ยังสำรองครบ และบรรทัดสรุปบอกผลของ database ด้วย · exit ≠ 0", () => {
     const r = run({ ...baseEnv(), STUB_FAIL_COPY: "1" });
     expect(r.status).not.toBe(0);
-    expect(r.stderr).toMatch(/FAILED database=0 files=1/);
     expect(r.stdout).toMatch(/database backup done/);
+    expect(r.stderr).toMatch(
+      /files copy failed \(exit 1\) — for "immutable file modified" see .*ไฟล์ใน Media ถูกเขียนทับ/,
+    );
+    expect(r.stderr).toMatch(
+      /backup: FAILED — database: ok \(staging-\d{8}T\d{6}Z\.dump\) · files: FAILED \(exit 1\)$/m,
+    );
   });
 
   it("ขาดตัวแปร → หยุดก่อนทำอะไร พร้อมรายชื่อที่ขาด", () => {

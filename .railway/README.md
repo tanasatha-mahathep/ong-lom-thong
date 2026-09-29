@@ -88,11 +88,11 @@ service `Nightly Backup` (cron · โค้ด `services/backup/`) รันท�
 - ชื่อ dump เช่น `production-20260929T191700Z.dump` (เวลา UTC ตอนเริ่ม dump)
 - เก็บ dump: **ทุกไฟล์ของ 30 วันล่าสุดที่มี dump + ไฟล์ล่าสุดของแต่ละเดือน 12 เดือน** (`BACKUP_KEEP_DAILY` / `BACKUP_KEEP_MONTHLY` ใน `railway.ts`) · นับวันที่มีไฟล์ ไม่ใช่อายุ — cron หยุดไปนานของเก่าก็ไม่หาย · ไฟล์ที่ไม่ตรงรูปชื่อไม่ถูกลบ · อัปโหลดไม่สำเร็จ/ยืนยันไม่ได้ = ไม่ prune
 - **ตรวจขนาดก่อน prune** (`BACKUP_MIN_SIZE_PERCENT` 50): บิลไม่ถูกลบ → dump ใหม่ที่เล็กกว่า 50% ของ dump ก่อนหน้า หรือของ dump ใดที่ถึงคิวลบ = database อาจถูกล้าง/เริ่มใหม่ — dump ใหม่ยังเก็บ แต่**ไม่ลบอะไร**และ run fail ทุกคืนจนกว่าคนจะตัดสิน (ไม่งั้นอีก 30 คืน dump ก่อนเกิดเหตุถูก prune หมด) · ดู "dump เล็กลงผิดปกติ"
-- `--immutable`: ไฟล์ใน `Media` ที่ถูกแก้เนื้อหา (ใบรับซื้อ/สำเนาบัตรห้ามแก้) → run นั้น fail และสำเนาเดิมไม่ถูกเขียนทับ — **ต้องตรวจทันที**
+- `--immutable`: ไฟล์ใน `Media` ที่ถูกเขียนทับ (ใบรับซื้อ/สำเนาบัตรห้ามแก้ — แม้ byte เดิมก็นับ) → ส่วน files fail ทุกคืน และสำเนาเดิมไม่ถูกเขียนทับ — **ต้องตรวจทันที** ดู "ไฟล์ใน Media ถูกเขียนทับ"
 - **ไม่มีรอบไหนค้างได้**: `pg_dump --lock-wait-timeout` (`BACKUP_LOCK_WAIT_TIMEOUT` 15 นาที — ตารางถูกล็อก `ACCESS EXCLUSIVE` ค้าง = fail) · ทั้งรอบมีเส้นตาย `BACKUP_TIMEOUT_SECONDS` (6 ชั่วโมง) — คำสั่งที่ยังทำงานเมื่อถึงเส้นตายถูก TERM (อีก 30 วินาที KILL) · รอบที่ค้าง = Railway ข้ามทุกรอบถัดไป backup หยุดเงียบ จึงต้องมีเส้นตาย
   - เส้นตายบังคับที่คำสั่งลูกทีละตัว (pg_dump · pg_restore · rclone) ไม่ใช่ `timeout` ครอบ entrypoint: สคริปต์เป็น PID 1 ใน container และ signal ที่ส่งจากใน container ถึง PID 1 ถูกทิ้ง (ทดสอบกับ image นี้: `timeout 2` เป็น entrypoint → `sleep 12` รันครบ exit 0)
   - ทดสอบกับ image จริง: ถือ `LOCK TABLE branch IN ACCESS EXCLUSIVE MODE` ไว้ → pg_dump fail ใน 5 วินาที (`BACKUP_LOCK_WAIT_TIMEOUT=5s`) · lock wait 10 นาที + เส้นตาย 10 วินาที → หยุดที่ 11 วินาที · S3 ค้าง (`docker pause`) → rclone หยุดที่เส้นตาย
-- database กับ files ทำแยกกัน — ส่วนหนึ่งพัง อีกส่วนยังทำ แล้ว exit ≠ 0 · log บรรทัดท้าย `backup: all done` หรือ `backup: FAILED database=<code> files=<code>`
+- database กับ files ทำแยกกัน — ส่วนหนึ่งพัง อีกส่วนยังทำ แล้ว exit ≠ 0 · บรรทัดสรุปท้ายรอบบอกผลทั้งสองส่วนเสมอ (files พังทุกคืนต้องไม่บังผลของ database): `backup: all done — database: ok (<ชื่อ dump>) · files: ok` หรือ `backup: FAILED — database: ok (<ชื่อ dump>) · files: FAILED (exit 6)`
 
 > **ข้อจำกัด:** bucket `Backup` อยู่ในบัญชี/project Railway เดียวกัน — กันข้อมูลเสีย/ถูกลบในแอป, database พัง และไฟล์ใน `Media` หาย แต่ **ไม่กันกรณีบัญชีหรือ project Railway หาย** · สำเนานอก Railway (R2/B2) เป็นงานเสริมความปลอดภัยในอนาคต — ดู "ต่อสำเนานอก Railway" ด้านล่าง
 
@@ -122,7 +122,7 @@ service `Nightly Backup` (cron · โค้ด `services/backup/`) รันท�
 ### ตรวจผลการรัน
 
 ```bash
-railway logs --service "Nightly Backup"   # รอบล่าสุด: "backup: all done" · pg_dump (PostgreSQL) 18.x · "prune: …"
+railway logs --service "Nightly Backup"   # รอบล่าสุด: "backup: all done — database: ok (…) · files: ok" · pg_dump (PostgreSQL) 18.x · "prune: …"
 ```
 
 ยังไม่ได้ยืนยันว่า Railway มีปุ่มสั่งรัน cron ทันที — ถ้าไม่มี ให้ตรวจหลังรอบแรก (02:17 น.) · ดูรายการไฟล์ใน bucket ด้วย rclone ตาม "ตั้ง rclone บนเครื่อง" แล้ว
@@ -179,6 +179,28 @@ rclone copy "backup:$BACKUP_S3_BUCKET/production/files" "media:$S3_BUCKET" --imm
 rclone lsjson --metadata "media:$S3_BUCKET/receipts/<สาขา>/<เลขที่>.pdf"   # metadata sha256
 rclone hashsum sha256 --download "media:$S3_BUCKET/receipts/<สาขา>/<เลขที่>.pdf"  # ต้องตรงกัน
 ```
+
+### ไฟล์ใน Media ถูกเขียนทับ
+
+log: `ERROR : <key>: Source and destination exist but do not match: immutable file modified` (บางครั้งมี `Timestamp mismatch between immutable objects` ก่อน) แล้ว `files copy failed (exit 6)` · บรรทัดสรุป `database: ok (…) · files: FAILED (exit 6)` — database ยังสำรองตามปกติ แต่ส่วน files จะ fail ทุกคืนจนกว่าจะแก้
+
+- แอปไม่เคยเขียนทับไฟล์ใน `Media`: รูปลูกค้าได้ key ใหม่ (UUID) ทุกครั้งที่อัปโหลด (`apps/api/src/services/customers.ts`) · PDF ใบรับซื้อ/สำเนาบัตรเขียนครั้งเดียว (`putImmutable`) — เกิดได้จากคนอัปโหลด/แก้ไฟล์เองเท่านั้น (console · rclone) · **เขียนทับด้วย byte เดิมก็ fail** (เวลาแก้ไขเปลี่ยน — ทดสอบแล้ว)
+- ใบรับซื้อ/สำเนาบัตรเป็นเอกสารภาษี — หาให้ได้ว่าใครแก้ เมื่อไร เพราะอะไร ก่อนทำอะไรต่อ · เทียบฉบับปัจจุบันกับฉบับที่สำรองไว้ก่อนถูกแก้:
+
+```bash
+rclone lsjson --metadata "media:$S3_BUCKET/<key>"                                   # metadata sha256 ตอนแอปเขียน
+rclone hashsum sha256 --download "media:$S3_BUCKET/<key>"                            # ฉบับปัจจุบัน
+rclone hashsum sha256 --download "backup:$BACKUP_S3_BUCKET/production/files/<key>"   # ฉบับที่สำรองไว้
+```
+
+- ให้ backup เดินต่อโดยไม่ทิ้งฉบับเดิม: ย้ายสำเนาเดิมไป `files-conflicts/<เวลา UTC>/` (ไม่มีการ prune) แล้วรอบถัดไปจะ copy ไฟล์ปัจจุบันของ `Media` มาแทน (ทดสอบแล้ว: ฉบับเดิมพร้อม metadata อยู่ครบ · รอบถัดไปผ่าน)
+
+```bash
+rclone moveto "backup:$BACKUP_S3_BUCKET/production/files/<key>" \
+  "backup:$BACKUP_S3_BUCKET/production/files-conflicts/<UTC>/<key>"
+```
+
+- ฉบับใน `Media` ผิดและฉบับเดิมถูก → ตัดสินกับบัญชีก่อนนำฉบับเดิมกลับเข้า `Media` (ห้ามเขียนทับเองโดยไม่มีบันทึก)
 
 ### dump เล็กลงผิดปกติ
 

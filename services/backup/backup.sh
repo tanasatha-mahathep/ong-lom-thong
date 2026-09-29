@@ -116,15 +116,23 @@ backup_database() {
     done <<<"$prune"
   fi
   log "database backup done: $name"
+  # ผลของส่วนนี้ให้บรรทัดสรุปท้ายรอบ (subshell ส่งตัวแปรกลับไม่ได้)
+  printf '%s\n' "$name" >"$workdir/database.done"
 }
 
 backup_files() {
-  local src="media:$S3_BUCKET" dest="backup:$BACKUP_S3_BUCKET/$BACKUP_ENVIRONMENT/files"
+  local src="media:$S3_BUCKET" dest="backup:$BACKUP_S3_BUCKET/$BACKUP_ENVIRONMENT/files" status=0
   log "copy files $src → $dest (copy only — never deletes)"
   # --metadata: เก็บ content-type + x-amz-meta-* (sha256 ของ PDF) ไว้ตรวจความถูกต้องตอนกู้คืน
   # log เฉพาะ error + สรุปท้าย (จำนวนไฟล์ที่ copy/ตรวจ) — ไม่ไล่ชื่อไฟล์ทีละตัว
   bounded rclone copy "$src" "$dest" --immutable --metadata --retries 3 \
-    --log-level NOTICE --stats 1h --stats-log-level NOTICE
+    --log-level NOTICE --stats 1h --stats-log-level NOTICE || status=$?
+  if ((status != 0)); then
+    # แอปไม่เขียนทับไฟล์ใน Media เลย — "immutable file modified" = มีคนแก้/อัปโหลดทับเอง (แม้ byte เดิมก็ fail)
+    printf 'backup: ERROR: files copy failed (exit %s) — for "immutable file modified" see %s\n' \
+      "$status" '.railway/README.md "ไฟล์ใน Media ถูกเขียนทับ"' >&2
+    return "$status"
+  fi
   log "files backup done"
 }
 
@@ -183,11 +191,19 @@ main() {
   files_status=$?
   set -e
 
+  # บรรทัดสรุปบอกผลทั้งสองส่วนเสมอ — files พังทุกคืนต้องไม่บังผลของ database (และกลับกัน)
+  local db_result files_result
+  if ((db_status == 0)); then
+    db_result="ok ($(cat "$workdir/database.done"))"
+  else
+    db_result="FAILED (exit $db_status)"
+  fi
+  if ((files_status == 0)); then files_result="ok"; else files_result="FAILED (exit $files_status)"; fi
   if ((db_status != 0 || files_status != 0)); then
-    printf 'backup: FAILED database=%s files=%s (exit codes)\n' "$db_status" "$files_status" >&2
+    printf 'backup: FAILED — database: %s · files: %s\n' "$db_result" "$files_result" >&2
     exit 1
   fi
-  log "all done"
+  log "all done — database: $db_result · files: $files_result"
 }
 
 main "$@"
