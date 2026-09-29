@@ -2,6 +2,7 @@ import type { Db } from "@ong/db";
 import { Hono } from "hono";
 import { accessLog } from "./lib/accessLog";
 import { requireJsonBody } from "./lib/contentType";
+import { requireSameOriginFetch } from "./lib/fetchSite";
 import { noStoreByDefault, securityHeaders } from "./lib/httpHeaders";
 import type { Auth } from "./auth";
 import type { Env } from "./env";
@@ -52,6 +53,8 @@ export function createApp({ db, auth, env, storage, pdf, now = () => new Date() 
   api.use(sameOriginOnly(env.BETTER_AUTH_URL));
   // defence in depth (ASVS V13.2.5) — request ที่มี body ต้องเป็น application/json (F12 · F15 · F16)
   api.use(requireJsonBody);
+  // Fetch Metadata — GET ที่ส่งไฟล์สำคัญ/ลง audit ต้องไม่มาจากเว็บอื่น (sameOriginOnly ยกเว้นเมธอดปลอดภัย)
+  api.use(requireSameOriginFetch);
   api.get("/healthz", (c) => c.json(health()));
   // login / logout / session ของ better-auth
   api.on(["GET", "POST"], "/auth/*", (c) => auth.handler(c.req.raw));
