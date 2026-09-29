@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { navigation } from "@/lib/navigation";
 import type { Me } from "@/lib/queries";
 import { BRANCH_2, BRANCH_HQ, GOLD_PRICE, fakeApi, json, makeMe, renderApp } from "@/test/app";
 
@@ -42,6 +43,7 @@ async function open(
     "GET /api/me": () => json(me),
     "GET /api/gold-price/today": () => json(GOLD_PRICE),
     [`GET ${TODAY}`]: () => json(STOCK),
+    "GET /api/reports/stock": () => json(STOCK),
     ...routes,
   });
   const router = renderApp(path);
@@ -76,12 +78,32 @@ describe("สต็อกคงเหลือ", () => {
         .map((td) => td.textContent),
     ).toEqual(["987,654,321.123", "5.250", "97.500"]);
 
-    const csv = screen.getByRole("link", { name: "ดาวน์โหลด CSV" });
-    expect(csv).toHaveAttribute("href", `${TODAY}&format=csv`);
-    expect(csv).toHaveAttribute("download", "สต็อกคงเหลือ_2026-09-29.csv");
+    expect(screen.getByText("ณ วันที่ 29/09/2569")).toBeInTheDocument();
+    expect(screen.getByLabelText("ณ วันที่")).toHaveAttribute("placeholder", "วว/ดด/ปปปป");
   });
 
-  it("กรอกวันที่ + สาขา → URL (ISO) → query ของ API · ลิงก์ CSV ตาม", async () => {
+  it("CSV: ขอตามตัวกรองที่ใช้แล้ว → บันทึกไฟล์ชื่อไทย + toast · ล้มเหลว = toast ค้าง ไม่บันทึกไฟล์", async () => {
+    const save = vi.spyOn(navigation, "saveBlob").mockImplementation(() => undefined);
+    let fail = false;
+    const { api, user } = await open("/reports/stock", {
+      [`GET ${TODAY}&format=csv`]: () =>
+        fail ? json({ error: "forbidden" }, 403) : new Response("a,b", { headers: { "Content-Type": "text/csv" } }),
+    });
+    await matrix();
+
+    await user.click(screen.getByRole("button", { name: "ดาวน์โหลด CSV" }));
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    expect(save.mock.calls[0]?.[1]).toBe("สต็อกคงเหลือ_2026-09-29.csv");
+    expect(stockCalls(api)).toEqual([TODAY, `${TODAY}&format=csv`]);
+    expect(await screen.findByText("ดาวน์โหลด สต็อกคงเหลือ_2026-09-29.csv แล้ว")).toBeInTheDocument();
+
+    fail = true;
+    await user.click(screen.getByRole("button", { name: "ดาวน์โหลด CSV" }));
+    expect(await screen.findByText("ดาวน์โหลด CSV ไม่สำเร็จ — ไม่มีสิทธิ์")).toBeInTheDocument();
+    expect(save).toHaveBeenCalledTimes(1);
+  });
+
+  it("สาขาใช้ทันที · วันที่ที่พิมพ์ใช้เมื่อกด Enter → URL (ISO) → query ของ API", async () => {
     const filtered = `/api/reports/stock?as_of=2026-08-31&branch_id=${BRANCH_2.id}`;
     const { api, router, user } = await open("/reports/stock", {
       [`GET ${filtered}`]: () => json({ ...STOCK, as_of: "2026-08-31" }),
@@ -90,13 +112,14 @@ describe("สต็อกคงเหลือ", () => {
 
     const asOf = screen.getByLabelText("ณ วันที่");
     await user.selectOptions(screen.getByLabelText("สาขา"), BRANCH_2.id);
+    const withBranch = `${TODAY}&branch_id=${BRANCH_2.id}`;
+    await waitFor(() => expect(stockCalls(api)).toEqual([TODAY, withBranch]));
     await user.clear(asOf);
     await user.type(asOf, "31/8/2569{Enter}");
 
     await waitFor(() => expect(router.state.location.search).toEqual({ as_of: "2026-08-31", branch_id: BRANCH_2.id }));
-    await waitFor(() => expect(stockCalls(api)).toEqual([TODAY, filtered]));
-    expect(await screen.findByText("ณ วันที่ 31 สิงหาคม 2569")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "ดาวน์โหลด CSV" })).toHaveAttribute("href", `${filtered}&format=csv`);
+    await waitFor(() => expect(stockCalls(api)).toEqual([TODAY, withBranch, filtered]));
+    expect(await screen.findByText("ณ วันที่ 31/08/2569")).toBeInTheDocument();
   });
 
   it("ปุ่มลัดสิ้นเดือนที่แล้ว ใช้ทันที", async () => {
@@ -122,11 +145,21 @@ describe("สต็อกคงเหลือ", () => {
     expect(stockCalls(api)).toEqual([TODAY]);
   });
 
+  it("400 ที่ชี้ช่อง as_of → ข้อความใต้ช่อง “ณ วันที่” (U3) · ไม่ซ้ำในกล่องแจ้ง", async () => {
+    await open("/reports/stock", {
+      [`GET ${TODAY}`]: () => json({ error: "as_of ต้องไม่ใช่วันในอนาคต", field: "as_of" }, 400),
+    });
+
+    expect(await screen.findByText("โหลดรายงานไม่ได้")).toBeInTheDocument();
+    expect(screen.getAllByText("as_of ต้องไม่ใช่วันในอนาคต")).toHaveLength(1);
+    expect(screen.getByLabelText("ณ วันที่")).toHaveAccessibleDescription(/as_of ต้องไม่ใช่วันในอนาคต/);
+  });
+
   it("staff (API ตอบ 403) → ไม่มีสิทธิ์ดูรายงาน", async () => {
     await open("/reports/stock", { [`GET ${TODAY}`]: () => json({ error: "forbidden" }, 403) }, makeMe("staff"));
 
     expect(await screen.findByText("ไม่มีสิทธิ์ดูรายงาน")).toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "ดาวน์โหลด CSV" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "ดาวน์โหลด CSV" })).not.toBeInTheDocument();
   });
 });

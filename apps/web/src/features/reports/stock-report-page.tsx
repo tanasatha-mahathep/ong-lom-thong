@@ -1,7 +1,10 @@
 import { type UseQueryResult, keepPreviousData, useQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
-import { type FormEvent, useId, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useId, useMemo } from "react";
+import { useTranslation as useCommonTranslation } from "react-i18next";
+import { AppForm } from "@/components/app-form";
 import { PageHeader } from "@/components/page-header";
+import { ThaiDateField } from "@/components/thai-date-field";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -13,22 +16,25 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useAppForm } from "@/hooks/use-app-form";
 import { useBusinessDate } from "@/hooks/use-business-date";
 import { ApiError } from "@/lib/api";
-import { formatThaiDate, formatWeight } from "@/lib/format";
+import { formatWeight } from "@/lib/format";
 import { useTranslation } from "./i18n";
 import { type StockParams, type StockReport, stockCsvHref, stockReportQueryOptions } from "./queries";
+import { stockFilterSchema } from "./filter-schema";
 import {
+  ApplyButton,
   BranchSelect,
-  CsvLink,
+  CsvDownloadButton,
   NumberCell,
   ReportForbidden,
   ReportLoadError,
   ReportSkeleton,
   TableFrame,
-  ThaiDateField,
 } from "./report-parts";
-import { type StockSearch, isoToThaiInput, lastMonth, parseDateInput } from "./search";
+import { type FieldProblem, fieldProblem, problemOf } from "./report-problem";
+import { type StockSearch, isoToThaiInput, lastMonth } from "./search";
 
 const route = getRouteApi("/_app/reports/stock");
 
@@ -59,89 +65,110 @@ export function StockReportPage() {
     <>
       <PageHeader
         description={t("stock.description")}
-        actions={<CsvLink href={stockCsvHref(params)} filename={t("csv.stockFile", { asOf: params.as_of })} />}
+        actions={
+          <CsvDownloadButton href={stockCsvHref(params)} filename={t("csv.stockFile", { asOf: params.as_of })} />
+        }
       />
-      <StockFilters applied={params} onApply={(next) => void navigate({ search: next })} />
+      <StockFilters
+        applied={params}
+        loading={report.isFetching}
+        problem={fieldProblem(report.error)}
+        onApply={(next) => void navigate({ search: next })}
+      />
       <StockResults report={report} />
     </>
   );
 }
 
 interface FilterValues {
-  asOf: string;
-  branch: string;
+  as_of: string;
+  branch_id: string;
 }
 
-const toValues = (p: StockParams): FilterValues => ({ asOf: isoToThaiInput(p.as_of), branch: p.branch_id ?? "" });
+const toValues = (p: StockParams): FilterValues => ({ as_of: isoToThaiInput(p.as_of), branch_id: p.branch_id ?? "" });
 
-const toSearch = (asOf: string, v: FilterValues): StockSearch => ({
-  as_of: asOf,
-  ...(v.branch ? { branch_id: v.branch } : {}),
+/** ค่าที่ตรวจแล้ว (วันที่เป็น ISO) → search ของ URL */
+const toSearch = (v: FilterValues): StockSearch => ({
+  as_of: v.as_of,
+  ...(v.branch_id ? { branch_id: v.branch_id } : {}),
 });
 
-/** ตัวกรอง — Enter / "แสดงรายงาน" = ใช้ตัวกรอง · ปุ่มลัดใช้ทันที */
-function StockFilters({ applied, onApply }: { applied: StockParams; onApply: (next: StockSearch) => void }) {
+/**
+ * ตัวกรอง — วันที่ที่พิมพ์: Enter / "แสดงรายงาน" · สาขาและปุ่มลัดใช้ทันที (กติกาเดียวกับรายงานยอดซื้อและหน้าค้นบิล)
+ * วันที่ผิดรูปแจ้งใต้ช่องก่อนยิง API (U2) · 400 ของ API ที่ชี้ช่องแสดงใต้ช่องนั้น (U3)
+ */
+function StockFilters({
+  applied,
+  loading,
+  problem,
+  onApply,
+}: {
+  applied: StockParams;
+  loading: boolean;
+  problem: FieldProblem | undefined;
+  onApply: (next: StockSearch) => void;
+}) {
   const { t } = useTranslation("reports");
-  const ids = useId();
+  const { t: tc } = useCommonTranslation("common");
   const today = useBusinessDate();
-  const asOfRef = useRef<HTMLInputElement>(null);
-  const [values, setValues] = useState(() => toValues(applied));
-  const [error, setError] = useState<string | null>(null);
+  const schema = useMemo(() => stockFilterSchema(tc), [tc]);
+  const f = useAppForm({
+    defaultValues: toValues(applied),
+    schema,
+    submit: (values) => Promise.resolve(values),
+    onSuccess: (values) => onApply(toSearch(values)),
+  });
 
   // URL เปลี่ยนจากทางอื่น → ช่องแสดงค่าที่ใช้อยู่จริง โดยไม่ remount ฟอร์ม
   const appliedKey = JSON.stringify(applied);
-  const [syncedKey, setSyncedKey] = useState(appliedKey);
-  if (appliedKey !== syncedKey) {
-    setSyncedKey(appliedKey);
-    setValues(toValues(applied));
-    setError(null);
-  }
-
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const asOf = parseDateInput(values.asOf);
-    if ("error" in asOf) {
-      setError(t(`filters.errors.${asOf.error}`));
-      asOfRef.current?.focus();
-      return;
-    }
-    onApply(toSearch(asOf.iso, values));
-  };
+  const syncFromUrl = useEffectEvent(() => f.form.reset(toValues(applied)));
+  useEffect(() => syncFromUrl(), [appliedKey]);
 
   const applyDate = (iso: string) => {
-    setValues((current) => ({ ...current, asOf: isoToThaiInput(iso) }));
-    setError(null);
-    onApply(toSearch(iso, values));
+    f.form.setFieldValue("as_of", isoToThaiInput(iso));
+    onApply(toSearch({ as_of: iso, branch_id: f.form.state.values.branch_id }));
   };
 
   return (
-    <form
+    <AppForm
+      form={f}
       role="search"
       aria-label={t("filters.label")}
-      noValidate
-      onSubmit={submit}
-      className="grid gap-4 rounded-lg border bg-card p-4"
+      className="rounded-lg border bg-card p-4"
+      fieldsetClassName="grid gap-4"
     >
       <div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <ThaiDateField
-          id={`${ids}-as-of`}
-          inputRef={asOfRef}
-          label={t("filters.asOf")}
-          value={values.asOf}
-          error={error}
-          onChange={(asOf) => {
-            setValues((current) => ({ ...current, asOf }));
-            setError(null);
+        <f.form.Field name="as_of">
+          {(field) => {
+            const bound = f.bind(field);
+            return (
+              <ThaiDateField
+                {...bound}
+                label={t("filters.asOf")}
+                error={bound.error ?? problemOf(problem, "as_of")}
+                onFormat={field.handleChange}
+              />
+            );
           }}
-        />
-        <BranchSelect
-          id={`${ids}-branch`}
-          value={values.branch}
-          onChange={(branch) => setValues((current) => ({ ...current, branch }))}
-        />
+        </f.form.Field>
+        <f.form.Field name="branch_id">
+          {(field) => {
+            const bound = f.bind(field);
+            return (
+              <BranchSelect
+                {...bound}
+                error={bound.error ?? problemOf(problem, "branch_id")}
+                onChange={(event) => {
+                  bound.onChange(event);
+                  f.submit();
+                }}
+              />
+            );
+          }}
+        </f.form.Field>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="submit">{t("filters.apply")}</Button>
+        <ApplyButton loading={loading} />
         <div role="group" aria-label={t("filters.presets")} className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" onClick={() => applyDate(today)}>
             {t("filters.today")}
@@ -151,7 +178,7 @@ function StockFilters({ applied, onApply }: { applied: StockParams; onApply: (ne
           </Button>
         </div>
       </div>
-    </form>
+    </AppForm>
   );
 }
 
@@ -161,7 +188,11 @@ function StockResults({ report }: { report: UseQueryResult<StockReport> }) {
   const data = report.data;
   if (data === undefined) {
     return report.isError ? (
-      <ReportLoadError error={report.error} onRetry={() => void report.refetch()} />
+      <ReportLoadError
+        error={report.error}
+        detail={!fieldProblem(report.error)}
+        onRetry={() => void report.refetch()}
+      />
     ) : (
       <ReportSkeleton />
     );
@@ -175,7 +206,7 @@ function StockResults({ report }: { report: UseQueryResult<StockReport> }) {
         <h2 id={titleId} className="text-lg font-semibold">
           {t("stock.title")}
         </h2>
-        <p className="text-sm text-muted-foreground">{t("stock.asOf", { date: formatThaiDate(data.as_of, "long") })}</p>
+        <p className="text-sm text-muted-foreground">{t("stock.asOf", { date: isoToThaiInput(data.as_of) })}</p>
       </div>
       <TableFrame>
         <Table>
