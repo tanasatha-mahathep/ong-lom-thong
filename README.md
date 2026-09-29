@@ -36,15 +36,17 @@ make railway-plan ENV=staging
 | image                   | `scripts/ci/image-smoke.sh` — Dockerfile ที่ Railway ใช้: boot · pre-deploy ซ้ำได้ · header · SIGTERM · access log                | `make smoke`                                 | Docker      |
 | e2e                     | `tests/e2e` (Playwright: smoke · api · pdf · ui) บน stack จริง                                                                    | `make e2e-up` → `make e2e` → `make e2e-down` | Docker      |
 | ความปลอดภัย             | `scripts/ci/{ci-lint,secret-scan,sast,sca}.sh` — actionlint · zizmor · shellcheck · gitleaks · Semgrep CE · OSV-Scanner           | `make scan` · `make sca` · `make security`   | Docker + jq |
+| image Gotenberg         | `scripts/ci/gotenberg-scan.sh` — SBOM CycloneDX + Trivy (fail = CRITICAL ที่มี fix · HIGH รายงาน)                                 | `make gotenberg-scan`                        | Docker + jq |
+| provenance              | `scripts/ci/verify-image.sh` — SLSA provenance + SBOM attestation ของ image ใน GHCR (ลงนามโดย `ci.yml`)                           | `make verify-image REF=<sha>`                | gh          |
 | TestSprite (advisory)   | `tests/testsprite` — probe อ่านอย่างเดียว · ห้ามชี้ production ([README](tests/testsprite/README.md))                             | `make testsprite-probe URL=…`                | Python 3    |
 
 **วงแหวนของ CI** ([ci.yml](.github/workflows/ci.yml)) — gate ที่ `make promote` และ Railway รอ อยู่ในไฟล์นี้ทั้งหมด
 
 - **ring 0** — ทุก PR และ push: `check` · `scan` · `db-verify` · `backup-image` (รันขนานกัน)
-- **ring 1** — push `testing` / `staging` / `main` และ `make ci-full` (workflow_dispatch บน branch ใดก็ได้): `image` (build ครั้งเดียว → smoke → SBOM CycloneDX → Trivy gate) → `e2e` บน image เดียวกัน · `sca`
+- **ring 1** — push `testing` / `staging` / `main` และ `make ci-full` (workflow_dispatch บน branch ใดก็ได้): `image` (build ครั้งเดียว → smoke → SBOM CycloneDX → Trivy gate · Gotenberg: SBOM → Trivy gate → push ทั้งสอง image ไป `ghcr.io/tanasatha-mahathep/ong-lom-thong/{api,gotenberg}` tag = commit SHA + branch → attest SLSA provenance + SBOM ลง registry) → `e2e` บน image เดียวกัน · `sca`
 - **ring 2** — [deploy-smoke.yml](.github/workflows/deploy-smoke.yml): Railway deploy สำเร็จ → Playwright `smoke` (อ่านอย่างเดียว) ยิงเว็บจริง · URL จาก repository variables `E2E_URL_STAGING` · `E2E_URL_PRODUCTION` (ไม่ตั้ง = ข้าม)
-- **advisory** — [security.yml](.github/workflows/security.yml) ทุกวันจันทร์บน `main` · [testsprite.yml](.github/workflows/testsprite.yml) ทุกคืน (เงียบจนตั้ง `vars.TESTSPRITE_PROJECT_ID`) — ไม่ block promote
-- repo private บน GitHub Free ใช้ CodeQL / dependency review / secret scanning ของ GitHub ไม่ได้ → ใช้ Semgrep CE · OSV-Scanner · gitleaks ใน container ปัก digest แทน · Dependabot alerts (ฟรี) เปิดอยู่ · ข้อยกเว้นทุกตัวต้องมีเหตุผล (และวันหมดอายุเมื่อเครื่องมือรองรับ)
+- **advisory** — [security.yml](.github/workflows/security.yml) ทุกวันจันทร์บน `main` (รวม Trivy ของ image Gotenberg) · [testsprite.yml](.github/workflows/testsprite.yml) ทุกคืน (เงียบจนตั้ง `vars.TESTSPRITE_PROJECT_ID`) — ไม่ block promote
+- repo public (28 ก.ย. 2026) — GitHub code scanning ([codeql.yml](.github/workflows/codeql.yml)) · dependency review ([dependency-review.yml](.github/workflows/dependency-review.yml)) · secret scanning ของ GitHub ใช้ได้ฟรีแล้ว เสริม Semgrep CE · OSV-Scanner · gitleaks ใน container ปัก digest (defence in depth ไม่ใช่แทนที่) · Dependabot alerts (ฟรี) เปิดอยู่ · ข้อยกเว้นทุกตัวต้องมีเหตุผล (และวันหมดอายุเมื่อเครื่องมือรองรับ)
 - Docker VM ในเครื่องมีดิสก์จำกัด — build image ทีละตัว และลบ image ของตัวเองเมื่อเสร็จ
 
 ## Commit / release

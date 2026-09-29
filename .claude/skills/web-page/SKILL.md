@@ -115,6 +115,15 @@ return (
 - ชั้นบังหน้าจอเปิด/ปิดผ่าน helper เท่านั้น (นับซ้อน · ปิดใน `finally`) · มี watchdog 25 วินาที (loader ค้าง / navigation ถูกยกเลิก) → เลิกบัง + toast error · `reloadBlocking()` / `navigate({ reloadDocument })` / href ไปเว็บอื่น บังจนหน้าหาย ถ้าถูกยกเลิก (beforeunload "อยู่ต่อ") เลิกบังเองหลัง 5 วินาที · toaster อยู่นอก `#root` (portal ที่ body) จึงยังประกาศ toast ระหว่างบัง · เทสต์รีเซ็ตให้ใน `src/test/setup.ts`
 - เทสต์ของหน้า: ป้ายหาได้ด้วย `getByLabelText` ตามเดิม · error อยู่ใน `toHaveAccessibleDescription` · ระหว่างส่ง `toBeDisabled()` · toast ค้นด้วยข้อความ / ปุ่ม "ปิดการแจ้งเตือน" · ชั้นบัง `getByRole("dialog", { name: "กำลังทำงาน…" })`
 
+## วันที่ · ตัวกรอง · ความกว้างหน้า (รายการ/รายงาน)
+
+- **วันที่ที่แสดง = `วว/ดด/ปปปป` พ.ศ.** ทุกตาราง/ข้อความบรรยาย · วันที่+เวลา = `29/09/2569 17:56` (`formatDocDateTime` ใน `lib/thai-date.ts`) — ไม่ใช้ "29 ก.ย. 2569" ในตาราง (`formatThaiDate` ไว้ให้หัวการ์ดที่ต้องอ่านง่ายเท่านั้น)
+- **ช่องวันที่พิมพ์เอง = `<ThaiDateField>`** (`components/thai-date-field.tsx`): placeholder `วว/ดด/ปปปป` + คำแนะนำใต้ช่อง + error ชุดเดียว (`common.dateField.*`) · ตรวจด้วย `parseDateField` (`required` · `invalid` · `tooEarly` ก่อน ค.ศ. 2000) · ช่วงกลับด้าน (ตั้งแต่ > ถึง) = error ที่ช่อง "ถึง" ก่อนยิง API
+- **ตัวกรองทุกหน้าใช้กติกาเดียว:** ตัวเลือก (โลหะ · สาขา) และปุ่มลัดช่วงวันที่ = ใช้ทันที · ค้นหาข้อความ = หน่วง 300 ms หรือ Enter · วันที่ที่พิมพ์: รายการเบา (ค้นบิล) ใช้เมื่อ blur/Enter · **รายงานหนัก (ยอดซื้อ · สต็อก) ใช้เมื่อ Enter หรือปุ่ม "แสดงรายงาน"** เพราะคำนวณยอดรวมทั้งช่วง — ไม่ยิงทุกครั้งที่ออกจากช่อง · ระหว่างโหลดปุ่มกดไม่ได้ + หมุน
+- **ไฟล์ดาวน์โหลดที่ต้องรู้ผล** (CSV): ขอผ่าน `apiBlob` + `navigation.saveBlob` ปุ่มหมุนระหว่างโหลด · toast สำเร็จ/ล้มเหลว (`notifySuccess`/`notifyError`) · ไฟล์ใหญ่ (zip) ยังใช้ HEAD เช็คแล้ว `navigation.downloadAt` — ห้าม fetch เข้าหน่วยความจำ
+- **หน้าไม่ล้นแนวนอน** (1366 · 1024 · 768 · 390): `SidebarInset`/`<main>` มี `min-w-0` · grid ที่ถือตารางใช้ `grid-cols-1` (ไม่ใช่ track `auto`) · ตารางอยู่ในกล่อง `overflow-x-auto` ของตัวเอง (`Table`) — เทสต์ `src/test/layout.test.tsx` ตรวจสัญญานี้
+- ป้ายสถานะ "ยกเลิก" = `<Badge variant="destructive">` เหมือนหน้าใบรับซื้อ
+
 ## ฟอร์มลูกค้า — Siam ID (CLAUDE.md กฎ 6)
 
 - 11 ช่องเรียงตาม `../Work_2026-09-27/03-customer-member.md` **ห้ามสลับ** · ลำดับ DOM = ลำดับ Tab

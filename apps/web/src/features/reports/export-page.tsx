@@ -1,21 +1,25 @@
 import { CircleAlert, Download } from "lucide-react";
-import { type FormEvent, useId, useRef, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { z } from "zod";
+import { AppForm, SubmitButton } from "@/components/app-form";
+import { LabeledSelect } from "@/components/labeled-select";
 import { PageHeader } from "@/components/page-header";
 import { Alert, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
-import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { FieldDescription } from "@/components/ui/field";
+import { NativeSelectOption } from "@/components/ui/native-select";
+import { useAppForm } from "@/hooks/use-app-form";
 import { useBusinessDate } from "@/hooks/use-business-date";
-import { ApiError, apiFetch, errorMessage } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import { canExportReports } from "@/lib/nav";
 import { navigation } from "@/lib/navigation";
 import { useMe } from "@/lib/queries";
 import { useTranslation } from "./i18n";
 import { type ExportParams, exportHref } from "./queries";
+
+type ExportUrl = ReturnType<typeof exportHref>;
 import { BranchSelect, ReportForbidden } from "./report-parts";
 import { lastMonth } from "./search";
-
-const focusById = (id: string) => document.getElementById(id)?.focus();
 
 const MONTHS = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"] as const;
 type MonthKey = (typeof MONTHS)[number];
@@ -26,16 +30,25 @@ function defaultPeriod(today: string): { year: string; month: MonthKey } {
   return { year: from.slice(0, 4), month: from.slice(5, 7) as MonthKey };
 }
 
-/** error ของ HEAD precheck — มี field ที่หน้านี้มีช่องจริง (year · month) = ใต้ช่องนั้น · อื่น ๆ (branch_id · 403 · 404) = แจ้งรวม */
-interface ExportError {
-  field?: "year" | "month";
-  message: string;
+/** ชื่อช่องตรงกับ query ของ API (year · month · branch_id) — 400 ที่ชี้ `field` ตกที่ช่องนั้นเอง (U3) */
+interface ExportValues {
+  year: string;
+  month: MonthKey;
+  branch_id: string;
 }
 
-function exportErrorOf(error: unknown): ExportError {
-  const field = error instanceof ApiError ? error.field : undefined;
-  return { field: field === "year" || field === "month" ? field : undefined, message: errorMessage(error) };
-}
+/**
+ * ตรวจก่อนส่ง (U2): เดือนที่เลือกต้องไม่เกินเดือนปัจจุบันตามเวลาไทย — ไม่ต้องรอ API ปฏิเสธ
+ * (API ยังตรวจซ้ำเสมอ · ข้อความจาก API ขึ้นใต้ช่องเดียวกันถ้าเวลาเครื่องกับเซิร์ฟเวอร์ต่างกัน)
+ */
+const exportSchema = (today: string, message: string) =>
+  z.object({ year: z.string(), month: z.string(), branch_id: z.string() }).transform((values, ctx) => {
+    if (`${values.year}-${values.month}` > today.slice(0, 7)) {
+      ctx.issues.push({ code: "custom", input: values, path: ["month"], message });
+      return z.NEVER;
+    }
+    return { year: Number(values.year), month: Number(values.month), branch_id: values.branch_id };
+  });
 
 /**
  * /reports/export — ส่งบัญชีรายเดือน (spec §9.4) · accounting · admin เท่านั้น
@@ -64,134 +77,83 @@ export function ExportPage() {
 
 function ExportForm() {
   const { t } = useTranslation("reports");
-  const ids = useId();
   const today = useBusinessDate();
-  const [{ year: defaultYear, month: defaultMonth }] = useState(() => defaultPeriod(today));
-  const [year, setYear] = useState(defaultYear);
-  const [month, setMonth] = useState<MonthKey>(defaultMonth);
-  const [branch, setBranch] = useState("");
-  const [error, setError] = useState<ExportError | null>(null);
-  const [pending, setPending] = useState(false);
-  const busy = useRef(false);
+  const [defaults] = useState<ExportValues>(() => ({ ...defaultPeriod(today), branch_id: "" }));
+  const schema = useMemo(() => exportSchema(today, t("export.futureMonth")), [today, t]);
 
-  const yearId = `${ids}-year`;
-  const monthId = `${ids}-month`;
-  const branchId = `${ids}-branch`;
-  const buttonId = `${ids}-download`;
-  const yearErrorId = `${yearId}-error`;
-  const monthErrorId = `${monthId}-error`;
-
-  // ปีของตัวเลือก — ปีปัจจุบันย้อนหลัง 6 ปี (ไม่มีปีอนาคต) · เดือนอนาคตของปีปัจจุบันให้ API ปฏิเสธและแจ้งใต้ช่อง
+  // ปีของตัวเลือก — ปีปัจจุบันย้อนหลัง 6 ปี (ไม่มีปีอนาคต)
   const currentYear = Number(today.slice(0, 4));
   const years = Array.from({ length: 6 }, (_, i) => String(currentYear - i));
 
-  /** HEAD เช็คก่อนเสมอ — 2xx ค่อย navigate ไปดาวน์โหลดจริง (ไม่ fetch ตัว zip เข้าหน่วยความจำ) */
-  const runExport = async () => {
-    if (busy.current) return;
-    busy.current = true;
-    setPending(true);
-    setError(null);
-    const params: ExportParams = { year: Number(year), month: Number(month), branch_id: branch || undefined };
-    const url = exportHref(params);
-    try {
-      await apiFetch(url, { method: "HEAD" });
-      navigation.downloadAt(url);
-    } catch (e) {
-      const mapped = exportErrorOf(e);
-      setError(mapped);
-      if (mapped.field === "year") focusById(yearId);
-      else if (mapped.field === "month") focusById(monthId);
-      else focusById(buttonId);
-    } finally {
-      busy.current = false;
-      setPending(false);
-    }
-  };
-
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    void runExport();
-  };
-
-  const yearError = error?.field === "year" ? error.message : null;
-  const monthError = error?.field === "month" ? error.message : null;
-  const formError = error && !error.field ? error.message : null;
+  /**
+   * HEAD เช็คก่อนเสมอ — 2xx ค่อยพาเบราว์เซอร์ไปดาวน์โหลดจริง (ไม่ fetch ตัว zip เข้าหน่วยความจำ)
+   * ระหว่างเช็คทั้งฟอร์มปิด + ปุ่มหมุน (U4) · ผล: toast บนกลาง (U5) — เริ่มดาวน์โหลดแล้ว / ล้มเหลวพร้อมเหตุผล
+   * ไม่ใช้ชั้นบังหน้าจอ (U6): การดาวน์โหลดไฟล์ไม่ทำให้หน้านี้เปลี่ยนหรือโหลดใหม่
+   */
+  // useMutation: 401 ระหว่างเช็คไปทางเดียวกับ query อื่น (MutationCache → /login?redirect=…) ไม่ใช่แค่ toast
+  const check = useMutation({ mutationFn: (url: ExportUrl) => apiFetch(url, { method: "HEAD" }) });
+  const f = useAppForm({
+    defaultValues: defaults,
+    schema,
+    submit: async (params: ExportParams) => {
+      const url = exportHref({ ...params, branch_id: params.branch_id || undefined });
+      await check.mutateAsync(url);
+      return url;
+    },
+    successMessage: t("export.started"),
+    onSuccess: (url) => navigation.downloadAt(url),
+  });
 
   return (
-    <form
+    <AppForm
+      form={f}
       aria-label={t("export.formLabel")}
-      noValidate
-      onSubmit={submit}
-      className="grid max-w-2xl gap-4 rounded-lg border bg-card p-4"
+      className="max-w-2xl rounded-lg border bg-card p-4"
+      fieldsetClassName="grid gap-4"
     >
       <div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Field data-invalid={!!yearError}>
-          <FieldLabel htmlFor={yearId}>{t("export.year")}</FieldLabel>
-          <NativeSelect
-            id={yearId}
-            value={year}
-            aria-invalid={!!yearError}
-            aria-describedby={yearError ? yearErrorId : undefined}
-            onChange={(event) => {
-              setYear(event.target.value);
-              setError(null);
-            }}
-          >
-            {years.map((y) => (
-              <NativeSelectOption key={y} value={y}>
-                {t("export.yearLabel", { year: Number(y) + 543 })}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <FieldError id={yearErrorId}>{yearError}</FieldError>
-        </Field>
+        <f.form.Field name="year">
+          {(field) => (
+            <LabeledSelect {...f.bind(field)} label={t("export.year")}>
+              {years.map((y) => (
+                <NativeSelectOption key={y} value={y}>
+                  {t("export.yearLabel", { year: Number(y) + 543 })}
+                </NativeSelectOption>
+              ))}
+            </LabeledSelect>
+          )}
+        </f.form.Field>
 
-        <Field data-invalid={!!monthError}>
-          <FieldLabel htmlFor={monthId}>{t("export.month")}</FieldLabel>
-          <NativeSelect
-            id={monthId}
-            value={month}
-            aria-invalid={!!monthError}
-            aria-describedby={monthError ? monthErrorId : undefined}
-            onChange={(event) => {
-              setMonth(event.target.value as MonthKey);
-              setError(null);
-            }}
-          >
-            {MONTHS.map((m) => (
-              <NativeSelectOption key={m} value={m}>
-                {t(`export.months.${m}`)}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <FieldError id={monthErrorId}>{monthError}</FieldError>
-        </Field>
+        <f.form.Field name="month">
+          {(field) => (
+            <LabeledSelect {...f.bind(field)} label={t("export.month")}>
+              {MONTHS.map((m) => (
+                <NativeSelectOption key={m} value={m}>
+                  {t(`export.months.${m}`)}
+                </NativeSelectOption>
+              ))}
+            </LabeledSelect>
+          )}
+        </f.form.Field>
 
-        <BranchSelect
-          id={branchId}
-          value={branch}
-          onChange={(next) => {
-            setBranch(next);
-            setError(null);
-          }}
-        />
+        <f.form.Field name="branch_id">{(field) => <BranchSelect {...f.bind(field)} />}</f.form.Field>
       </div>
       <FieldDescription>{t("export.hint")}</FieldDescription>
 
-      {formError && (
+      {f.formError && (
         <Alert variant="destructive">
           <CircleAlert aria-hidden="true" />
-          <AlertTitle>{formError}</AlertTitle>
+          <AlertTitle>{f.formError}</AlertTitle>
         </Alert>
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button id={buttonId} type="submit" disabled={pending}>
+        <SubmitButton form={f} pendingLabel={t("export.checking")}>
           <Download aria-hidden="true" />
-          {pending ? t("saving", { ns: "common" }) : t("export.download")}
-        </Button>
+          {t("export.download")}
+        </SubmitButton>
         <p className="text-sm text-muted-foreground">{t("export.retryHint")}</p>
       </div>
-    </form>
+    </AppForm>
   );
 }

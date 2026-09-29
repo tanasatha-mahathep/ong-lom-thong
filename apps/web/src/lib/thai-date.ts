@@ -33,3 +33,28 @@ export function addDaysIso(iso: string, days: number): string {
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
+
+/** ปีแรกที่ API รับ (ListQuery · reports isoDate: ตั้งแต่ ค.ศ. 2000) — ก่อนนั้นถือว่าวันที่ไม่ถูกต้อง */
+export const MIN_INPUT_DATE = "2000-01-01";
+
+export type DateInputError = "required" | "invalid" | "tooEarly";
+
+/**
+ * ช่องวันที่ที่พิมพ์เอง → ISO ค.ศ. หรือชนิดของ error (ข้อความอยู่ใน common.dateField.*)
+ * ว่าง = required · ไม่ใช่วันจริง = invalid · ก่อน ค.ศ. 2000 = tooEarly
+ */
+export function parseDateField(text: string): { iso: string } | { error: DateInputError } {
+  if (text.trim() === "") return { error: "required" };
+  const iso = thaiInputToIso(text);
+  if (!iso) return { error: "invalid" };
+  if (iso < MIN_INPUT_DATE) return { error: "tooEarly" };
+  return { iso };
+}
+
+/**
+ * วันที่ + เวลาในตารางทั้งแอป — รูปเดียวกับตารางค้นบิล: "29/09/2569 17:56" (วว/ดด/ปปปป พ.ศ. + ชม:นน)
+ * วันที่ในข้อความบรรยาย (หัวรายงาน · ช่วงวันที่) ก็ใช้ isoToThaiInput รูปเดียวกัน
+ */
+export function formatDocDateTime(isoDate: string, time: string): string {
+  return `${isoToThaiInput(isoDate)} ${time}`;
+}

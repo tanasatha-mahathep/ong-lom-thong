@@ -1,10 +1,10 @@
 import { z } from "zod";
-import { addDaysIso, thaiInputToIso } from "@/lib/thai-date";
+import { MIN_INPUT_DATE, addDaysIso, parseDateField } from "@/lib/thai-date";
 import { type BuyListParams } from "./api";
 import { type BillsKey } from "./i18n";
 
 /** API รับวันที่ตั้งแต่ ค.ศ. 2000 เท่านั้น (ListQuery ใน services/buy.ts) — ก่อนหน้านั้นถือว่าวันที่ไม่ถูกต้อง */
-export const MIN_DATE = "2000-01-01";
+export const MIN_DATE = MIN_INPUT_DATE;
 
 const filterDate = z.iso.date().refine((iso) => iso >= MIN_DATE);
 
@@ -61,8 +61,8 @@ export function toListParams(search: BillsSearch): BuyListParams {
 export function parseDateFilter(text: string): string | null {
   const trimmed = text.trim();
   if (trimmed === "") return "";
-  const iso = thaiInputToIso(trimmed);
-  return iso !== null && iso >= MIN_DATE ? iso : null;
+  const parsed = parseDateField(trimmed);
+  return "iso" in parsed ? parsed.iso : null;
 }
 
 /** ช่วงวันที่ (ISO ค.ศ.) — ไม่มีค่า = ไม่จำกัดด้านนั้น */

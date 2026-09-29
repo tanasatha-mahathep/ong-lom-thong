@@ -216,15 +216,24 @@ jobs:
           'pg_dump --version && pg_restore --version && rclone version | head -1 && command -v timeout awk'
 
   # ring 1 — image ที่ Railway build: build ครั้งเดียว → smoke → SBOM → Trivy gate → ส่ง bytes เดียวกันให้ e2e
+  #          + Gotenberg: build → SBOM → Trivy gate (CRITICAL ที่มี fix) · ผ่านทั้งคู่แล้วเท่านั้น → push ghcr.io
+  #          (tag = commit SHA + branch) → attest SLSA provenance + SBOM ลง registry — make verify-image REF=<sha>
   image:
     needs: [check, scan, db-verify]
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && contains(fromJSON('["refs/heads/testing", "refs/heads/staging", "refs/heads/main"]'), github.ref))
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45 # api + Gotenberg (~1.7 GB) build · scan · push
+    # สิทธิ์เขียนเฉพาะ job นี้ · ไม่มี cache (skill ci-pipeline กฎ 3) · token ใช้เฉพาะ step push/attest
+    permissions:
+      contents: read
+      packages: write # push ghcr.io/<repo>/{api,gotenberg}
+      id-token: write # OIDC → Sigstore signing certificate ของ attestation
+      attestations: write # เก็บ attestation ใน GitHub
     env:
       IMAGE: ong-api:ci
+      GOTENBERG_IMAGE: ong-gotenberg:ci
       # docker:// step รันโดยมี workspace เป็น cwd — DB ของ Trivy โหลดครั้งเดียวแล้วใช้ซ้ำทุก step
       TRIVY_CACHE_DIR: .trivy-cache
       TRIVY_NO_PROGRESS: "true"
@@ -274,7 +283,7 @@ jobs:
           args: image --input api-image.tar --scanners vuln,secret --format json --output trivy-report.json
       - name: vulnerability summary
         run: |
-          jq -r '"### Trivy — every finding in the api image (before .trivyignore.yaml)", "",
+          jq -r '"### Trivy — every finding in the api image", "",
             "| Severity | Findings | Fix available |", "| --- | --: | --: |",
             ([.Results[] | (.Vulnerabilities // [])[]] | group_by(.Severity)[]
             | "| \(.[0].Severity) | \(length) | \(map(select((.FixedVersion // "") != "")) | length) |")' \
@@ -284,7 +293,15 @@ jobs:
         with:
           args: >-
             image --input api-image.tar --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed
-            --ignorefile .trivyignore.yaml --show-suppressed --table-mode detailed --exit-code 1
+            --table-mode detailed --exit-code 1
+      # Gotenberg ตัวเดียวกับ Railway (services/gotenberg/Dockerfile) — SBOM + รายงานเต็ม + gate: CRITICAL ที่มี fix
+      # HIGH รายงานใน step summary ไม่ fail (Chromium แก้ได้จาก release ของ upstream เท่านั้น — docs/proposals/…)
+      - name: gotenberg image — build · SBOM · trivy gate
+        env:
+          IMAGE: ${{ env.GOTENBERG_IMAGE }}
+          # สคริปต์รัน Trivy ด้วย uid ของ runner — .trivy-cache ของ step docker:// ข้างบนเป็นของ root เขียนไม่ได้
+          TRIVY_CACHE_DIR: ${{ runner.temp }}/trivy-cache
+        run: scripts/ci/gotenberg-scan.sh
       - name: keep the evidence (SBOM + full report)
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -293,8 +310,57 @@ jobs:
           path: |
             sbom.cdx.json
             trivy-report.json
+            ${{ runner.temp }}/ong-sec/gotenberg/sbom.cdx.json
+            ${{ runner.temp }}/ong-sec/gotenberg/trivy-report.json
+            ${{ runner.temp }}/ong-sec/gotenberg/gate.txt
           if-no-files-found: ignore
           retention-days: 14
+      # ถึงตรงนี้ = smoke + Trivy ของทั้งสอง image ผ่านแล้ว → push bytes ที่ตรวจแล้ว (ไม่ build ใหม่) แล้วเซ็นที่ digest
+      # Railway ควร deploy ด้วย digest นี้หลัง ci.yml เขียวทั้ง run (docs/proposals/railway-deploy-attested-image.md)
+      - name: push the api image (tags = commit SHA + branch)
+        id: push-api
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: scripts/ci/push-image.sh "$IMAGE" api
+      - name: push the gotenberg image (tags = commit SHA + branch)
+        id: push-gotenberg
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: scripts/ci/push-image.sh "$GOTENBERG_IMAGE" gotenberg
+      # actions/attest คือตัวที่ attest-build-provenance / attest-sbom (deprecated) ห่ออยู่ — ไม่มี sbom-path = SLSA provenance
+      # create-storage-record: false — storage record ใช้ได้เฉพาะ repo ขององค์กร (repo นี้เป็นบัญชีผู้ใช้)
+      - name: attest provenance — api
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-name: ${{ steps.push-api.outputs.name }}
+          subject-digest: ${{ steps.push-api.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+      - name: attest SBOM — api
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-name: ${{ steps.push-api.outputs.name }}
+          subject-digest: ${{ steps.push-api.outputs.digest }}
+          sbom-path: sbom.cdx.json
+          push-to-registry: true
+          create-storage-record: false
+      - name: attest provenance — gotenberg
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-name: ${{ steps.push-gotenberg.outputs.name }}
+          subject-digest: ${{ steps.push-gotenberg.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+      - name: attest SBOM — gotenberg
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-name: ${{ steps.push-gotenberg.outputs.name }}
+          subject-digest: ${{ steps.push-gotenberg.outputs.digest }}
+          sbom-path: ${{ runner.temp }}/ong-sec/gotenberg/sbom.cdx.json
+          push-to-registry: true
+          create-storage-record: false
       - name: hand the image to e2e
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
