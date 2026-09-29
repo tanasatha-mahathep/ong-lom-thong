@@ -167,6 +167,131 @@ describe("backup_prune_list — เลือก dump ที่จะลบ", () 
   });
 });
 
+describe("backup_size_guard — dump เล็กลงผิดปกติ = ห้าม prune", () => {
+  const guard = (rows: [string, number][], keep: string, doomed: string[] = [], percent = "50", env = "p") =>
+    lib(
+      "backup_size_guard",
+      [env, percent, keep, doomed.join("\n")],
+      rows.map(([n, s]) => `${n}\t${s}`).join("\n") + "\n",
+    );
+  const NEW = "p-20260929T191700Z.dump";
+  const PREV = "p-20260928T191700Z.dump";
+
+  it("ข้อมูลโตขึ้นตามปกติ → ผ่าน", () => {
+    const r = guard(
+      [
+        ["p-20260801T191700Z.dump", 900],
+        [PREV, 990],
+        [NEW, 1000],
+      ],
+      NEW,
+      ["p-20260801T191700Z.dump"],
+    );
+    expect(r.stderr).toBe("");
+    expect(r.status).toBe(0);
+  });
+
+  it("ลดลงแต่ยัง ≥ 50% ของ dump ก่อนหน้า → ผ่าน", () => {
+    expect(
+      guard(
+        [
+          [PREV, 1000],
+          [NEW, 500],
+        ],
+        NEW,
+      ).status,
+    ).toBe(0);
+  });
+
+  it("คืนแรกหลัง database ถูกล้าง: < 50% ของ dump ก่อนหน้า → ไม่ผ่าน แม้ไม่มีอะไรจะลบ", () => {
+    const r = guard(
+      [
+        [PREV, 1000],
+        [NEW, 499],
+      ],
+      NEW,
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(`${NEW} is 499 bytes, less than 50% of the previous dump ${PREV} (1000 bytes)`);
+  });
+
+  it("30 คืนต่อมา: dump ก่อนเกิดเหตุที่ถึงคิวลบใหญ่กว่า 2 เท่า → ไม่ผ่าน (dump ก่อนหน้าเล็กเหมือนกันแล้ว)", () => {
+    const before = "p-20260829T191700Z.dump";
+    const r = guard(
+      [
+        [before, 1000],
+        ["p-20260830T191700Z.dump", 400],
+        [PREV, 400],
+        [NEW, 410],
+      ],
+      NEW,
+      [before],
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(`refusing to delete ${before} (1000 bytes): ${NEW} (410 bytes) is less than 50% of it`);
+    expect(r.stderr).not.toMatch(/previous dump/);
+  });
+
+  it("ไม่นับไฟล์ที่ไม่ใช่ dump ของ environment นี้ (ใหญ่แค่ไหนก็ไม่เกี่ยว)", () => {
+    const r = guard(
+      [
+        ["notes.txt", 999_999],
+        ["staging-20260928T191700Z.dump", 999_999],
+        ["p-20260928T191700Z.dump.partial", 999_999],
+        [PREV, 1000],
+        [NEW, 1000],
+      ],
+      NEW,
+      ["notes.txt", "staging-20260928T191700Z.dump"],
+    );
+    expect(r.status).toBe(0);
+  });
+
+  it("ขนาดระดับ GB คำนวณไม่ล้น", () => {
+    const rows = (n: number): [string, number][] => [
+      [PREV, 6_000_000_000],
+      [NEW, n],
+    ];
+    expect(guard(rows(5_000_000_000), NEW).status).toBe(0);
+    const r = guard(rows(2_000_000_000), NEW);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch("is 2000000000 bytes, less than 50% of the previous dump");
+    expect(r.stderr).toMatch("(6000000000 bytes)");
+  });
+
+  it("BACKUP_MIN_SIZE_PERCENT = 0 → ปิดการตรวจ", () => {
+    const r = guard(
+      [
+        [PREV, 1000],
+        [NEW, 1],
+      ],
+      NEW,
+      [PREV],
+      "0",
+    );
+    expect(r.status).toBe(0);
+  });
+
+  it("fail-closed: ไม่เห็นไฟล์ที่เพิ่งอัปโหลดในรายชื่อ → ไม่ผ่าน", () => {
+    const r = guard([[PREV, 1000]], NEW);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/not in the listing/);
+  });
+
+  it.each(["-1", "101", "half", "", "5.5"])("MIN_PERCENT ผิด %j → ไม่ผ่าน", (percent) => {
+    const r = guard(
+      [
+        [PREV, 1000],
+        [NEW, 1000],
+      ],
+      NEW,
+      [],
+      percent,
+    );
+    expect(r.status).toBe(1);
+  });
+});
+
 /**
  * backup.sh ทั้งตัวกับ pg_dump / pg_restore / pg_isready / rclone ปลอมใน PATH
  * ตรวจลำดับและเงื่อนไข (prune หลังอัปโหลดสำเร็จเท่านั้น · copy ไม่ใช่ sync · ค่าลับไม่อยู่ใน argv)
@@ -233,11 +358,14 @@ env | grep '^RCLONE_CONFIG_' | LC_ALL=C sort > "$STUB_STATE/rclone.env"
 case "$1" in
   copyto)
     [[ -n \${STUB_FAIL_UPLOAD:-} ]] && { echo "upload failed" >&2; exit 1; }
-    [[ -n \${STUB_HIDE_UPLOAD:-} ]] || basename "$3" >> "$STUB_STATE/remote.txt" ;;
-  lsf) cat "$STUB_STATE/remote.txt" ;;
+    [[ -n \${STUB_HIDE_UPLOAD:-} ]] ||
+      printf '%s\\t%s\\n' "$(basename "$3")" "$(wc -c < "$2" | tr -d ' ')" >> "$STUB_STATE/remote.txt" ;;
+  lsf)
+    # ปลายทางปลอม: บรรทัดละ "ชื่อ<TAB>ขนาด" — --format ps ได้ทั้งสองช่อง ไม่งั้นได้แค่ชื่อ
+    if [[ " $* " == *" --format ps "* ]]; then cat "$STUB_STATE/remote.txt"; else cut -f1 "$STUB_STATE/remote.txt"; fi ;;
   deletefile)
     n=$(basename "$2"); echo "$n" >> "$STUB_STATE/deleted.txt"
-    grep -vxF "$n" "$STUB_STATE/remote.txt" > "$STUB_STATE/remote.tmp" || true
+    awk -F '\\t' -v n="$n" '$1 != n' "$STUB_STATE/remote.txt" > "$STUB_STATE/remote.tmp"
     mv "$STUB_STATE/remote.tmp" "$STUB_STATE/remote.txt" ;;
   copy)
     [[ -n \${STUB_HANG_COPY:-} ]] && exec sleep 60
@@ -259,7 +387,10 @@ esac`,
   }
   const read = (name: string) => (existsSync(join(state, name)) ? readFileSync(join(state, name), "utf8") : "");
   const rcloneCalls = () => lines(read("rclone.log"));
-  const seedRemote = (names: string[]) => writeFileSync(join(state, "remote.txt"), names.join("\n") + "\n");
+  /** dump ปลอมของ stub pg_dump ยาว 10 ไบต์ ('PGDMP-stub') — ค่าเริ่มต้นให้ dump เก่าขนาดเท่ากัน */
+  const seedRemote = (names: string[], size = 10) =>
+    writeFileSync(join(state, "remote.txt"), names.map((n) => `${n}\t${size}`).join("\n") + "\n");
+  const remoteNames = () => lines(read("remote.txt")).map((l) => l.split("\t")[0]!);
 
   it("สำเร็จ: dump → ตรวจ → อัปโหลด → prune (เก่ากว่าช่วงเก็บ) → copy ไฟล์", () => {
     // dump เก่า 60 คืนก่อนวันนี้ — คืนนี้เพิ่มอีกหนึ่ง
@@ -284,7 +415,7 @@ esac`,
     expect(deleted.length).toBeGreaterThan(0);
     expect(deleted).not.toContain(uploaded);
     expect(calls.findIndex((c) => c.startsWith("deletefile"))).toBeGreaterThan(calls.indexOf(upload!));
-    const remaining = lines(read("remote.txt"));
+    const remaining = remoteNames();
     expect(remaining).toContain(uploaded);
     expect(remaining.length).toBeGreaterThanOrEqual(30);
     expect(remaining.length).toBeLessThanOrEqual(30 + 12);
@@ -396,11 +527,35 @@ esac`,
     ["BACKUP_TIMEOUT_SECONDS", "0"],
     ["BACKUP_TIMEOUT_SECONDS", "86400"],
     ["BACKUP_TIMEOUT_SECONDS", "6h"],
+    ["BACKUP_MIN_SIZE_PERCENT", "101"],
+    ["BACKUP_MIN_SIZE_PERCENT", "-5"],
+    ["BACKUP_MIN_SIZE_PERCENT", "half"],
   ])("%s=%j ผิด → หยุดก่อนทำอะไร", (key, value) => {
     const r = run({ ...baseEnv(), [key]: value });
     expect(r.status).toBe(1);
     expect(rcloneCalls()).toEqual([]);
     expect(read("pg_dump.log")).toBe("");
+  });
+
+  it("dump ใหม่เล็กลงมาก (database ถูกล้าง?) → เก็บ dump ใหม่ไว้ แต่ไม่ prune · ไฟล์ยัง copy · exit ≠ 0", () => {
+    // dump เก่า 1000 ไบต์ · dump คืนนี้ 10 ไบต์
+    seedRemote(dailyNames("staging", new Date(Date.now() - 86_400_000), 60), 1000);
+    const r = run(baseEnv());
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/size guard: staging-\d{8}T\d{6}Z\.dump is 10 bytes, less than 50% of the previous dump/);
+    expect(r.stderr).toMatch(/dump size check failed — nothing pruned/);
+    expect(read("deleted.txt")).toBe("");
+    expect(remoteNames()).toHaveLength(61);
+    const lsf = rcloneCalls().find((c) => c.startsWith("lsf "));
+    expect(lsf).toMatch(/--format ps --separator\s/);
+    expect(rcloneCalls().some((c) => c.startsWith("copy "))).toBe(true);
+  });
+
+  it("BACKUP_MIN_SIZE_PERCENT=0 → ปิดการตรวจขนาด (prune ตามปกติ)", () => {
+    seedRemote(dailyNames("staging", new Date(Date.now() - 86_400_000), 60), 1000);
+    const r = run({ ...baseEnv(), BACKUP_MIN_SIZE_PERCENT: "0" });
+    expect(r.status).toBe(0);
+    expect(lines(read("deleted.txt")).length).toBeGreaterThan(0);
   });
 
   it("pg_dump รอ lock ได้ไม่เกิน BACKUP_LOCK_WAIT_TIMEOUT (ค่าเริ่มต้น 15min)", () => {
@@ -431,6 +586,6 @@ esac`,
     expect(r.status).not.toBe(0);
     expect(r.stdout).toMatch(/database backup done/);
     expect(r.stderr).toMatch(/rclone stopped at BACKUP_TIMEOUT_SECONDS=3/);
-    expect(lines(read("remote.txt")).some((n) => /^staging-\d{8}T\d{6}Z\.dump$/.test(n))).toBe(true);
+    expect(remoteNames().some((n) => /^staging-\d{8}T\d{6}Z\.dump$/.test(n))).toBe(true);
   }, 30_000);
 });

@@ -87,6 +87,7 @@ service `Nightly Backup` (cron · โค้ด `services/backup/`) รันท�
 
 - ชื่อ dump เช่น `production-20260929T191700Z.dump` (เวลา UTC ตอนเริ่ม dump)
 - เก็บ dump: **ทุกไฟล์ของ 30 วันล่าสุดที่มี dump + ไฟล์ล่าสุดของแต่ละเดือน 12 เดือน** (`BACKUP_KEEP_DAILY` / `BACKUP_KEEP_MONTHLY` ใน `railway.ts`) · นับวันที่มีไฟล์ ไม่ใช่อายุ — cron หยุดไปนานของเก่าก็ไม่หาย · ไฟล์ที่ไม่ตรงรูปชื่อไม่ถูกลบ · อัปโหลดไม่สำเร็จ/ยืนยันไม่ได้ = ไม่ prune
+- **ตรวจขนาดก่อน prune** (`BACKUP_MIN_SIZE_PERCENT` 50): บิลไม่ถูกลบ → dump ใหม่ที่เล็กกว่า 50% ของ dump ก่อนหน้า หรือของ dump ใดที่ถึงคิวลบ = database อาจถูกล้าง/เริ่มใหม่ — dump ใหม่ยังเก็บ แต่**ไม่ลบอะไร**และ run fail ทุกคืนจนกว่าคนจะตัดสิน (ไม่งั้นอีก 30 คืน dump ก่อนเกิดเหตุถูก prune หมด) · ดู "dump เล็กลงผิดปกติ"
 - `--immutable`: ไฟล์ใน `Media` ที่ถูกแก้เนื้อหา (ใบรับซื้อ/สำเนาบัตรห้ามแก้) → run นั้น fail และสำเนาเดิมไม่ถูกเขียนทับ — **ต้องตรวจทันที**
 - **ไม่มีรอบไหนค้างได้**: `pg_dump --lock-wait-timeout` (`BACKUP_LOCK_WAIT_TIMEOUT` 15 นาที — ตารางถูกล็อก `ACCESS EXCLUSIVE` ค้าง = fail) · ทั้งรอบมีเส้นตาย `BACKUP_TIMEOUT_SECONDS` (6 ชั่วโมง) — คำสั่งที่ยังทำงานเมื่อถึงเส้นตายถูก TERM (อีก 30 วินาที KILL) · รอบที่ค้าง = Railway ข้ามทุกรอบถัดไป backup หยุดเงียบ จึงต้องมีเส้นตาย
   - เส้นตายบังคับที่คำสั่งลูกทีละตัว (pg_dump · pg_restore · rclone) ไม่ใช่ `timeout` ครอบ entrypoint: สคริปต์เป็น PID 1 ใน container และ signal ที่ส่งจากใน container ถึง PID 1 ถูกทิ้ง (ทดสอบกับ image นี้: `timeout 2` เป็น entrypoint → `sleep 12` รันครบ exit 0)
@@ -102,6 +103,7 @@ service `Nightly Backup` (cron · โค้ด `services/backup/`) รันท�
 | `DATABASE_URL`                                                                                | reference `Postgres`                                                            |
 | `BACKUP_ENVIRONMENT`                                                                          | ชื่อ environment (prefix + ชื่อไฟล์)                                            |
 | `BACKUP_KEEP_DAILY` · `BACKUP_KEEP_MONTHLY`                                                   | `30` · `12` (daily ≥ 1 · monthly ≥ 0 — ผิดรูป = หยุดทันที)                      |
+| `BACKUP_MIN_SIZE_PERCENT`                                                                     | `50` (0–100 · `0` = ปิดการตรวจขนาด — ไม่แนะนำ)                                  |
 | `BACKUP_LOCK_WAIT_TIMEOUT`                                                                    | `15min` (ต้องมีหน่วย `ms` `s` `min` `h` — ตัวเลขเปล่าใน Postgres = มิลลิวินาที) |
 | `BACKUP_TIMEOUT_SECONDS`                                                                      | `21600` = 6 ชั่วโมง (1–86399 — ต้องจบก่อนรอบถัดไป)                              |
 | `S3_ENDPOINT` `S3_REGION` `S3_BUCKET` `S3_ACCESS_KEY` `S3_SECRET_KEY` `S3_FORCE_PATH_STYLE`   | reference bucket `Media` (ต้นทางของไฟล์)                                        |
@@ -176,6 +178,20 @@ rclone copy "backup:$BACKUP_S3_BUCKET/production/files" "media:$S3_BUCKET" --imm
 rclone copy "backup:$BACKUP_S3_BUCKET/production/files" "media:$S3_BUCKET" --immutable --metadata
 rclone lsjson --metadata "media:$S3_BUCKET/receipts/<สาขา>/<เลขที่>.pdf"   # metadata sha256
 rclone hashsum sha256 --download "media:$S3_BUCKET/receipts/<สาขา>/<เลขที่>.pdf"  # ต้องตรงกัน
+```
+
+### dump เล็กลงผิดปกติ
+
+log: `size guard: … less than 50% of the previous dump …` หรือ `refusing to delete …` แล้ว `dump size check failed — nothing pruned` · dump คืนนั้นอัปโหลดแล้ว แต่ไม่มีอะไรถูกลบ และ run จะ fail ทุกคืนจนกว่าจะแก้
+
+- **production = เหตุผิดปกติจนกว่าจะพิสูจน์ได้ว่าไม่ใช่** — ตรวจในระบบว่าบิล/ลูกค้าของเมื่อวานยังอยู่ไหม · ข้อมูลหาย → ทำตาม "กู้จริง" ด้านบน · **อย่าย้าย/ลบ dump ใด ๆ** ระหว่างตรวจ
+- ตั้งใจให้เล็กลงจริง (เช่น ล้างข้อมูลทดสอบใน staging): ย้าย dump เก่าที่ใหญ่กว่าไปเก็บแยก — `postgres-archive/` ไม่มีการ prune และ `rclone move` ภายใน bucket ไม่ทำให้ไฟล์หาย (ทดสอบแล้ว: รอบถัดไปผ่าน)
+
+```bash
+# เว้น dump ใหม่ (ตัวที่ log บอก) ไว้ใน postgres/ — ที่เหลือไป postgres-archive/<เวลา UTC ตอนย้าย>/
+rclone move "backup:$BACKUP_S3_BUCKET/staging/postgres/" "backup:$BACKUP_S3_BUCKET/staging/postgres-archive/<UTC>/" \
+  --exclude "staging-<UTC ของ dump ใหม่>.dump" --dry-run
+# ดูรายการแล้วรันซ้ำโดยไม่ใส่ --dry-run
 ```
 
 ### ต่อสำเนานอก Railway (อนาคต)

@@ -38,12 +38,14 @@ const BACKUP_CRON = "17 19 * * *";
 /**
  * ค่าของ services/backup/backup.sh (รายละเอียด: .railway/README.md หัวข้อ "สำรองข้อมูลรายคืน")
  * - dump ที่เก็บ: ทุกไฟล์ของ 30 วันล่าสุด + ล่าสุดของแต่ละเดือน 12 เดือน
+ * - ไม่ prune ถ้า dump ใหม่ < 50% ของ dump ก่อนหน้า/ของ dump ที่จะลบ (บิลไม่ถูกลบ → เล็กลงมาก = database ถูกล้าง?)
  * - pg_dump รอ lock ของตารางไม่เกิน 15 นาที (ต้องมีหน่วย — ตัวเลขเปล่าใน Postgres = มิลลิวินาที)
  * - ทั้งรอบไม่เกิน 6 ชั่วโมง (< 24 ชั่วโมง: รอบที่ค้าง Railway ข้ามรอบถัดไป = backup หยุดเงียบ)
  */
 const BACKUP_SETTINGS = {
   BACKUP_KEEP_DAILY: "30",
   BACKUP_KEEP_MONTHLY: "12",
+  BACKUP_MIN_SIZE_PERCENT: "50",
   BACKUP_LOCK_WAIT_TIMEOUT: "15min",
   BACKUP_TIMEOUT_SECONDS: "21600",
 };

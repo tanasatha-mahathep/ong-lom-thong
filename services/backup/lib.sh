@@ -77,3 +77,57 @@ backup_prune_list() {
     }
   '
 }
+
+# backup_size_guard ENV MIN_PERCENT JUST_UPLOADED DELETE_LIST < "ชื่อ<TAB>ขนาด" ต่อบรรทัด (rclone lsf --format ps)
+# ข้อมูลเพิ่มอย่างเดียว (บิลไม่ถูกลบ) → dump ใหม่ที่เล็กลงมาก = database ถูกล้าง/เริ่มใหม่ ไม่ใช่วันปกติ
+# return 1 (ห้าม prune) ถ้าขนาด dump ใหม่ < MIN_PERCENT% ของ
+#   - dump ก่อนหน้าตัวล่าสุด — เตือนตั้งแต่คืนแรกหลังเกิดเหตุ
+#   - dump ใดก็ตามใน DELETE_LIST — กันไม่ให้อีก 30 คืนต่อมา dump ก่อนเกิดเหตุถูก prune ทิ้งหมด
+#     (fail ทุกคืนจนกว่าคนจะตัดสิน: .railway/README.md หัวข้อ "dump เล็กลงผิดปกติ")
+# MIN_PERCENT = 0 → ปิด · ไม่แตะชื่อที่ไม่ตรงรูป dump ของ ENV
+backup_size_guard() {
+  local env=$1 percent=$2 keep=$3 delete=$4
+  if ! backup_valid_env "$env"; then
+    echo "invalid environment name: '$env'" >&2
+    return 1
+  fi
+  if ! [[ $percent =~ ^([0-9]|[1-9][0-9]|100)$ ]]; then
+    echo "BACKUP_MIN_SIZE_PERCENT must be an integer from 0 to 100: '$percent'" >&2
+    return 1
+  fi
+  # รายชื่อที่จะลบส่งผ่าน ENVIRON — awk -v กับสตริงหลายบรรทัดใช้ไม่ได้ในบาง awk
+  BACKUP_GUARD_DELETE=$delete awk -F '\t' -v env="$env" -v percent="$percent" -v keep="$keep" '
+    BEGIN {
+      n = split(ENVIRON["BACKUP_GUARD_DELETE"], d, "\n")
+      for (i = 1; i <= n; i++) if (d[i] != "") doomed[d[i]] = 1
+    }
+    NF == 2 && index($1, env "-") == 1 && $2 ~ /^[0-9][0-9]*$/ {
+      stamp = substr($1, length(env) + 2)
+      if (stamp !~ /^[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z\.dump$/) next
+      size[$1] = $2 + 0
+      if ($1 != keep && $1 > newest) newest = $1
+    }
+    END {
+      if (!(keep in size)) {
+        printf "size guard: just-uploaded dump %s is not in the listing\n", keep > "/dev/stderr"
+        exit 1
+      }
+      if (percent + 0 == 0) exit 0
+      new = size[keep]
+      bad = 0
+      if (newest != "" && new * 100 < size[newest] * percent) {
+        printf "size guard: %s is %.0f bytes, less than %d%% of the previous dump %s (%.0f bytes)\n",
+          keep, new, percent, newest, size[newest] > "/dev/stderr"
+        bad = 1
+      }
+      for (name in doomed) {
+        if ((name in size) && new * 100 < size[name] * percent) {
+          printf "size guard: refusing to delete %s (%.0f bytes): %s (%.0f bytes) is less than %d%% of it\n",
+            name, size[name], keep, new, percent > "/dev/stderr"
+          bad = 1
+        }
+      }
+      exit bad
+    }
+  '
+}

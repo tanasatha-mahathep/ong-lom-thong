@@ -2,7 +2,8 @@
 # สำรองข้อมูลรายคืน — Railway cron service (ประกาศใน .railway/railway.ts · วิธีใช้/กู้คืน: .railway/README.md)
 #
 # 1. database: pg_dump -Fc → อ่านกลับทั้งไฟล์ (pg_restore --file=/dev/null) → อัปโหลด
-#    → ยืนยันว่าอยู่ในปลายทาง → ลบ dump เก่าตาม BACKUP_KEEP_DAILY / BACKUP_KEEP_MONTHLY
+#    → ยืนยันว่าอยู่ในปลายทาง → ตรวจขนาด (dump เล็กลงผิดปกติ = ไม่ลบอะไร)
+#    → ลบ dump เก่าตาม BACKUP_KEEP_DAILY / BACKUP_KEEP_MONTHLY
 # 2. files: rclone copy (ไม่ใช่ sync — ไฟล์ที่ถูกลบจากต้นทางไม่ถูกลบจากสำเนา) · --immutable = ไฟล์ที่มีอยู่แล้ว
 #    แต่เนื้อหาต่าง → fail ไม่เขียนทับ (ใบรับซื้อ/สำเนาบัตรเป็นเอกสารที่ห้ามแก้)
 #
@@ -78,7 +79,7 @@ wait_for_database() {
 }
 
 backup_database() {
-  local stamp name dump dest listing prune old
+  local stamp name dump dest listing names prune old tab=$'\t'
   stamp=$(backup_stamp)
   name=$(backup_dump_name "$BACKUP_ENVIRONMENT" "$stamp")
   dump="$workdir/$name"
@@ -99,8 +100,12 @@ backup_database() {
   log "uploaded $dest/$name"
 
   # prune ต่อเมื่อเห็นไฟล์ที่เพิ่งอัปโหลดในรายชื่อจริงเท่านั้น (backup_prune_list ปฏิเสธถ้าไม่เห็น)
-  listing=$(bounded rclone lsf --files-only "$dest/")
-  prune=$(backup_prune_list "$BACKUP_ENVIRONMENT" "$keep_daily" "$keep_monthly" "$name" <<<"$listing")
+  listing=$(bounded rclone lsf --files-only --format ps --separator "$tab" "$dest/")
+  names=$(awk -F '\t' 'NF == 2 { print $1 }' <<<"$listing")
+  prune=$(backup_prune_list "$BACKUP_ENVIRONMENT" "$keep_daily" "$keep_monthly" "$name" <<<"$names")
+  # dump ใหม่เล็กลงมาก = database อาจถูกล้าง/เริ่มใหม่ — dump ใหม่เก็บไว้แล้ว แต่ไม่ prune และ fail ให้คนตรวจ
+  backup_size_guard "$BACKUP_ENVIRONMENT" "$min_size_percent" "$name" "$prune" <<<"$listing" ||
+    fail "dump size check failed — nothing pruned (.railway/README.md: dump เล็กลงผิดปกติ)"
   if [[ -z $prune ]]; then
     log "prune: nothing to delete"
   else
@@ -132,6 +137,9 @@ main() {
   keep_monthly=${BACKUP_KEEP_MONTHLY:-12}
   [[ $keep_daily =~ ^[1-9][0-9]*$ ]] || fail "BACKUP_KEEP_DAILY must be an integer >= 1: '$keep_daily'"
   [[ $keep_monthly =~ ^(0|[1-9][0-9]*)$ ]] || fail "BACKUP_KEEP_MONTHLY must be an integer >= 0: '$keep_monthly'"
+  min_size_percent=${BACKUP_MIN_SIZE_PERCENT:-50}
+  [[ $min_size_percent =~ ^([0-9]|[1-9][0-9]|100)$ ]] ||
+    fail "BACKUP_MIN_SIZE_PERCENT must be an integer from 0 to 100: '$min_size_percent'"
   # หน่วยบังคับ — ตัวเลขเปล่าใน Postgres = มิลลิวินาที (900 = 0.9 วินาที ไม่ใช่ 15 นาที)
   lock_wait=${BACKUP_LOCK_WAIT_TIMEOUT:-15min}
   [[ $lock_wait =~ ^[1-9][0-9]*(ms|s|min|h)$ ]] ||
@@ -159,7 +167,7 @@ main() {
   trap 'rm -rf "$workdir"' EXIT
 
   log "start environment=$BACKUP_ENVIRONMENT destination=$BACKUP_S3_BUCKET keep_daily=$keep_daily" \
-    "keep_monthly=$keep_monthly lock_wait=$lock_wait timeout=${timeout_seconds}s"
+    "keep_monthly=$keep_monthly min_size=${min_size_percent}% lock_wait=$lock_wait timeout=${timeout_seconds}s"
   local db_status files_status
   # subshell + set -e ที่ไม่อยู่ใน if/||/&& — errexit ทำงานเต็มที่ข้างใน และส่วนหนึ่งพังไม่หยุดอีกส่วน
   set +e
