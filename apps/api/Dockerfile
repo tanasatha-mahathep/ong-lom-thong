@@ -4,7 +4,8 @@ ENV HUSKY=0 COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable
 WORKDIR /repo
 
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+# .pnpmfile.cjs ตัด optional peer ของ better-auth (drizzle-kit · vitest) — lockfile มี checksum ของไฟล์นี้
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .pnpmfile.cjs ./
 # เวอร์ชัน pnpm มาจาก packageManager ใน package.json ที่เดียว (Renovate อัปเดตที่นั่น)
 RUN corepack install
 COPY apps/api/package.json apps/api/
