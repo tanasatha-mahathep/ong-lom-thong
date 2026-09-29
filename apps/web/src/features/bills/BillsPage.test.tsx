@@ -185,6 +185,26 @@ describe("หน้าค้นบิล — ช่องค้นหา", { tim
     expect(searchBox()).toHaveValue(typed);
   });
 
+  it.each([
+    ["ติดกัน", "11037001234", "58"],
+    ["จัดกลุ่มแบบหน้าบัตร", "1 1037 00123 4", "5 8"],
+  ])("พิมพ์เลขบัตรไม่ครบจนลง URL แล้วพิมพ์ต่อจนครบ (%s): ส่วนที่ค้างใน URL ถูกล้าง", async (_name, partial, rest) => {
+    const { api, user, router } = openBills();
+    await waitForRows();
+
+    // 11 หลัก: ยังไม่ถือเป็นเลขบัตร จึงลง URL หลังหน่วงเวลาตามปกติ
+    await user.type(searchBox(), partial);
+    await waitFor(() => expect(router.state.location.search).toEqual({ q: partial }));
+
+    // หยุดพักแล้วพิมพ์ต่อจนครบ — เลขที่พิมพ์ไปแล้วต้องไม่ค้างใน URL (รีโหลด/แชร์/redirect หลัง 401 จะพาไปด้วย)
+    await user.type(searchBox(), rest);
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: `${partial}${rest}` }));
+    expect(router.state.location.search).toEqual({});
+    expect(searchBox()).toHaveValue(`${partial}${rest}`);
+    await pastDebounce();
+    expect(router.state.location.search).toEqual({});
+  });
+
   it("เบอร์โทร 10 หลักและเลขที่บิลไม่ใช่เลขบัตร: ลงใน URL ตามเดิม", async () => {
     const { user, router } = openBills();
     await waitForRows();

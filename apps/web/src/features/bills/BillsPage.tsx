@@ -97,10 +97,11 @@ export function BillsPage() {
     setSensitiveQuery(undefined);
     void navigate({ search: {}, replace: true });
   };
-  // เลขบัตรประชาชนเต็ม 13 หลัก: เก็บไว้ในหน้านี้เท่านั้น ล้างเลขหน้าใน URL เหมือนตัวกรองอื่นเปลี่ยน
+  // เลขบัตรประชาชน: เก็บไว้ในหน้านี้เท่านั้น · คำค้นที่หน่วงเวลาส่งเข้า URL ไปก่อนหน้านี้ (พิมพ์ยังไม่ครบ)
+  // ต้องถูกล้างออกด้วย ไม่งั้นเลขบัตรส่วนที่พิมพ์ไปแล้วค้างใน URL · เลขหน้าล้างเหมือนตัวกรองอื่นเปลี่ยน
   const applySensitiveQuery = (q: string) => {
     setSensitiveQuery(q);
-    void navigate({ search: (prev) => ({ ...prev, page: undefined }), replace: true });
+    void navigate({ search: (prev) => ({ ...prev, q: undefined, page: undefined }), replace: true });
   };
   const goToPage = (page: number) =>
     void navigate({ search: (prev) => ({ ...prev, page: page > 1 ? page : undefined }), replace: true });
@@ -110,8 +111,9 @@ export function BillsPage() {
   return (
     <>
       <PageHeader />
+      {/* ช่องค้นแสดงคำค้นที่ใช้จริง (รวมเลขบัตรที่ไม่ได้อยู่ใน URL) — ไม่งั้นล้าง q ออกจาก URL แล้วช่องจะว่างตาม */}
       <BillFilters
-        search={search}
+        search={effectiveSearch}
         branches={showBranchFilter ? me.branches : null}
         problem={problem}
         onApply={applyFilters}
