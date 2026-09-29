@@ -283,7 +283,7 @@ jobs:
           args: image --input api-image.tar --scanners vuln,secret --format json --output trivy-report.json
       - name: vulnerability summary
         run: |
-          jq -r '"### Trivy — every finding in the api image (before .trivyignore.yaml)", "",
+          jq -r '"### Trivy — every finding in the api image", "",
             "| Severity | Findings | Fix available |", "| --- | --: | --: |",
             ([.Results[] | (.Vulnerabilities // [])[]] | group_by(.Severity)[]
             | "| \(.[0].Severity) | \(length) | \(map(select((.FixedVersion // "") != "")) | length) |")' \
@@ -293,7 +293,7 @@ jobs:
         with:
           args: >-
             image --input api-image.tar --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed
-            --ignorefile .trivyignore.yaml --show-suppressed --table-mode detailed --exit-code 1
+            --table-mode detailed --exit-code 1
       # Gotenberg ตัวเดียวกับ Railway (services/gotenberg/Dockerfile) — SBOM + รายงานเต็ม + gate: CRITICAL ที่มี fix
       # HIGH รายงานใน step summary ไม่ fail (Chromium แก้ได้จาก release ของ upstream เท่านั้น — docs/proposals/…)
       - name: gotenberg image — build · SBOM · trivy gate

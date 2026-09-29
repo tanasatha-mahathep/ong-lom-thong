@@ -14,6 +14,12 @@
   }
 }
 
+/*
+ * floated: ป้ายของช่องแบบ floating label (components/ui/floating-field.tsx) ลอยขึ้นเมื่อช่องที่อยู่ก่อนหน้า
+ * (class "peer") ได้โฟกัส · มีค่า (placeholder ไม่แสดงแล้ว) · หรือ browser เติมค่าให้ (autofill)
+ */
+@custom-variant floated (&:is(:where(.peer):focus ~ *, :where(.peer):not(:placeholder-shown) ~ *, :where(.peer):autofill ~ *));
+
 /* Sarabun — ตระกูลเดียวกับ TH Sarabun ของใบเสร็จระบบเดิม · ฝังไว้เอง ไม่พึ่ง CDN */
 @font-face {
   font-family: "Sarabun";
