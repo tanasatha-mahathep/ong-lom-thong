@@ -1,53 +1,40 @@
-import { Link } from "@tanstack/react-router";
 import type { ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
-import { BrandMark } from "@/components/brand-mark";
+import { BranchChangedNotice, BranchSwitchConfirm, BranchSwitcher } from "@/components/branch-switcher";
 import { NavMain } from "@/components/nav-main";
 import { NavUser } from "@/components/nav-user";
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-} from "@/components/ui/sidebar";
+import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarRail } from "@/components/ui/sidebar";
+import { useBranchHotkeys, useBranchSwitch } from "@/hooks/use-branch-switch";
 import { useMe } from "@/lib/queries";
 
-/** sidebar ของ dashboard-01 — หัว = ชื่อร้าน + สาขาปัจจุบัน · เมนูตาม role · ท้าย = เมนูผู้ใช้ */
+/** sidebar ของแอป — หัว = ตัวเลือกสาขา (TeamSwitcher ของ sidebar-07) · เมนูตาม role · ท้าย = เมนูผู้ใช้ */
 export function AppSidebar(props: ComponentProps<typeof Sidebar>) {
   const { t } = useTranslation("shell");
   const me = useMe();
+  // การสลับสาขา + ปุ่มลัดอยู่นอก <Sidebar> — บนมือถือ sheet ถูก unmount ตอนปิด ปุ่มลัดต้องยังทำงาน
+  const branchSwitch = useBranchSwitch(me);
+  useBranchHotkeys(me, branchSwitch.request);
 
   return (
-    <Sidebar collapsible="offcanvas" {...props}>
-      {/* landmark ของทั้งแถบ — หัว (ชื่อร้าน/สาขา) และเมนูผู้ใช้ไม่หลุดอยู่นอก landmark */}
-      <aside aria-label={t("sidebar")} className="flex h-full min-h-0 w-full flex-col">
-        <SidebarHeader>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton size="lg" asChild>
-                <Link to="/">
-                  <BrandMark className="size-8!" />
-                  <span className="grid flex-1 text-left leading-snug">
-                    <span className="truncate font-semibold">{t("shopName", { ns: "common" })}</span>
-                    <span className="truncate text-xs text-muted-foreground">
-                      {me.branch ? me.branch.name : t("noBranch", { ns: "common" })}
-                    </span>
-                  </span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarHeader>
-        <SidebarContent>
-          <NavMain role={me.role} />
-        </SidebarContent>
-        <SidebarFooter>
-          <NavUser me={me} />
-        </SidebarFooter>
-      </aside>
-    </Sidebar>
+    <>
+      {/* ย่อเป็นแถบไอคอนแบบ sidebar-07 (collapsible="icon") — Ctrl/⌘+B หรือปุ่มในหัวหน้า · จำใน cookie */}
+      <Sidebar collapsible="icon" {...props}>
+        {/* landmark ของทั้งแถบ — หัว (สาขา) และเมนูผู้ใช้ไม่หลุดอยู่นอก landmark */}
+        <aside aria-label={t("sidebar")} className="flex h-full min-h-0 w-full flex-col">
+          <SidebarHeader>
+            <BranchSwitcher me={me} onSelect={branchSwitch.request} />
+          </SidebarHeader>
+          <SidebarContent>
+            <NavMain role={me.role} />
+          </SidebarContent>
+          <SidebarFooter>
+            <NavUser me={me} />
+          </SidebarFooter>
+        </aside>
+        <SidebarRail />
+      </Sidebar>
+      <BranchSwitchConfirm state={branchSwitch} />
+      <BranchChangedNotice state={branchSwitch} />
+    </>
   );
 }

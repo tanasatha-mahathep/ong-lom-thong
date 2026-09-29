@@ -3,7 +3,6 @@ import { Link } from "@tanstack/react-router";
 import { Store, TriangleAlert } from "lucide-react";
 import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
@@ -14,18 +13,19 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { Separator } from "@/components/ui/separator";
-import { SidebarTrigger } from "@/components/ui/sidebar";
+import { SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePageMeta } from "@/hooks/use-page-meta";
 import { formatInteger, formatMoney } from "@/lib/format";
 import { canSetGoldPrice } from "@/lib/nav";
 import { type Role, goldPriceTodayQueryOptions, useMe } from "@/lib/queries";
 
-/** หัวหน้าของ dashboard-01 — breadcrumb · ราคาทองวันนี้ · สาขาปัจจุบัน */
+/** หัวหน้าของ dashboard-01 — breadcrumb · ราคาทองวันนี้ (สาขาอยู่หัว sidebar — แสดงที่นี่ด้วยตอนย่อ/มือถือ · ธีมอยู่เมนูผู้ใช้) */
 export function SiteHeader() {
   const { t } = useTranslation("shell");
   const me = useMe();
   const { title, crumbs } = usePageMeta();
+  const { state, isMobile } = useSidebar();
 
   return (
     // container query: ราคาทองขึ้นแถวเดียวกับ breadcrumb เมื่อหัวกว้างพอ (ขึ้นกับ sidebar เปิด/ปิด ไม่ใช่ขนาดจอ)
@@ -55,12 +55,14 @@ export function SiteHeader() {
           </BreadcrumbList>
         </Breadcrumb>
       </div>
-      <Badge variant="outline" className="h-7 gap-1.5 px-2.5 text-sm font-normal @6xl/header:order-last">
-        <Store aria-hidden="true" />
-        <span className="sr-only">{t("currentBranch")}</span>
-        {me.branch ? me.branch.name : t("noBranch", { ns: "common" })}
-      </Badge>
-      <ThemeToggle />
+      {/* ราคาทองเป็นของสาขา — sidebar ย่อ/มือถือไม่เห็นชื่อสาขา จึงแสดงข้างราคาเฉพาะตอนนั้น */}
+      {(state === "collapsed" || isMobile) && (
+        <Badge variant="outline" className="h-7 max-w-full gap-1.5 px-2.5 text-sm font-normal">
+          <Store aria-hidden="true" />
+          <span className="sr-only">{t("currentBranch")}</span>
+          <span className="truncate">{me.branch ? me.branch.name : t("noBranch", { ns: "common" })}</span>
+        </Badge>
+      )}
       <div className="order-last w-full @6xl/header:order-none @6xl/header:w-auto">
         <GoldPriceToday role={me.role} />
       </div>

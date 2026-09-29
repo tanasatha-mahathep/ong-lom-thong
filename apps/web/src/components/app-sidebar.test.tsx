@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { BRANCH_2, BRANCH_HQ, GOLD_PRICE, fakeApi, json, makeMe, renderApp } from "@/test/app";
@@ -60,13 +60,14 @@ describe("sidebar ของแอป", () => {
     expect(within(nav).getByRole("link", { name: "ผู้ใช้" })).toHaveAttribute("href", "/settings/users");
   });
 
-  it("ผู้จัดการมีปุ่มซื้อเข้า (Quick Create) + เมนูซื้อเข้า และตั้งราคาทองได้", async () => {
+  it("ผู้จัดการมีเมนูซื้อเข้า (ปุ่มสีหลัก ไม่ซ้ำ) และตั้งราคาทองได้", async () => {
     renderShell("manager");
     const nav = await screen.findByRole("navigation", { name: "เมนูหลัก" });
 
+    // ปุ่มซื้อเข้า (Quick Create เดิม) กับเมนูซื้อเข้าเป็นเมนูเดียว
     const buyLinks = within(nav).getAllByRole("link", { name: "ซื้อเข้า" });
-    expect(buyLinks).toHaveLength(2);
-    for (const link of buyLinks) expect(link).toHaveAttribute("href", "/buy");
+    expect(buyLinks).toHaveLength(1);
+    expect(buyLinks[0]).toHaveAttribute("href", "/buy");
     expect(within(nav).getByRole("link", { name: "ราคาทองวันนี้" })).toHaveAttribute("href", "/settings/gold-price");
     expect(within(nav).queryByRole("link", { name: "ส่งบัญชีรายเดือน" })).not.toBeInTheDocument();
     expect(within(nav).queryByRole("link", { name: "สาขา" })).not.toBeInTheDocument();
@@ -90,7 +91,7 @@ describe("sidebar ของแอป", () => {
     expect(warning).toHaveAttribute("href", "/settings/gold-price");
   });
 
-  it("มีสาขาเดียว → เมนูผู้ใช้ไม่มีสลับสาขา แต่ออกจากระบบได้", async () => {
+  it("เมนูผู้ใช้ออกจากระบบได้", async () => {
     const { api, router } = renderShell("staff");
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: /ทดสอบ staff/ }));
@@ -105,70 +106,16 @@ describe("sidebar ของแอป", () => {
     expect(router.state.location.pathname).toBe("/login");
   });
 
-  it("ยังไม่มีสาขาปัจจุบัน (สาขาหลักถูกปิด) → เมนูผู้ใช้มีสลับสาขาแม้มีสิทธิ์สาขาเดียว", async () => {
-    const { api } = renderShell("staff", [BRANCH_2], { ...makeMe("staff", [BRANCH_2]), branch: null });
+  it("หลายสาขา → สลับสาขาอยู่ที่หัว sidebar ไม่อยู่ในเมนูผู้ใช้", async () => {
+    renderShell("manager", [BRANCH_HQ, BRANCH_2]);
     const user = userEvent.setup();
-    (await screen.findByRole("button", { name: /ทดสอบ staff/ })).focus();
-    expect(screen.getByText("สาขาปัจจุบัน").parentElement).toHaveTextContent("ยังไม่ได้เลือกสาขา");
-    await user.keyboard("{Enter}");
-    await waitFor(() => expect(screen.getByRole("menuitem", { name: "สลับสาขา" })).toHaveFocus());
-    await user.keyboard("{ArrowRight}");
-    await waitFor(() => expect(screen.getByRole("menuitemradio", { name: /สาขา 2/ })).toHaveFocus());
-    await user.keyboard("{Enter}");
+    const sidebar = await screen.findByRole("complementary", { name: "แถบเมนู" });
+    expect(within(sidebar).getByRole("button", { name: /^สาขาปัจจุบัน/ })).toHaveAttribute("aria-haspopup", "menu");
+    await user.click(screen.getByRole("button", { name: /ทดสอบ manager/ }));
 
-    await waitFor(() =>
-      expect(api.callsTo("POST", "/api/me/branch").map((c) => c.body)).toEqual([{ branch_id: BRANCH_2.id }]),
-    );
-  });
-
-  it("สลับสาขา → ข้อมูลของสาขาเดิมหายทันที ไม่ค้างใต้หัวสาขาใหม่ระหว่างโหลด", async () => {
-    let current = BRANCH_HQ;
-    let releasePrice = () => {};
-    const newPrice = new Promise<void>((resolve) => (releasePrice = resolve));
-    fakeApi({
-      "GET /api/me": () => json({ ...makeMe("manager", [BRANCH_HQ, BRANCH_2]), branch: current }),
-      "GET /api/gold-price/today": async () => {
-        if (current.id === BRANCH_HQ.id) return json(GOLD_PRICE);
-        await newPrice;
-        return json({ ...GOLD_PRICE, bar_sell: "68000.00" });
-      },
-      "POST /api/me/branch": () => {
-        current = BRANCH_2;
-        return json({ branch: BRANCH_2 });
-      },
-    });
-    renderApp("/");
-    const user = userEvent.setup();
-    expect(await screen.findByText("67,850.00")).toBeInTheDocument();
-    (await screen.findByRole("button", { name: /ทดสอบ manager/ })).focus();
-    await user.keyboard("{Enter}");
-    await waitFor(() => expect(screen.getByRole("menuitem", { name: "สลับสาขา" })).toHaveFocus());
-    await user.keyboard("{ArrowRight}");
-    await waitFor(() => expect(screen.getByRole("menuitemradio", { name: /สำนักงานใหญ่/ })).toHaveFocus());
-    await user.keyboard("{ArrowDown}{Enter}");
-
-    // หัวเป็นสาขาใหม่แล้ว แต่ราคาของสาขาเดิมต้องไม่ค้างอยู่ระหว่างรอราคาใหม่
-    await waitFor(() => expect(screen.getByText("สาขาปัจจุบัน").parentElement).toHaveTextContent(BRANCH_2.name));
-    expect(screen.queryByText("67,850.00")).not.toBeInTheDocument();
-    releasePrice();
-    expect(await screen.findByText("68,000.00")).toBeInTheDocument();
-  });
-
-  it("หลายสาขา → สลับสาขาจากเมนูผู้ใช้ด้วยคีย์บอร์ด แล้วโหลดข้อมูลใหม่", async () => {
-    const { api } = renderShell("manager", [BRANCH_HQ, BRANCH_2]);
-    const user = userEvent.setup();
-    (await screen.findByRole("button", { name: /ทดสอบ manager/ })).focus();
-    // Enter เปิดเมนู (โฟกัส "สลับสาขา") · → เปิดเมนูย่อย · ↓ ไปสาขา 2 · Enter เลือก
-    await user.keyboard("{Enter}");
-    await waitFor(() => expect(screen.getByRole("menuitem", { name: "สลับสาขา" })).toHaveFocus());
-    await user.keyboard("{ArrowRight}");
-    await waitFor(() => expect(screen.getByRole("menuitemradio", { name: /สำนักงานใหญ่/ })).toHaveFocus());
-    await user.keyboard("{ArrowDown}{Enter}");
-
-    expect(await screen.findByText("สลับสาขาแล้ว — สาขา 2")).toBeInTheDocument();
-    expect(api.callsTo("POST", "/api/me/branch").map((c) => c.body)).toEqual([{ branch_id: BRANCH_2.id }]);
-    // invalidate ทุก query → ถามผู้ใช้และราคาทองใหม่
-    expect(api.callsTo("GET", "/api/me").length).toBeGreaterThanOrEqual(2);
+    expect(await screen.findByRole("menuitem", { name: "ออกจากระบบ" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "สลับสาขา" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitemradio")).not.toBeInTheDocument();
   });
 });
 
@@ -200,5 +147,64 @@ describe("เมนูบนมือถือ (sheet)", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "เมนู" })).not.toBeInTheDocument());
     expect(router.state.location.pathname).toBe("/customers");
     await waitFor(() => expect(screen.getByRole("button", { name: "แสดง/ซ่อนเมนู" })).toHaveFocus());
+  });
+});
+
+describe("sidebar ย่อเป็นแถบไอคอน (sidebar-07 collapsible=icon)", () => {
+  const sidebarRoot = () => document.querySelector<HTMLElement>('[data-slot="sidebar"]');
+
+  it("cookie ย่อไว้ → แถบไอคอน: เมนูทุกตัวมีไอคอน + tooltip · ตัวเลือกสาขาและเมนูผู้ใช้ยังเปิดได้", async () => {
+    document.cookie = "sidebar_state=false; path=/";
+    renderShell("admin", [BRANCH_HQ, BRANCH_2]);
+    const user = userEvent.setup();
+    const nav = await screen.findByRole("navigation", { name: "เมนูหลัก" });
+    expect(sidebarRoot()).toHaveAttribute("data-state", "collapsed");
+    expect(sidebarRoot()).toHaveAttribute("data-collapsible", "icon");
+
+    // ทุกเมนูมีไอคอนและยังมีชื่อ (ข้อความถูกตัดด้วย CSS ไม่ได้หายจาก accessibility tree)
+    const links = within(nav).getAllByRole("link");
+    expect(links.map((link) => link.getAttribute("href"))).toEqual(
+      navFor("admin").flatMap((g) => g.items.map((i) => i.to)),
+    );
+    for (const link of links) expect(link.querySelector("svg")).not.toBeNull();
+
+    // โฟกัสเมนูด้วยคีย์บอร์ด → tooltip ชื่อเมนู
+    within(nav).getByRole("link", { name: "ค้นบิล" }).focus();
+    expect(await screen.findByRole("tooltip", { name: "ค้นบิล" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^สาขาปัจจุบัน/ }));
+    expect(await screen.findByRole("menuitemradio", { name: /สาขา 2/ })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: /ทดสอบ admin/ }));
+    expect(await screen.findByRole("menuitem", { name: "ออกจากระบบ" })).toBeInTheDocument();
+  });
+
+  it("ขยายอยู่ → tooltip ไม่แสดง (ชื่อเมนูเห็นอยู่แล้ว)", async () => {
+    renderShell("staff");
+    const nav = await screen.findByRole("navigation", { name: "เมนูหลัก" });
+    expect(sidebarRoot()).toHaveAttribute("data-state", "expanded");
+    within(nav).getByRole("link", { name: "ค้นบิล" }).focus();
+    await waitFor(() => expect(document.querySelector('[data-slot="tooltip-content"]')).toHaveAttribute("hidden"));
+  });
+
+  it("Ctrl+B สลับย่อ/ขยาย และจำไว้ใน cookie", async () => {
+    renderShell("staff");
+    const user = userEvent.setup();
+    await screen.findByRole("navigation", { name: "เมนูหลัก" });
+
+    await user.keyboard("{Control>}b{/Control}");
+    await waitFor(() => expect(sidebarRoot()).toHaveAttribute("data-state", "collapsed"));
+    expect(document.cookie).toContain("sidebar_state=false");
+
+    // ปุ่ม panel-left อยู่ในหัวหน้า (แถบ rail ข้าง sidebar ก็สลับได้ด้วยเมาส์)
+    await user.click(within(screen.getByRole("banner")).getByRole("button", { name: "แสดง/ซ่อนเมนู" }));
+    await waitFor(() => expect(sidebarRoot()).toHaveAttribute("data-state", "expanded"));
+    expect(document.cookie).toContain("sidebar_state=true");
+
+    // แป้นภาษาไทย: ปุ่มเดียวกันได้ key "ิ" — ใช้ตำแหน่งปุ่ม (code KeyB)
+    fireEvent.keyDown(document.body, { key: "ิ", code: "KeyB", ctrlKey: true });
+    await waitFor(() => expect(sidebarRoot()).toHaveAttribute("data-state", "collapsed"));
   });
 });

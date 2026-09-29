@@ -78,7 +78,6 @@ export default {
     notifications: "การแจ้งเตือน",
     closeNotification: "ปิดการแจ้งเตือน",
     currentBranch: "สาขาปัจจุบัน",
-    quickBuy: "ซื้อเข้า",
     groups: {
       reports: "รายงาน",
       settings: "ตั้งค่า",
@@ -114,15 +113,31 @@ export default {
       stock: "สต็อกคงเหลือ",
       export: "ส่งบัญชีรายเดือน",
     },
+    /** ตัวเลือกสาขาที่หัว sidebar (แบบ TeamSwitcher ของ sidebar-07) */
+    branchSwitcher: {
+      label: "สาขา",
+      /** ปุ่มลัดของสาขาที่ n ในรายการ — Alt (ไม่ใช่ Ctrl/⌘ ที่ browser ใช้สลับแท็บ) */
+      shortcut: "Alt+{{n}}",
+      manage: "จัดการสาขา",
+      switched: "เปลี่ยนสาขาเป็น {{name}} แล้ว",
+      failed: "เปลี่ยนสาขาไม่สำเร็จ — {{reason}}",
+      confirmTitle: "ข้อมูลในหน้านี้ยังไม่ได้บันทึก",
+      confirmBody: "ถ้าเปลี่ยนเป็น {{name}} ข้อมูลที่กรอกค้างไว้จะหายไป",
+      confirmStay: "อยู่ต่อ",
+      confirmSwitch: "ทิ้งข้อมูลและเปลี่ยนสาขา",
+      savingWait: "กำลังบันทึก… รอให้เสร็จก่อนเปลี่ยนสาขา",
+      changedElsewhere: "สาขาถูกเปลี่ยนเป็น {{name}} จากที่อื่น",
+      changedTitle: "สาขาถูกเปลี่ยนจากที่อื่น",
+      changedBody:
+        "ตอนนี้บัญชีนี้ทำงานที่ {{name}} (เปลี่ยนจากแท็บหรือเครื่องอื่น) — ข้อมูลที่กรอกค้างไว้บันทึกไม่ได้ กรุณาโหลดหน้าใหม่",
+      changedReload: "โหลดหน้าใหม่",
+    },
     userMenu: {
-      switchBranch: "สลับสาขา",
       signOut: "ออกจากระบบ",
-      switched: "สลับสาขาแล้ว — {{name}}",
-      switchFailed: "สลับสาขาไม่สำเร็จ — {{reason}}",
       signOutFailed: "ออกจากระบบไม่สำเร็จ — {{reason}}",
     },
     theme: {
-      label: "เปลี่ยนธีม",
+      label: "ธีม",
       light: "สว่าง",
       dark: "มืด",
       system: "ตามระบบ",
