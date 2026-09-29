@@ -13,7 +13,7 @@ API_IMAGE ?= ong-api:local
 WITH_ENV  := set -a && . ./.env && set +a &&
 
 .PHONY: help setup install dev infra-up infra-down infra-reset logs \
-	db-migrate db-seed db-generate db-psql \
+	db-migrate db-seed db-generate db-psql db-verify db-verify-test \
 	check lint lint-fix format format-check typecheck test test-coverage test-watch build bundle-budget docker-api \
 	scan ci-lint secret-scan sast sca security smoke e2e-up e2e e2e-down ci-full testsprite-probe testsprite-doctor \
 	railway-link railway-plan railway-apply railway-logs railway-status \
@@ -63,6 +63,12 @@ db-generate: ## สร้าง migration หลังแก้ packages/db/src/
 
 db-psql: ## psql เข้า DB local
 	docker compose exec postgres psql -U ong -d ong
+
+db-verify: ## migration ปลอดภัยก่อน deploy — ชุดเดียวกับ job db-verify ใน CI (ต้องมี postgres · BASE_REF=vX.Y.Z)
+	scripts/ci/db-verify.sh
+
+db-verify-test: ## negative controls ของ db-verify (~10 นาที) — หลังแก้ db-verify หรืออัป drizzle
+	scripts/ci/db-verify-selftest.sh
 
 ##@ ตรวจคุณภาพ — ชุดเดียวกับ CI
 check: lint format-check typecheck test test-coverage build bundle-budget ## ทุกอย่างที่ job check ใน CI ตรวจ (ต้องผ่านก่อน commit)
