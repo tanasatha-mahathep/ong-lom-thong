@@ -88,20 +88,25 @@ service `Nightly Backup` (cron · โค้ด `services/backup/`) รันท�
 - ชื่อ dump เช่น `production-20260929T191700Z.dump` (เวลา UTC ตอนเริ่ม dump)
 - เก็บ dump: **ทุกไฟล์ของ 30 วันล่าสุดที่มี dump + ไฟล์ล่าสุดของแต่ละเดือน 12 เดือน** (`BACKUP_KEEP_DAILY` / `BACKUP_KEEP_MONTHLY` ใน `railway.ts`) · นับวันที่มีไฟล์ ไม่ใช่อายุ — cron หยุดไปนานของเก่าก็ไม่หาย · ไฟล์ที่ไม่ตรงรูปชื่อไม่ถูกลบ · อัปโหลดไม่สำเร็จ/ยืนยันไม่ได้ = ไม่ prune
 - `--immutable`: ไฟล์ใน `Media` ที่ถูกแก้เนื้อหา (ใบรับซื้อ/สำเนาบัตรห้ามแก้) → run นั้น fail และสำเนาเดิมไม่ถูกเขียนทับ — **ต้องตรวจทันที**
+- **ไม่มีรอบไหนค้างได้**: `pg_dump --lock-wait-timeout` (`BACKUP_LOCK_WAIT_TIMEOUT` 15 นาที — ตารางถูกล็อก `ACCESS EXCLUSIVE` ค้าง = fail) · ทั้งรอบมีเส้นตาย `BACKUP_TIMEOUT_SECONDS` (6 ชั่วโมง) — คำสั่งที่ยังทำงานเมื่อถึงเส้นตายถูก TERM (อีก 30 วินาที KILL) · รอบที่ค้าง = Railway ข้ามทุกรอบถัดไป backup หยุดเงียบ จึงต้องมีเส้นตาย
+  - เส้นตายบังคับที่คำสั่งลูกทีละตัว (pg_dump · pg_restore · rclone) ไม่ใช่ `timeout` ครอบ entrypoint: สคริปต์เป็น PID 1 ใน container และ signal ที่ส่งจากใน container ถึง PID 1 ถูกทิ้ง (ทดสอบกับ image นี้: `timeout 2` เป็น entrypoint → `sleep 12` รันครบ exit 0)
+  - ทดสอบกับ image จริง: ถือ `LOCK TABLE branch IN ACCESS EXCLUSIVE MODE` ไว้ → pg_dump fail ใน 5 วินาที (`BACKUP_LOCK_WAIT_TIMEOUT=5s`) · lock wait 10 นาที + เส้นตาย 10 วินาที → หยุดที่ 11 วินาที · S3 ค้าง (`docker pause`) → rclone หยุดที่เส้นตาย
 - database กับ files ทำแยกกัน — ส่วนหนึ่งพัง อีกส่วนยังทำ แล้ว exit ≠ 0 · log บรรทัดท้าย `backup: all done` หรือ `backup: FAILED database=<code> files=<code>`
 
 > **ข้อจำกัด:** bucket `Backup` อยู่ในบัญชี/project Railway เดียวกัน — กันข้อมูลเสีย/ถูกลบในแอป, database พัง และไฟล์ใน `Media` หาย แต่ **ไม่กันกรณีบัญชีหรือ project Railway หาย** · สำเนานอก Railway (R2/B2) เป็นงานเสริมความปลอดภัยในอนาคต — ดู "ต่อสำเนานอก Railway" ด้านล่าง
 
 ### ตัวแปร (ประกาศใน `railway.ts` ครบ — ไม่มีค่าที่ต้อง export ตอน apply)
 
-| ตัวแปร                                                                                        | ค่า                                                        |
-| --------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| `DATABASE_URL`                                                                                | reference `Postgres`                                       |
-| `BACKUP_ENVIRONMENT`                                                                          | ชื่อ environment (prefix + ชื่อไฟล์)                       |
-| `BACKUP_KEEP_DAILY` · `BACKUP_KEEP_MONTHLY`                                                   | `30` · `12` (daily ≥ 1 · monthly ≥ 0 — ผิดรูป = หยุดทันที) |
-| `S3_ENDPOINT` `S3_REGION` `S3_BUCKET` `S3_ACCESS_KEY` `S3_SECRET_KEY` `S3_FORCE_PATH_STYLE`   | reference bucket `Media` (ต้นทางของไฟล์)                   |
-| `BACKUP_S3_ENDPOINT` `…_REGION` `…_BUCKET` `…_ACCESS_KEY` `…_SECRET_KEY` `…_FORCE_PATH_STYLE` | reference bucket `Backup` (ปลายทาง)                        |
-| `BACKUP_S3_PROVIDER`                                                                          | `Other` (ชื่อ provider ของ rclone s3)                      |
+| ตัวแปร                                                                                        | ค่า                                                                             |
+| --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                                                                | reference `Postgres`                                                            |
+| `BACKUP_ENVIRONMENT`                                                                          | ชื่อ environment (prefix + ชื่อไฟล์)                                            |
+| `BACKUP_KEEP_DAILY` · `BACKUP_KEEP_MONTHLY`                                                   | `30` · `12` (daily ≥ 1 · monthly ≥ 0 — ผิดรูป = หยุดทันที)                      |
+| `BACKUP_LOCK_WAIT_TIMEOUT`                                                                    | `15min` (ต้องมีหน่วย `ms` `s` `min` `h` — ตัวเลขเปล่าใน Postgres = มิลลิวินาที) |
+| `BACKUP_TIMEOUT_SECONDS`                                                                      | `21600` = 6 ชั่วโมง (1–86399 — ต้องจบก่อนรอบถัดไป)                              |
+| `S3_ENDPOINT` `S3_REGION` `S3_BUCKET` `S3_ACCESS_KEY` `S3_SECRET_KEY` `S3_FORCE_PATH_STYLE`   | reference bucket `Media` (ต้นทางของไฟล์)                                        |
+| `BACKUP_S3_ENDPOINT` `…_REGION` `…_BUCKET` `…_ACCESS_KEY` `…_SECRET_KEY` `…_FORCE_PATH_STYLE` | reference bucket `Backup` (ปลายทาง)                                             |
+| `BACKUP_S3_PROVIDER`                                                                          | `Other` (ชื่อ provider ของ rclone s3)                                           |
 
 สคริปต์ตั้ง rclone จาก env ล้วน (`RCLONE_CONFIG_*`) — ไม่มี `rclone.conf` · ค่าลับไม่ผ่าน argv · ปลายทางเป็น bucket เดียวกับต้นทาง = ปฏิเสธ
 

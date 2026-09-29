@@ -17,6 +17,16 @@ function lib(fn: string, args: string[], input = ""): Result {
 
 const lines = (s: string) => s.split("\n").filter(Boolean);
 
+/**
+ * macOS ไม่มี timeout (coreutils) — จำลองด้วย perl alarm (SIGALRM ถึงตัวคำสั่งเมื่อครบเวลา) ให้เทสต์รันบนเครื่อง dev ได้
+ * BACKUP_TEST_TIMEOUT_SHIM=1 บังคับใช้ตัวจำลองบน Linux เพื่อตรวจตัวจำลองเอง
+ */
+const HOST_HAS_TIMEOUT =
+  !process.env.BACKUP_TEST_TIMEOUT_SHIM && spawnSync("sh", ["-c", "command -v timeout"]).status === 0;
+const TIMEOUT_SHIM = `while [[ $1 == -* ]]; do case $1 in -s | -k) shift 2 ;; *) shift ;; esac; done
+secs=$1; shift
+exec perl -e 'alarm shift @ARGV; exec @ARGV or die "exec: $!\\n"' "$secs" "$@"`;
+
 /** dump รายวันเวลา 19:17 UTC (= 02:17 น. เวลาไทย) ย้อนหลังจากวันที่ให้ */
 function dailyNames(env: string, newest: Date, days: number): string[] {
   return Array.from({ length: days }, (_, i) => {
@@ -205,6 +215,7 @@ describe("backup.sh — ลำดับงานและ fail-closed", () => {
       "pg_dump",
       `echo "$*" >> "$STUB_STATE/pg_dump.log"
 [[ \${1:-} == --version ]] && { echo "pg_dump (PostgreSQL) 18.6"; exit 0; }
+[[ -n \${STUB_HANG_PGDUMP:-} ]] && exec sleep 60
 [[ -n \${STUB_FAIL_PGDUMP:-} ]] && { echo "pg_dump: error: connection refused" >&2; exit 1; }
 for a in "$@"; do case "$a" in --file=*) printf 'PGDMP-stub' > "\${a#--file=}";; esac; done`,
     );
@@ -228,10 +239,13 @@ case "$1" in
     n=$(basename "$2"); echo "$n" >> "$STUB_STATE/deleted.txt"
     grep -vxF "$n" "$STUB_STATE/remote.txt" > "$STUB_STATE/remote.tmp" || true
     mv "$STUB_STATE/remote.tmp" "$STUB_STATE/remote.txt" ;;
-  copy) [[ -n \${STUB_FAIL_COPY:-} ]] && { echo "copy failed" >&2; exit 1; }; exit 0 ;;
+  copy)
+    [[ -n \${STUB_HANG_COPY:-} ]] && exec sleep 60
+    [[ -n \${STUB_FAIL_COPY:-} ]] && { echo "copy failed" >&2; exit 1; }; exit 0 ;;
   *) echo "unexpected rclone command: $1" >&2; exit 2 ;;
 esac`,
     );
+    if (!HOST_HAS_TIMEOUT) stub("timeout", TIMEOUT_SHIM);
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -375,10 +389,48 @@ esac`,
     ["BACKUP_KEEP_DAILY", "thirty"],
     ["BACKUP_KEEP_MONTHLY", "-1"],
     ["BACKUP_ENVIRONMENT", "Staging"],
+    // ตัวเลขเปล่าใน Postgres = มิลลิวินาที — บังคับใส่หน่วย
+    ["BACKUP_LOCK_WAIT_TIMEOUT", "900"],
+    ["BACKUP_LOCK_WAIT_TIMEOUT", "15 minutes"],
+    ["BACKUP_LOCK_WAIT_TIMEOUT", "0s"],
+    ["BACKUP_TIMEOUT_SECONDS", "0"],
+    ["BACKUP_TIMEOUT_SECONDS", "86400"],
+    ["BACKUP_TIMEOUT_SECONDS", "6h"],
   ])("%s=%j ผิด → หยุดก่อนทำอะไร", (key, value) => {
     const r = run({ ...baseEnv(), [key]: value });
     expect(r.status).toBe(1);
     expect(rcloneCalls()).toEqual([]);
     expect(read("pg_dump.log")).toBe("");
   });
+
+  it("pg_dump รอ lock ได้ไม่เกิน BACKUP_LOCK_WAIT_TIMEOUT (ค่าเริ่มต้น 15min)", () => {
+    expect(run(baseEnv()).status).toBe(0);
+    const dump = () => lines(read("pg_dump.log")).filter((l) => l.includes("--format=custom"));
+    expect(dump()).toHaveLength(1);
+    expect(dump()[0]).toContain("--lock-wait-timeout=15min");
+
+    writeFileSync(join(state, "pg_dump.log"), "");
+    expect(run({ ...baseEnv(), BACKUP_LOCK_WAIT_TIMEOUT: "90s" }).status).toBe(0);
+    expect(dump()[0]).toContain("--lock-wait-timeout=90s");
+  });
+
+  it("pg_dump ค้าง → หยุดที่เส้นตายของรอบ · ไม่อัปโหลด · copy ไฟล์ไม่เริ่ม · exit ≠ 0", () => {
+    const started = Date.now();
+    const r = run({ ...baseEnv(), BACKUP_TIMEOUT_SECONDS: "2", STUB_HANG_PGDUMP: "1" });
+    expect(Date.now() - started).toBeLessThan(20_000);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/pg_dump stopped at BACKUP_TIMEOUT_SECONDS=2/);
+    expect(r.stderr).toMatch(/BACKUP_TIMEOUT_SECONDS=2 reached — not starting rclone/);
+    expect(rcloneCalls()).toEqual([]);
+  }, 30_000);
+
+  it("rclone ค้าง → หยุดที่เส้นตายของรอบ · database ที่สำรองแล้วยังอยู่ · exit ≠ 0", () => {
+    const started = Date.now();
+    const r = run({ ...baseEnv(), BACKUP_TIMEOUT_SECONDS: "3", STUB_HANG_COPY: "1" });
+    expect(Date.now() - started).toBeLessThan(20_000);
+    expect(r.status).not.toBe(0);
+    expect(r.stdout).toMatch(/database backup done/);
+    expect(r.stderr).toMatch(/rclone stopped at BACKUP_TIMEOUT_SECONDS=3/);
+    expect(lines(read("remote.txt")).some((n) => /^staging-\d{8}T\d{6}Z\.dump$/.test(n))).toBe(true);
+  }, 30_000);
 });

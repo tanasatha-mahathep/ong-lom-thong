@@ -35,8 +35,18 @@ const BACKUP_BUCKET = "Backup";
  * นาที 17 ไม่ใช่ 00: เลี่ยงช่วงที่ cron ทั้งแพลตฟอร์มแย่งกันรันต้นชั่วโมง
  */
 const BACKUP_CRON = "17 19 * * *";
-/** dump ที่เก็บ: ทุกไฟล์ของ 30 วันล่าสุด + ล่าสุดของแต่ละเดือน 12 เดือน (services/backup/lib.sh) */
-const BACKUP_KEEP = { BACKUP_KEEP_DAILY: "30", BACKUP_KEEP_MONTHLY: "12" };
+/**
+ * ค่าของ services/backup/backup.sh (รายละเอียด: .railway/README.md หัวข้อ "สำรองข้อมูลรายคืน")
+ * - dump ที่เก็บ: ทุกไฟล์ของ 30 วันล่าสุด + ล่าสุดของแต่ละเดือน 12 เดือน
+ * - pg_dump รอ lock ของตารางไม่เกิน 15 นาที (ต้องมีหน่วย — ตัวเลขเปล่าใน Postgres = มิลลิวินาที)
+ * - ทั้งรอบไม่เกิน 6 ชั่วโมง (< 24 ชั่วโมง: รอบที่ค้าง Railway ข้ามรอบถัดไป = backup หยุดเงียบ)
+ */
+const BACKUP_SETTINGS = {
+  BACKUP_KEEP_DAILY: "30",
+  BACKUP_KEEP_MONTHLY: "12",
+  BACKUP_LOCK_WAIT_TIMEOUT: "15min",
+  BACKUP_TIMEOUT_SECONDS: "21600",
+};
 /**
  * หัวใบรับซื้อ — ข้อมูลกิจการที่พิมพ์บนใบทุกใบ (ไม่ใช่ค่าลับ) · ค่าจากหน้า "ข้อมูลบริษัท" ของระบบเดิม
  * ใช้ค่าเดียวกันทุก environment · แอปตรวจรูปแบบตอน start (เลขผู้เสียภาษี 13 หลัก + หลักตรวจสอบ)
@@ -191,7 +201,7 @@ export default defineRailway((ctx) => {
     env: {
       DATABASE_URL: db.env.DATABASE_URL,
       BACKUP_ENVIRONMENT: environment,
-      ...BACKUP_KEEP,
+      ...BACKUP_SETTINGS,
       // ต้นทาง: bucket ไฟล์ (ชื่อตัวแปรเดียวกับ Office)
       ...s3Env("S3_", files),
       // ปลายทาง: bucket Backup — เปลี่ยนเป็น R2/B2 ได้ด้วยการแก้ 7 ค่านี้ (ไม่ต้องแก้สคริปต์)
