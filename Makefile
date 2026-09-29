@@ -93,7 +93,7 @@ build: ## build web + api
 docker-api: ## build image ของ api แบบเดียวกับ Railway
 	docker build -f apps/api/Dockerfile -t $(API_IMAGE) .
 
-##@ Railway (ENV=staging|production · SERVICE=Office|"PDF (Gotenberg)"|Postgres)
+##@ Railway (ENV=staging|production · SERVICE=Office|"PDF (Gotenberg)"|"Nightly Backup"|Postgres)
 railway-link: ## ผูก directory นี้กับ environment
 	railway link --project "$(PROJECT)" --environment $(ENV)
 
