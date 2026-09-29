@@ -201,7 +201,9 @@ describe("sidebar ย่อเป็นแถบไอคอน (sidebar-07 coll
     await waitFor(() => expect(sidebarRoot()).toHaveAttribute("data-state", "collapsed"));
     expect(document.cookie).toContain("sidebar_state=false");
 
-    // ปุ่ม panel-left อยู่ในหัวหน้า (แถบ rail ข้าง sidebar ก็สลับได้ด้วยเมาส์)
+    // สลับได้ด้วยปุ่ม panel-left ในหัวหน้าเท่านั้น — ไม่มีแถบ rail ที่ขอบ (ไม่มีเส้น/เงาตอน hover)
+    expect(document.querySelector('[data-slot="sidebar-rail"]')).toBeNull();
+    expect(screen.getAllByRole("button", { name: "แสดง/ซ่อนเมนู" })).toHaveLength(1);
     await user.click(within(screen.getByRole("banner")).getByRole("button", { name: "แสดง/ซ่อนเมนู" }));
     await waitFor(() => expect(sidebarRoot()).toHaveAttribute("data-state", "expanded"));
     expect(document.cookie).toContain("sidebar_state=true");
