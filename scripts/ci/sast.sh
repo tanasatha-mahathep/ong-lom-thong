@@ -231,8 +231,21 @@ if [ -s "$sarif" ]; then
 fi
 
 # --- 4. was it a complete scan? any Semgrep error, or no rules / no files, is a tool failure -------------
-errors=$(jq -r '.errors[] | [.level // "?", .type // "?", (.path // .spans[0].file // "-"), (.rule_id // "-"),
-  ((.message // "") | gsub("\\s+"; " ") | .[0:300])] | @tsv' "$json")
+# Semgrep's error .type is a string or ["PartialParsing", [spans…]] — take the name either way.
+# A PartialParsing warning means the rest of that file was still scanned: report it, don't fail on it.
+# Every other error (level error/fatal, or any other type) means the scan is incomplete → fail.
+readonly ERR_TYPE='(.type | if type == "array" then .[0] else . end // "?" | tostring)'
+partial=$(jq -r ".errors[] | select(.level == \"warn\" and $ERR_TYPE == \"PartialParsing\")
+  | \"\\(.path // \"-\")\\t\\((.type[1]? // []) | length)\"" "$json")
+if [ -n "$partial" ]; then
+  echo "Semgrep parsed these files only in part (warnings — the rest of each file was scanned):" >&2
+  printf '%s\n' "$partial" | while IFS=$'\t' read -r path spans; do
+    echo "  $path — $spans span(s) not parsed" >&2
+  done
+fi
+errors=$(jq -r ".errors[] | select((.level == \"warn\" and $ERR_TYPE == \"PartialParsing\") | not)
+  | [.level // \"?\", $ERR_TYPE, (.path // .spans[0].file // \"-\"), (.rule_id // \"-\"),
+  ((.message // \"\") | gsub(\"\\\\s+\"; \" \") | .[0:300])] | @tsv" "$json")
 if [ -n "$errors" ]; then
   echo "Semgrep reported errors — the scan is incomplete:" >&2
   printf '%s\n' "$errors" | while IFS=$'\t' read -r level type path rule msg; do
