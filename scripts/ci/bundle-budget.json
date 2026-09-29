@@ -3,16 +3,16 @@
   "gzipLevel": 6,
   "headroom": 0.25,
   "budget": {
-    "totalJsGzipBytes": 271000,
-    "totalCssGzipBytes": 15000,
-    "largestJsChunkGzipBytes": 108000
+    "totalJsGzipBytes": 458000,
+    "totalCssGzipBytes": 18000,
+    "largestJsChunkGzipBytes": 151000
   },
   "measured": {
     "date": "2026-09-29",
-    "commit": "5520bf9",
-    "totalJsGzipBytes": 216049,
-    "totalCssGzipBytes": 11297,
-    "largestJsChunkGzipBytes": 86275,
-    "largestJsChunk": "assets/vendor-_03OHiyF.js"
+    "commit": "cabf09b",
+    "totalJsGzipBytes": 365960,
+    "totalCssGzipBytes": 14181,
+    "largestJsChunkGzipBytes": 120358,
+    "largestJsChunk": "assets/vendor-CFELsRD4.js"
   }
 }
