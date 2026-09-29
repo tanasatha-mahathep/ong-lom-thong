@@ -123,7 +123,7 @@ export default {
       signOutFailed: "ออกจากระบบไม่สำเร็จ — {{reason}}",
     },
     theme: {
-      label: "เปลี่ยนธีม",
+      label: "ธีม",
       light: "สว่าง",
       dark: "มืด",
       system: "ตามระบบ",

@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
-import { EllipsisVertical, LogOut, UserRound } from "lucide-react";
+import { ChevronsUpDown, LogOut, Moon, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -8,18 +8,59 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
 import { errorMessage } from "@/lib/api";
 import type { Me } from "@/lib/queries";
 import { signOut } from "@/lib/session";
+import { THEMES, isTheme, useTheme } from "@/lib/theme";
 
-/** เมนูผู้ใช้ท้าย sidebar — ออกจากระบบ (สลับสาขาอยู่ที่หัว sidebar: branch-switcher.tsx) */
+/** สระหน้า (เ แ โ ใ ไ) ไม่ใช่ตัวแรกของชื่อที่อ่านออก — "เจน" ควรเป็น "จ" */
+const LEADING_VOWELS = /^[เ-ไ]/u;
+
+/** ตัวอักษรแรกของชื่อสำหรับรูปแทนตัว (ไม่มีรูปผู้ใช้ในระบบ) */
+function initialOf(name: string): string {
+  const trimmed = name.trim().replace(LEADING_VOWELS, "");
+  const first = [...new Intl.Segmenter("th", { granularity: "grapheme" }).segment(trimmed)][0]?.segment ?? "";
+  return first.toLocaleUpperCase("th");
+}
+
+/** รูปแทนตัวแบบ Avatar ของ sidebar-07 — ประดับ (ชื่ออยู่ในข้อความข้าง ๆ เสมอ) */
+function UserAvatar({ name }: { name: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background text-sm font-semibold text-foreground"
+    >
+      {initialOf(name)}
+    </span>
+  );
+}
+
+function UserText({ me }: { me: Me }) {
+  return (
+    <span className="grid flex-1 text-left text-sm leading-tight">
+      <span className="truncate font-medium">{me.user.name}</span>
+      <span className="truncate text-xs text-muted-foreground">{me.user.email}</span>
+    </span>
+  );
+}
+
+/**
+ * เมนูผู้ใช้ท้าย sidebar (NavUser ของ sidebar-07) — หัวเมนู = ผู้ใช้ + role · ธีม (สว่าง/มืด/ตามระบบ) · ออกจากระบบ
+ * สลับสาขาอยู่ที่หัว sidebar (branch-switcher.tsx)
+ */
 export function NavUser({ me }: { me: Me }) {
   const { t } = useTranslation("shell");
   const { isMobile } = useSidebar();
+  const { theme, setTheme } = useTheme();
   const queryClient = useQueryClient();
   const router = useRouter();
 
@@ -42,14 +83,9 @@ export function NavUser({ me }: { me: Me }) {
               size="lg"
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-accent">
-                <UserRound className="size-4" aria-hidden="true" />
-              </span>
-              <span className="grid flex-1 text-left text-sm leading-snug">
-                <span className="truncate font-medium">{me.user.name}</span>
-                <span className="truncate text-xs text-muted-foreground">{me.user.email}</span>
-              </span>
-              <EllipsisVertical className="ml-auto size-4" aria-hidden="true" />
+              <UserAvatar name={me.user.name} />
+              <UserText me={me} />
+              <ChevronsUpDown className="ml-auto size-4" aria-hidden="true" />
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -58,11 +94,40 @@ export function NavUser({ me }: { me: Me }) {
             align="end"
             sideOffset={4}
           >
-            <DropdownMenuLabel className="grid gap-0.5 font-normal leading-snug">
-              <span className="truncate font-medium">{me.user.name}</span>
-              <span className="truncate text-xs text-muted-foreground">{me.user.email}</span>
-              <span className="text-xs text-muted-foreground">{t(`roles.${me.role}`, { ns: "common" })}</span>
+            <DropdownMenuLabel className="p-0 font-normal">
+              <span className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
+                <UserAvatar name={me.user.name} />
+                <span className="grid flex-1 text-left text-sm leading-tight">
+                  <span className="truncate font-medium">{me.user.name}</span>
+                  <span className="truncate text-xs text-muted-foreground">{me.user.email}</span>
+                  <span className="truncate text-xs text-muted-foreground">
+                    {t(`roles.${me.role}`, { ns: "common" })}
+                  </span>
+                </span>
+              </span>
             </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <Sun className="text-muted-foreground dark:hidden" aria-hidden="true" />
+                <Moon className="hidden text-muted-foreground dark:block" aria-hidden="true" />
+                {t("theme.label")}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                <DropdownMenuRadioGroup
+                  value={theme}
+                  onValueChange={(value) => {
+                    if (isTheme(value)) setTheme(value);
+                  }}
+                >
+                  {THEMES.map((option) => (
+                    <DropdownMenuRadioItem key={option} value={option}>
+                      {t(`theme.${option}`)}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
             <DropdownMenuSeparator />
             <DropdownMenuItem disabled={signOutMutation.isPending} onSelect={() => signOutMutation.mutate()}>
               <LogOut aria-hidden="true" />

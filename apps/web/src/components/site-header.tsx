@@ -1,9 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Store, TriangleAlert } from "lucide-react";
+import { TriangleAlert } from "lucide-react";
 import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
@@ -21,7 +20,7 @@ import { formatInteger, formatMoney } from "@/lib/format";
 import { canSetGoldPrice } from "@/lib/nav";
 import { type Role, goldPriceTodayQueryOptions, useMe } from "@/lib/queries";
 
-/** หัวหน้าของ dashboard-01 — breadcrumb · ราคาทองวันนี้ · สาขาปัจจุบัน */
+/** หัวหน้าของ dashboard-01 — breadcrumb · ราคาทองวันนี้ (สาขาอยู่หัว sidebar · ธีมอยู่เมนูผู้ใช้) */
 export function SiteHeader() {
   const { t } = useTranslation("shell");
   const me = useMe();
@@ -55,12 +54,6 @@ export function SiteHeader() {
           </BreadcrumbList>
         </Breadcrumb>
       </div>
-      <Badge variant="outline" className="h-7 gap-1.5 px-2.5 text-sm font-normal @6xl/header:order-last">
-        <Store aria-hidden="true" />
-        <span className="sr-only">{t("currentBranch")}</span>
-        {me.branch ? me.branch.name : t("noBranch", { ns: "common" })}
-      </Badge>
-      <ThemeToggle />
       <div className="order-last w-full @6xl/header:order-none @6xl/header:w-auto">
         <GoldPriceToday role={me.role} />
       </div>
