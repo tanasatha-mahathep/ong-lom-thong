@@ -144,7 +144,7 @@ export function BillsPage() {
         </Alert>
       )}
       {(list.data || list.isPending) && (
-        <div className="grid gap-3" aria-busy={list.isPlaceholderData}>
+        <div className="grid grid-cols-1 gap-3" aria-busy={list.isPlaceholderData}>
           <DataTable
             columns={columns}
             data={list.data?.items ?? []}

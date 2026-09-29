@@ -170,7 +170,7 @@ function StockResults({ report }: { report: UseQueryResult<StockReport> }) {
   // คอลัมน์ = โลหะตามลำดับของร้านจาก `total` · ช่องของแต่ละสาขาจับคู่ด้วย metal_code (ไม่พึ่งลำดับ)
   const metals = data.total.by_metal;
   return (
-    <section aria-labelledby={titleId} aria-busy={report.isFetching} className="grid gap-3">
+    <section aria-labelledby={titleId} aria-busy={report.isFetching} className="grid grid-cols-1 gap-3">
       <div className="grid gap-1">
         <h2 id={titleId} className="text-lg font-semibold">
           {t("stock.title")}

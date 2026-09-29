@@ -235,7 +235,7 @@ function PurchaseResults({ report }: { report: UseQueryResult<PurchaseReport> })
   }
 
   return (
-    <div aria-busy={report.isFetching} className="grid gap-4 md:gap-6">
+    <div aria-busy={report.isFetching} className="grid grid-cols-1 gap-4 md:gap-6">
       <p className="text-sm text-muted-foreground">
         {t("purchase.period", {
           from: formatThaiDate(data.date_from, "long"),
@@ -243,7 +243,7 @@ function PurchaseResults({ report }: { report: UseQueryResult<PurchaseReport> })
         })}
       </p>
       <PurchaseSummary total={data.total} />
-      <div className="grid items-start gap-4 md:gap-6 xl:grid-cols-2">
+      <div className="grid grid-cols-1 items-start gap-4 md:gap-6 xl:grid-cols-2">
         <ByBranchTable report={data} />
         <ByMetalTable report={data} />
       </div>
@@ -291,7 +291,7 @@ function ByBranchTable({ report }: { report: PurchaseReport }) {
   const { t } = useTranslation("reports");
   const titleId = useId();
   return (
-    <section aria-labelledby={titleId} className="grid gap-3">
+    <section aria-labelledby={titleId} className="grid grid-cols-1 gap-3">
       <SectionTitle id={titleId}>{t("purchase.byBranch.title")}</SectionTitle>
       <TableFrame>
         <Table>
@@ -345,7 +345,7 @@ function ByMetalTable({ report }: { report: PurchaseReport }) {
   const { t } = useTranslation("reports");
   const titleId = useId();
   return (
-    <section aria-labelledby={titleId} className="grid gap-3">
+    <section aria-labelledby={titleId} className="grid grid-cols-1 gap-3">
       <SectionTitle id={titleId}>{t("purchase.byMetal.title")}</SectionTitle>
       <TableFrame>
         <Table>
@@ -469,7 +469,7 @@ function BillRows({ rows }: { rows: PurchaseRow[] }) {
   );
 
   return (
-    <section aria-labelledby={titleId} className="grid gap-3">
+    <section aria-labelledby={titleId} className="grid grid-cols-1 gap-3">
       <SectionTitle id={titleId}>{t("purchase.rows.title")}</SectionTitle>
       <DataTable
         columns={columns}

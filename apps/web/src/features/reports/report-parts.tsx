@@ -170,7 +170,7 @@ export function ReportSkeleton() {
 
 /** กรอบตารางพื้นทึบ (เหมือน DataTable) */
 export function TableFrame({ children }: { children: ReactNode }) {
-  return <div className="overflow-hidden rounded-lg border bg-card">{children}</div>;
+  return <div className="min-w-0 overflow-hidden rounded-lg border bg-card">{children}</div>;
 }
 
 /** ช่องตัวเลข — ชิดขวา ตัวเลขกว้างเท่ากัน */
