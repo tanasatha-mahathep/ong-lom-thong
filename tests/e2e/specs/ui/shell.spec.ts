@@ -21,7 +21,6 @@ interface CspViolation {
  * falls back — harmless, but a script-src violation on every load of the production build (apps/web: set
  * `z.config({ jitless: true })`). Allowed in the journey; `@known-issue` below turns red once it is gone.
  */
-const isZodEvalProbe = (v: CspViolation) => v.directive === "script-src" && v.blocked === "eval";
 
 /**
  * Everything the browser complains about: console errors, uncaught exceptions, failed requests, HTTP ≥ 400 and
@@ -144,32 +143,21 @@ test.describe("SPA in Chromium from the production image — sign in to the firs
     expect(apiCalls.filter((url) => new URL(url).origin !== target.origin)).toEqual([]);
     await page.waitForLoadState("load");
     expect(watch.problems).toEqual([]);
-    expect(watch.csp.filter((v) => !isZodEvalProbe(v))).toEqual([]);
+    expect(watch.csp).toEqual([]);
   });
 
-  test.fail(
-    "the production CSP blocks nothing on the home page",
-    {
-      tag: "@known-issue",
-      annotation: {
-        type: "issue",
-        description:
-          "apps/web (web session): zod v4 probes eval once per page load (util.allowsEval → new Function('')); " +
-          "the CSP refuses it (script-src 'self' via default-src) — a violation on every load. " +
-          "Fix: z.config({ jitless: true }) before any schema parses. Remove test.fail with that change.",
-      },
-    },
-    async ({ page, signedIn }) => {
-      const watch = await watchProblems(page);
-      const staff = await signedIn("staff");
-      await page.context().addCookies((await staff.storageState()).cookies);
-      await page.goto("/");
-      // the price board and the day's totals are parsed with zod schemas by now
-      await expect(page.getByRole("heading", { level: 1, name: "หน้าแรก" })).toBeVisible();
-      await expect(page.getByRole("main").getByRole("heading", { level: 2, name: "ยอดซื้อวันนี้" })).toBeVisible();
-      // one more page task so a queued securitypolicyviolation event has reached the test
-      await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
-      expect(watch.csp).toEqual([]);
-    },
-  );
+  // was a @known-issue: zod v4's eval probe hit the CSP on every load — fixed in apps/web with
+  // z.config({ jitless: true }) (src/lib/zod-config.ts, imported first in main.tsx)
+  test("the production CSP blocks nothing on the home page", async ({ page, signedIn }) => {
+    const watch = await watchProblems(page);
+    const staff = await signedIn("staff");
+    await page.context().addCookies((await staff.storageState()).cookies);
+    await page.goto("/");
+    // the price board and the day's totals are parsed with zod schemas by now
+    await expect(page.getByRole("heading", { level: 1, name: "หน้าแรก" })).toBeVisible();
+    await expect(page.getByRole("main").getByRole("heading", { level: 2, name: "ยอดซื้อวันนี้" })).toBeVisible();
+    // one more page task so a queued securitypolicyviolation event has reached the test
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(watch.csp).toEqual([]);
+  });
 });

@@ -192,7 +192,8 @@ test.describe("buy-in — quote, save, read back, scoped (R1–R5 · R7 · R9 ·
     const res = await staff.post("/api/buy", {
       data: { ...body, payments: [{ method: "cash", amount: "21000" }], idempotency_key: idempotencyKey() },
     });
-    const quoteKeys = ["ok", "errors", "date", "branch", "gold_price_snapshot", "lines"];
+    // the quote now echoes the normalised payments (dev 09e5742)
+    const quoteKeys = ["ok", "errors", "date", "branch", "gold_price_snapshot", "lines", "payments"];
     const error = await expectFieldError(res, 409, "payments", [
       ...quoteKeys,
       "total_weight",
