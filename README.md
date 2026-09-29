@@ -42,18 +42,20 @@ apps/api        Hono — REST · เสิร์ฟ web build ที่ / (origi
 packages/core   @ong/core — ตรรกะเงินทั้งหมด (decimal.js) + เทสต์
 packages/db     Drizzle schema · migrations · plpgsql (sql/functions.sql)
 services/gotenberg  image Gotenberg + ฟอนต์ Sarabun
+services/backup     cron สำรองข้อมูลรายคืน — pg_dump + rclone (bash) + เทสต์
 ```
 
 ## Railway (project `Ong Lom Thong` · region Singapore)
 
 โครงสร้างทั้งหมดอยู่ใน [`.railway/railway.ts`](.railway/railway.ts) (Infrastructure as Code) — วิธีตั้งครั้งแรก · ค่าลับ · ตรวจหลัง deploy: [`.railway/README.md`](.railway/README.md)
 
-| resource  | ที่มา                                       | หมายเหตุ                                                  |
-| --------- | ------------------------------------------- | --------------------------------------------------------- |
-| api       | `apps/api/Dockerfile` (context = root repo) | เสิร์ฟ web + REST · pre-deploy migrate · public domain    |
-| gotenberg | `services/gotenberg`                        | private only · basic auth · `PORT=3000`                   |
-| Postgres  | Railway Postgres 18                         | `DATABASE_URL` reference                                  |
-| files     | Railway Bucket (`sin`)                      | `S3_*` reference · private · ไม่มี versioning/object lock |
-| cron      | ยังไม่ทำ                                    | `pg_dump` + `rclone` → R2/B2 ทุกคืน (ภาคบังคับ)           |
+| resource  | ที่มา                                        | หมายเหตุ                                                                                           |
+| --------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| api       | `apps/api/Dockerfile` (context = root repo)  | เสิร์ฟ web + REST · pre-deploy migrate · public domain                                             |
+| gotenberg | `services/gotenberg`                         | private only · basic auth · `PORT=3000`                                                            |
+| Postgres  | Railway Postgres 18                          | `DATABASE_URL` reference                                                                           |
+| files     | Railway Bucket (`sin`)                       | `S3_*` reference · private · ไม่มี versioning/object lock                                          |
+| cron      | `services/backup` (service `Nightly Backup`) | ทุกคืน 02:17 น. · `pg_dump` + `rclone copy` → bucket `Backup` (Railway) · ยังไม่มีสำเนานอก Railway |
+| Backup    | Railway Bucket (`sin`)                       | `BACKUP_S3_*` reference · private · dump 30 วัน + 12 เดือน · สำเนาไฟล์ไม่ลบ                        |
 
 environment บน Railway ใช้ชื่อเดียวกับ branch (`dev` `testing` `staging` · `production` ← `main`) — ตอนนี้ตั้งแค่ staging + production · Railway รอ CI ผ่านก่อน deploy

@@ -3,12 +3,14 @@
 `railway.ts` คือแหล่งเดียวของโครงสร้างบน Railway (Infrastructure as Code) — ใช้แทน `railway.json` ที่ถูก deprecate
 Railway **ไม่อ่านไฟล์นี้ตอน deploy** · แก้ไฟล์แล้วต้อง `pnpm railway:plan` → `pnpm railway:apply` เอง
 
-| resource          | ชนิด                                                            | หมายเหตุ                                                                                        |
-| ----------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `Office`          | service (Dockerfile `apps/api/Dockerfile`, context = root repo) | เสิร์ฟ web + REST · pre-deploy: migrate (ที่ไม่ใช่ production: + seed) · healthcheck `/healthz` |
-| `PDF (Gotenberg)` | service (root `services/gotenberg`)                             | private เท่านั้น · `PORT=3000` · basic auth · healthcheck `/health`                             |
-| `Postgres`        | database (Postgres 18)                                          | `DATABASE_URL` อ้างจาก api                                                                      |
-| `Media`           | bucket (region `sin`)                                           | private · virtual-hosted style · **ไม่มี versioning/object lock** → สำเนา off-site รายคืน       |
+| resource          | ชนิด                                                            | หมายเหตุ                                                                                                               |
+| ----------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `Office`          | service (Dockerfile `apps/api/Dockerfile`, context = root repo) | เสิร์ฟ web + REST · pre-deploy: migrate (ที่ไม่ใช่ production: + seed) · healthcheck `/healthz`                        |
+| `PDF (Gotenberg)` | service (root `services/gotenberg`)                             | private เท่านั้น · `PORT=3000` · basic auth · healthcheck `/health`                                                    |
+| `Nightly Backup`  | cron service (root `services/backup`)                           | 02:17 น. เวลาไทยทุกคืน · `pg_dump` + `rclone copy` → bucket `Backup` · ไม่มี domain · [ดูด้านล่าง](#สำรองข้อมูลรายคืน) |
+| `Postgres`        | database (Postgres 18)                                          | `DATABASE_URL` อ้างจาก api และ `Nightly Backup`                                                                        |
+| `Media`           | bucket (region `sin`)                                           | private · virtual-hosted style · **ไม่มี versioning/object lock** → สำเนารายคืนไป `Backup`                             |
+| `Backup`          | bucket (region `sin`)                                           | private · dump database + สำเนาไฟล์จาก `Media` · เขียนโดย `Nightly Backup` เท่านั้น                                    |
 
 environment → branch: `dev` → `dev` · `testing` → `testing` · `staging` → `staging` · `production` → `main` · ทุกตัวรอ GitHub Actions ผ่านก่อน (Wait for CI)
 ชื่ออื่นไฟล์จะหยุดทันที · สร้าง environment เฉพาะที่ต้องใช้ (แต่ละตัวมี Postgres/bucket/gotenberg ของตัวเอง = ค่าใช้จ่ายเพิ่ม)
@@ -48,7 +50,7 @@ branch `staging` บน GitHub ต้องมีโค้ดชุดนี้�
    ```bash
    export RAILWAY_SET_GOTENBERG_PASSWORD="$(openssl rand -hex 32)"
    export RAILWAY_SET_BETTER_AUTH_SECRET="$(openssl rand -base64 32)"
-   pnpm railway:plan        # ตรวจ: สร้าง 4 resource · ไม่มีลบ · ดูค่าที่ไม่ลับด้วย --show-values
+   pnpm railway:plan        # ตรวจ: สร้าง 6 resource · ไม่มีลบ · ดูค่าที่ไม่ลับด้วย --show-values
    pnpm railway:apply
    unset RAILWAY_SET_GOTENBERG_PASSWORD RAILWAY_SET_BETTER_AUTH_SECRET
    ```
@@ -69,6 +71,116 @@ curl https://<domain>/healthz
 ```
 
 ดู region ของ Postgres ใน dashboard ด้วย — มีรายงานว่าบางครั้งไม่ตามค่า region ที่ตั้ง
+
+## สำรองข้อมูลรายคืน
+
+service `Nightly Backup` (cron · โค้ด `services/backup/`) รันทุกคืน 02:17 น. เวลาไทย แล้วจบเอง
+
+- cron ของ Railway เป็น **UTC เสมอ** → `17 19 * * *` = 19:17 UTC = 02:17 น. ของวันถัดไปตามเวลาไทย (UTC+7 ไม่มี daylight saving) · แก้ที่ `BACKUP_CRON` ใน `railway.ts`
+- รอบก่อนยังไม่จบ Railway ข้ามรอบนั้น · รันพัง = run นั้นขึ้น failed (restart policy `NEVER` ไม่วนรันซ้ำ)
+- ปลายทาง: bucket `Backup` ของ environment เดียวกัน (Railway สร้าง key ให้เอง — ไม่มีค่าลับให้ตั้ง)
+
+| ส่วน     | ทำอะไร                                                                                                                     | ที่อยู่ใน bucket `Backup`                         |
+| -------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| database | `pg_dump -Fc` (client 18) → ตรวจด้วย `pg_restore --list` → อัปโหลด → เห็นไฟล์ในปลายทางแล้วจึง prune dump เก่า              | `<environment>/postgres/<environment>-<UTC>.dump` |
+| files    | `rclone copy --immutable --metadata` จาก `Media` — **ไม่ใช่ sync**: ไฟล์ที่ถูกลบจาก `Media` ยังอยู่ในสำเนา · ไม่ prune เลย | `<environment>/files/<key เดิม>`                  |
+
+- ชื่อ dump เช่น `production-20260929T191700Z.dump` (เวลา UTC ตอนเริ่ม dump)
+- เก็บ dump: **ทุกไฟล์ของ 30 วันล่าสุดที่มี dump + ไฟล์ล่าสุดของแต่ละเดือน 12 เดือน** (`BACKUP_KEEP_DAILY` / `BACKUP_KEEP_MONTHLY` ใน `railway.ts`) · นับวันที่มีไฟล์ ไม่ใช่อายุ — cron หยุดไปนานของเก่าก็ไม่หาย · ไฟล์ที่ไม่ตรงรูปชื่อไม่ถูกลบ · อัปโหลดไม่สำเร็จ/ยืนยันไม่ได้ = ไม่ prune
+- `--immutable`: ไฟล์ใน `Media` ที่ถูกแก้เนื้อหา (ใบรับซื้อ/สำเนาบัตรห้ามแก้) → run นั้น fail และสำเนาเดิมไม่ถูกเขียนทับ — **ต้องตรวจทันที**
+- database กับ files ทำแยกกัน — ส่วนหนึ่งพัง อีกส่วนยังทำ แล้ว exit ≠ 0 · log บรรทัดท้าย `backup: all done` หรือ `backup: FAILED database=<code> files=<code>`
+
+> **ข้อจำกัด:** bucket `Backup` อยู่ในบัญชี/project Railway เดียวกัน — กันข้อมูลเสีย/ถูกลบในแอป, database พัง และไฟล์ใน `Media` หาย แต่ **ไม่กันกรณีบัญชีหรือ project Railway หาย** · สำเนานอก Railway (R2/B2) เป็นงานเสริมความปลอดภัยในอนาคต — ดู "ต่อสำเนานอก Railway" ด้านล่าง
+
+### ตัวแปร (ประกาศใน `railway.ts` ครบ — ไม่มีค่าที่ต้อง export ตอน apply)
+
+| ตัวแปร                                                                                        | ค่า                                                        |
+| --------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `DATABASE_URL`                                                                                | reference `Postgres`                                       |
+| `BACKUP_ENVIRONMENT`                                                                          | ชื่อ environment (prefix + ชื่อไฟล์)                       |
+| `BACKUP_KEEP_DAILY` · `BACKUP_KEEP_MONTHLY`                                                   | `30` · `12` (daily ≥ 1 · monthly ≥ 0 — ผิดรูป = หยุดทันที) |
+| `S3_ENDPOINT` `S3_REGION` `S3_BUCKET` `S3_ACCESS_KEY` `S3_SECRET_KEY` `S3_FORCE_PATH_STYLE`   | reference bucket `Media` (ต้นทางของไฟล์)                   |
+| `BACKUP_S3_ENDPOINT` `…_REGION` `…_BUCKET` `…_ACCESS_KEY` `…_SECRET_KEY` `…_FORCE_PATH_STYLE` | reference bucket `Backup` (ปลายทาง)                        |
+| `BACKUP_S3_PROVIDER`                                                                          | `Other` (ชื่อ provider ของ rclone s3)                      |
+
+สคริปต์ตั้ง rclone จาก env ล้วน (`RCLONE_CONFIG_*`) — ไม่มี `rclone.conf` · ค่าลับไม่ผ่าน argv · ปลายทางเป็น bucket เดียวกับต้นทาง = ปฏิเสธ
+
+### เปิดใช้ (ครั้งแรก)
+
+1. branch ของ environment นั้นมีโค้ดชุดนี้แล้ว (เช่น promote ถึง `staging`)
+2. `railway link --environment staging` แล้ว `pnpm railway:plan` — ต้องเห็นสร้าง 2 resource (`Backup` bucket · `Nightly Backup` service) **ไม่มีลบ** และ `Office` ไม่มี diff
+3. `pnpm railway:apply` → ตรวจตาม "ตรวจผลการรัน" หลังรอบแรก · ผ่านแล้วค่อยทำ production
+4. production: ทำขั้น 2–3 ด้วย `--environment production` แล้ว **ตรวจว่ามี bucket `Backup` จริง** (dashboard หรือ `railway variable list --service "Nightly Backup" --kv` ต้องเห็น `BACKUP_S3_BUCKET` มีค่า) — IaC สร้าง bucket ใน environment ที่สองไม่ได้ (ดู "production" ด้านล่าง) · แก้แบบเดียวกับ `Media`: API `environmentPatchCommit` ใส่ `buckets.<id ของ Backup> = { region: "sin", isCreated: true }` แล้ว `pnpm railway:plan` ต้อง up to date
+
+### ตรวจผลการรัน
+
+```bash
+railway logs --service "Nightly Backup"   # รอบล่าสุด: "backup: all done" · pg_dump (PostgreSQL) 18.x · "prune: …"
+```
+
+ยังไม่ได้ยืนยันว่า Railway มีปุ่มสั่งรัน cron ทันที — ถ้าไม่มี ให้ตรวจหลังรอบแรก (02:17 น.) · ดูรายการไฟล์ใน bucket ด้วย rclone ตาม "ตั้ง rclone บนเครื่อง" แล้ว
+
+```bash
+rclone lsl "backup:$BACKUP_S3_BUCKET/production/postgres/"   # มี dump ของคืนล่าสุด ขนาดไม่ต่างจากคืนก่อนมาก
+rclone size "backup:$BACKUP_S3_BUCKET/production/files/"     # จำนวนไฟล์ ≥ ใน Media: rclone size "media:$S3_BUCKET"
+```
+
+ทุกเดือนควรซ้อมกู้คืน (ด้านล่าง) อย่างน้อยหนึ่งครั้ง — backup ที่ไม่เคยกู้ = ยังไม่รู้ว่าใช้ได้
+
+### ตั้ง rclone บนเครื่อง (อ่าน bucket `Backup` / `Media`)
+
+ค่าจาก `railway variable list --service "Nightly Backup" --kv` (environment ที่ link อยู่) · ใส่ใน shell เท่านั้น ห้ามเขียนลงไฟล์ใน repo
+
+```bash
+export RCLONE_CONFIG_BACKUP_TYPE=s3 RCLONE_CONFIG_BACKUP_PROVIDER=Other RCLONE_CONFIG_BACKUP_NO_CHECK_BUCKET=true
+export RCLONE_CONFIG_BACKUP_ENDPOINT=<BACKUP_S3_ENDPOINT> RCLONE_CONFIG_BACKUP_REGION=<BACKUP_S3_REGION>
+export RCLONE_CONFIG_BACKUP_ACCESS_KEY_ID=<BACKUP_S3_ACCESS_KEY> RCLONE_CONFIG_BACKUP_SECRET_ACCESS_KEY=<BACKUP_S3_SECRET_KEY>
+export BACKUP_S3_BUCKET=<BACKUP_S3_BUCKET>
+# Media: แบบเดียวกันด้วยชื่อ RCLONE_CONFIG_MEDIA_* จาก S3_* · export S3_BUCKET=<S3_BUCKET>
+```
+
+### กู้คืน database (ซ้อมใน scratch DB — ทดสอบแล้วกับ Postgres 18 + migration จริง: จำนวนแถวทุกตาราง ฟังก์ชัน และ migration ตรงกับต้นทาง)
+
+dump ของ production มี**เลขบัตรประชาชนเต็ม** — ซ้อมบนเครื่องเจ้าของเท่านั้น ลบไฟล์และ database ทิ้งเมื่อเสร็จ · **ห้าม restore ข้อมูล production ลง staging**
+ต้องใช้ `pg_restore` รุ่น 18 (รุ่นเก่ากว่าอ่าน dump ของ 18 ไม่ได้) — ใช้ใน container `postgres` ของ compose
+
+```bash
+rclone lsf "backup:$BACKUP_S3_BUCKET/production/postgres/"                      # เลือกไฟล์
+rclone copyto "backup:$BACKUP_S3_BUCKET/production/postgres/production-<UTC>.dump" ./restore.dump
+make infra-up
+docker compose cp ./restore.dump postgres:/tmp/restore.dump
+docker compose exec -T postgres createdb -U ong restore_check
+docker compose exec -T postgres pg_restore --exit-on-error --no-owner --no-acl -U ong -d restore_check /tmp/restore.dump
+# ตรวจ: migration ล่าสุด + จำนวนบิล/ลูกค้า + บิลล่าสุดตรงกับที่เห็นในระบบ
+docker compose exec -T postgres psql -U ong -d restore_check -c \
+  "select (select count(*) from drizzle.__drizzle_migrations) migrations, (select count(*) from buy_receipt) receipts,
+          (select count(*) from customer) customers, (select max(created_at) from buy_receipt) last_receipt"
+# เสร็จแล้วลบทิ้ง
+docker compose exec -T postgres dropdb -U ong restore_check
+docker compose exec -T postgres rm /tmp/restore.dump && rm ./restore.dump
+```
+
+กู้จริง (database เสีย) — **ยังไม่ได้ซ้อมบน Railway**: หยุดรับบิลก่อน · dump สถานะปัจจุบันเก็บไว้ก่อนเสมอ (แม้จะเสีย) · restore ด้วยคำสั่งเดียวกันโดย `-d` เป็น `DATABASE_PUBLIC_URL` ของ `Postgres` และเพิ่ม `--clean --if-exists --single-transaction` · ตรวจแบบเดียวกับข้างบนก่อนเปิดรับบิล
+
+### กู้คืนไฟล์
+
+`copy` กลับเข้า `Media` — `--immutable` ไม่เขียนทับไฟล์ที่ยังอยู่ · ดู `--dry-run` ก่อนเสมอ (ทดสอบแล้ว: ไฟล์ที่ถูกลบกลับมาครบ sha256 ตรงกับ metadata)
+
+```bash
+rclone copy "backup:$BACKUP_S3_BUCKET/production/files" "media:$S3_BUCKET" --immutable --metadata --dry-run
+rclone copy "backup:$BACKUP_S3_BUCKET/production/files" "media:$S3_BUCKET" --immutable --metadata
+rclone lsjson --metadata "media:$S3_BUCKET/receipts/<สาขา>/<เลขที่>.pdf"   # metadata sha256
+rclone hashsum sha256 --download "media:$S3_BUCKET/receipts/<สาขา>/<เลขที่>.pdf"  # ต้องตรงกัน
+```
+
+### ต่อสำเนานอก Railway (อนาคต)
+
+เปลี่ยนปลายทางได้โดยไม่แก้สคริปต์: ใน `railway.ts` ของ `Nightly Backup` แทน `s3Env("BACKUP_S3_", backupBucket)` ด้วยค่าของ R2/B2 — `BACKUP_S3_PROVIDER` (`Cloudflare` / `Other`) · `BACKUP_S3_ENDPOINT` `_REGION` `_BUCKET` ค่าธรรมดา · `BACKUP_S3_ACCESS_KEY` / `_SECRET_KEY` เป็นค่า sealed แบบ `secret()` (key ของ B2 สั้นกว่า 32 ตัวอักษร — ต้องมี helper ที่ไม่บังคับความยาว) · ใช้ bucket แยกต่อ environment และเปิด object lock/bucket lock (ระยะ ≤ `BACKUP_KEEP_DAILY` วัน ไม่งั้น prune ลบไม่ได้แล้ว run fail) กัน key หลุดแล้วถูกลบ
+
+### ทดสอบบนเครื่อง
+
+- `pnpm test` รวม `services/backup/backup.test.ts` — ชื่อไฟล์ การเลือก dump ที่ลบ และลำดับงานของ `backup.sh` กับคำสั่งปลอมใน PATH (ไม่ต้องมี Postgres/S3)
+- end-to-end: build `services/backup` แล้วรันกับ Postgres 18 + RustFS ของ compose (ตั้ง `S3_*`/`BACKUP_S3_*` ชี้ `http://s3:9000` · `…_FORCE_PATH_STYLE=true` · สร้าง bucket ปลายทางก่อน · ต่อ network ของ compose)
 
 ## บัญชีพนักงาน
 
@@ -108,7 +220,7 @@ export `RAILWAY_SET_*` ค่าใหม่แล้ว `pnpm railway:apply` �
 
 เรื่องที่เจอตอนตั้ง production (แก้แล้ว แต่ต้องรู้ไว้):
 
-- **IaC สร้าง bucket ใน environment ที่สองไม่ได้** — apply ขึ้น ✓ แต่ไม่มี bucket · แก้ด้วย API `environmentPatchCommit` ใส่ `buckets.<bucket id> = { region: "sin", isCreated: true }` แล้ว plan กลับมา up to date
+- **IaC สร้าง bucket ใน environment ที่สองไม่ได้** — apply ขึ้น ✓ แต่ไม่มี bucket · แก้ด้วย API `environmentPatchCommit` ใส่ `buckets.<bucket id> = { region: "sin", isCreated: true }` แล้ว plan กลับมา up to date · **bucket `Backup` เจอแบบเดียวกันได้** ตอน apply ใน production ครั้งแรก — ตรวจทุกครั้ง
 - **Postgres ของ production ใช้ volume ชื่อ `postgres-volume` ซ้ำกับ instance ใน staging ที่ถูกตั้งลบ** (29 ก.ย.) · API แสดงว่าตั้งลบเฉพาะ instance ของ staging แต่เอกสารไม่ยืนยัน → **เจ้าของบัญชีกด restore ในอีเมล "volume deleted" ของ `postgres-volume`** กันไว้ก่อน
 - **ชื่อ service/bucket ผูกกับ IaC** — เปลี่ยนชื่อใน dashboard แล้วต้องแก้ค่าคงที่ใน `railway.ts` (`APP_SERVICE` `PDF_SERVICE` `BUCKET`) ก่อน apply ครั้งถัดไป ไม่งั้น plan จะสร้างใหม่แล้ว **ลบตัวเดิม** · Railway แก้ reference ใน variable ให้เองตอนเปลี่ยนชื่อ
 - **deploy รออนุมัติ (NEEDS_APPROVAL)** — push จากบัญชี GitHub ที่ไม่ผูกกับบัญชี Railway ที่เป็นสมาชิก project (เช่น `danglebz`) Railway จะไม่ deploy เองจนกว่าจะกด Approve · แก้ถาวร: สมัคร/ผูก Railway ด้วย GitHub นั้นแล้วเชิญเข้า workspace · ตอนนี้ promote ด้วยบัญชี GitHub ของเจ้าของ (`tanasatha-mahathep` ผูกกับ Railway แล้ว) จึงไม่ต้องอนุมัติ
