@@ -505,17 +505,15 @@ describe.skipIf(!available)("/api/me — สัญญา API: 401 · สาข�
   // โดยไม่มี preflight) สลับสาขาได้จริง · ด่าน Origin (lib/origin.ts) ยังกันข้ามเว็บอยู่ จึงเป็นชั้นป้องกันซ้อน
   // (ASVS 4.0.3 V13.2.5 · RFC 9110 §15.5.16) — แบบเดียวกับ F12 (/gold-price) และ F15 (/api/buy)
   // แก้: ตอบ 415 เมื่อ content-type ไม่ใช่ application/json · อยู่ท้ายสุดและใช้ session ใหม่ เพราะตอนนี้ request นี้สลับสาขาได้จริง
-  it.fails(
-    "F16 — POST /api/me/branch ที่ Content-Type ไม่ใช่ application/json (text/plain) → 415 · สาขาไม่เปลี่ยน",
-    async () => {
-      const cookie = await t.login("multi@ong.test", PW);
-      const res = await t.app.request("/api/me/branch", {
-        method: "POST",
-        headers: { cookie, origin: appOrigin(), "content-type": "text/plain" },
-        body: JSON.stringify({ branch_id: idOf("00001") }),
-      });
-      await expectApiError(res, 415, "POST /api/me/branch text/plain");
-      expect(await currentCode(cookie)).toBe("00000");
-    },
-  );
+  // เดิมเป็น it.fails — แก้ใน PR #89 (dev 7d8436e) · ตอนนี้ตรึงพฤติกรรมที่ถูกไว้
+  it("F16 — POST /api/me/branch ที่ Content-Type ไม่ใช่ application/json (text/plain) → 415 · สาขาไม่เปลี่ยน", async () => {
+    const cookie = await t.login("multi@ong.test", PW);
+    const res = await t.app.request("/api/me/branch", {
+      method: "POST",
+      headers: { cookie, origin: appOrigin(), "content-type": "text/plain" },
+      body: JSON.stringify({ branch_id: idOf("00001") }),
+    });
+    await expectApiError(res, 415, "POST /api/me/branch text/plain");
+    expect(await currentCode(cookie)).toBe("00000");
+  });
 });

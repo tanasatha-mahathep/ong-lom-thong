@@ -624,16 +624,14 @@ describe.skipIf(!available)("สัญญา API ราคาทอง: สิ�
   // F5 — ยังไม่แก้: routes/goldPrice.ts PUT /today ตอบ BAR_SELL_ERROR (field "bar_sell") ทุกครั้งที่ SetBody ไม่ผ่าน
   // (confirm_typo ผิดชนิดก็ชี้ bar_sell) · PR #60 แก้อีกเรื่อง: 409 ของด่านพิมพ์ผิดชี้ confirm_typo แล้ว (เทสต์ของ dev ข้างบน)
   // แก้: ใช้ path ของ issue แรกจาก zod (body.error.issues[0].path[0]) เป็น field
-  it.fails(
-    "F5 — PUT /today: confirm_typo ที่ไม่ใช่ boolean → 400 ชี้ช่อง confirm_typo (ไม่ใช่ bar_sell) · ไม่เขียนอะไร",
-    async () => {
-      onDay(DAY.guard);
-      const before = await writes();
-      const res = await put(cookies.manager, { bar_sell: "67850", confirm_typo: "yes" });
-      expect((await expectApiError(res, 400, "PUT confirm_typo=yes")).field).toBe("confirm_typo");
-      expect(await writes()).toEqual(before);
-    },
-  );
+  // เดิมเป็น it.fails — แก้ใน PR #89 (dev 7d8436e) · ตอนนี้ตรึงพฤติกรรมที่ถูกไว้
+  it("F5 — PUT /today: confirm_typo ที่ไม่ใช่ boolean → 400 ชี้ช่อง confirm_typo (ไม่ใช่ bar_sell) · ไม่เขียนอะไร", async () => {
+    onDay(DAY.guard);
+    const before = await writes();
+    const res = await put(cookies.manager, { bar_sell: "67850", confirm_typo: "yes" });
+    expect((await expectApiError(res, 400, "PUT confirm_typo=yes")).field).toBe("confirm_typo");
+    expect(await writes()).toEqual(before);
+  });
 
   // F6 — แก้แล้วใน dev (PR #53 · fix(core): strict parseDecimal): เงินที่ผู้ใช้พิมพ์รับเฉพาะตัวเลขล้วน (มีทศนิยมได้) หรือคั่นหลักพัน
   // ถูกต้อง — hex/binary/octal · e-notation · "_" · คอมมาผิดตำแหน่ง · เครื่องหมาย · ช่องว่างกลางตัวเลข ถูกปฏิเสธ
@@ -705,55 +703,53 @@ describe.skipIf(!available)("สัญญา API ราคาทอง: สิ�
   // ทั้งคู่ ตัวที่สองจึงบันทึก "gold_price.create" + before: null (:112-118) ทั้งที่จริงเขียนทับราคาของตัวแรก
   // (R12 · ASVS V7.1.4) · แก้: ล็อกก่อนอ่าน เช่น pg_advisory_xact_lock(hashtext('gold_price:' || date))
   // ต้นทรานแซกชัน หรือ INSERT … ON CONFLICT DO NOTHING ก่อนแล้วค่อย SELECT … FOR UPDATE
-  it.fails(
-    "F11 — PUT ราคาแรกของวันพร้อมกัน 2 ครั้ง: audit ต้องเป็น create 1 แถว + update 1 แถวที่ before = ราคาของครั้งแรก (R12)",
-    async () => {
-      onDay(DAY.race);
-      const waitingOnLocks = async () => {
-        const [row] = await t.db.execute<{ n: number }>(
-          sql`select count(*)::int as n from pg_stat_activity
+  // เดิมเป็น it.fails — แก้ใน PR #89 (dev 7d8436e) · ตอนนี้ตรึงพฤติกรรมที่ถูกไว้
+  it("F11 — PUT ราคาแรกของวันพร้อมกัน 2 ครั้ง: audit ต้องเป็น create 1 แถว + update 1 แถวที่ before = ราคาของครั้งแรก (R12)", async () => {
+    onDay(DAY.race);
+    const waitingOnLocks = async () => {
+      const [row] = await t.db.execute<{ n: number }>(
+        sql`select count(*)::int as n from pg_stat_activity
               where datname = current_database() and backend_type = 'client backend' and wait_event_type = 'Lock'`,
-        );
-        return row?.n ?? 0;
-      };
-      const pending: Promise<Response>[] = [];
-      try {
-        // ถือแถวราคากลางของวันนั้นไว้ในทรานแซกชันที่ยังไม่ commit: PUT ทั้งสองอ่าน before ไม่เจอแล้วไปรอที่ unique index
-        // → rollback ปล่อยให้แข่งกันจริง — ลำดับเหตุการณ์แน่นอนทุกครั้ง ไม่พึ่งจังหวะเครื่อง
-        await t.db
-          .transaction(async (tx) => {
-            await tx.insert(goldPrice).values({ date: DAY.race, barSell: "1", barBuy: "1", jewelryBuy: "1" });
-            for (const [who, barSell] of [
-              ["manager", "67850"],
-              ["admin", "67900"],
-            ] as const) {
-              pending.push(Promise.resolve(put(cookies[who], { bar_sell: barSell })));
-            }
-            await vi.waitFor(async () => expect(await waitingOnLocks()).toBe(2), { timeout: 5_000, interval: 10 });
-            tx.rollback();
-          })
-          .catch((e: unknown) => {
-            if (!(e instanceof TransactionRollbackError)) throw e;
-          });
-      } finally {
-        await Promise.allSettled(pending); // ไม่ทิ้ง request ค้างไว้เบื้องหลังแม้ส่วนบนพัง
-      }
-      expect((await Promise.all(pending)).map((r) => r.status)).toEqual([200, 200]);
-      const rows = await t.db
-        .select()
-        .from(goldPrice)
-        .where(and(isNull(goldPrice.branchId), eq(goldPrice.date, DAY.race)));
-      expect(rows).toHaveLength(1);
-      const audits = await t.db
-        .select()
-        .from(auditLog)
-        .where(eq(auditLog.rowId, rows[0]?.id ?? ""))
-        .orderBy(auditLog.id);
-      expect(audits.map((a) => a.action)).toEqual(["gold_price.create", "gold_price.update"]);
-      const [first, second] = audits.map((a) => a.diff as { before: unknown; after: unknown });
-      expect(second?.before).toEqual(first?.after);
-    },
-  );
+      );
+      return row?.n ?? 0;
+    };
+    const pending: Promise<Response>[] = [];
+    try {
+      // ถือแถวราคากลางของวันนั้นไว้ในทรานแซกชันที่ยังไม่ commit: PUT ทั้งสองอ่าน before ไม่เจอแล้วไปรอที่ unique index
+      // → rollback ปล่อยให้แข่งกันจริง — ลำดับเหตุการณ์แน่นอนทุกครั้ง ไม่พึ่งจังหวะเครื่อง
+      await t.db
+        .transaction(async (tx) => {
+          await tx.insert(goldPrice).values({ date: DAY.race, barSell: "1", barBuy: "1", jewelryBuy: "1" });
+          for (const [who, barSell] of [
+            ["manager", "67850"],
+            ["admin", "67900"],
+          ] as const) {
+            pending.push(Promise.resolve(put(cookies[who], { bar_sell: barSell })));
+          }
+          await vi.waitFor(async () => expect(await waitingOnLocks()).toBe(2), { timeout: 5_000, interval: 10 });
+          tx.rollback();
+        })
+        .catch((e: unknown) => {
+          if (!(e instanceof TransactionRollbackError)) throw e;
+        });
+    } finally {
+      await Promise.allSettled(pending); // ไม่ทิ้ง request ค้างไว้เบื้องหลังแม้ส่วนบนพัง
+    }
+    expect((await Promise.all(pending)).map((r) => r.status)).toEqual([200, 200]);
+    const rows = await t.db
+      .select()
+      .from(goldPrice)
+      .where(and(isNull(goldPrice.branchId), eq(goldPrice.date, DAY.race)));
+    expect(rows).toHaveLength(1);
+    const audits = await t.db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.rowId, rows[0]?.id ?? ""))
+      .orderBy(auditLog.id);
+    expect(audits.map((a) => a.action)).toEqual(["gold_price.create", "gold_price.update"]);
+    const [first, second] = audits.map((a) => a.diff as { before: unknown; after: unknown });
+    expect(second?.before).toEqual(first?.after);
+  });
 
   // F10 — แก้แล้วใน dev (PR #60 · fix(api): cap the gold bar price at 999,999.99): เดิม quote ตอบ 200 แต่ PUT ล้น
   // numeric(14,2) → 500 (preview กับ save ตัดสินต่างกัน · กฎ 2) · ตอนนี้ทั้งคู่ 400 ชี้ bar_sell ด้วยเหตุผลเดียวกัน
@@ -780,7 +776,8 @@ describe.skipIf(!available)("สัญญา API ราคาทอง: สิ�
   // JSON ที่มาเป็น text/plain (ชนิดที่ฟอร์ม HTML ข้ามเว็บส่งได้โดยไม่มี preflight) ถูกรับเหมือน application/json
   // ด่าน Origin (lib/origin.ts) ยังกันข้ามเว็บอยู่ จึงเป็นชั้นป้องกันซ้อน (ASVS 4.0.3 V13.2.5 · V13.1.5 · RFC 9110 §15.5.16)
   // แก้: ตอบ 415 เมื่อ content-type ไม่ใช่ application/json — แบบเดียวกับ routes/customers.ts:38 ที่ตอบ 415 เมื่อไม่ใช่ multipart
-  it.fails("F12 — POST /quote ที่ Content-Type ไม่ใช่ application/json (text/plain) → 415", async () => {
+  // เดิมเป็น it.fails — แก้ใน PR #89 (dev 7d8436e) · ตอนนี้ตรึงพฤติกรรมที่ถูกไว้
+  it("F12 — POST /quote ที่ Content-Type ไม่ใช่ application/json (text/plain) → 415", async () => {
     const body = JSON.stringify({ bar_sell: "67850" });
     const res = await raw("POST", "/api/gold-price/quote", { cookie: cookies.staff, contentType: "text/plain", body });
     await expectApiError(res, 415, "quote text/plain");

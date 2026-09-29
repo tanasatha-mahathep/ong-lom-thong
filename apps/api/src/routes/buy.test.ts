@@ -1684,22 +1684,16 @@ describe.skipIf(!available)("ซื้อเข้า — สัญญาที�
   // ส่งได้โดยไม่มี preflight) ถูกรับเหมือน application/json และบันทึกบิลได้จริง · ด่าน Origin (lib/origin.ts) ยังกันข้ามเว็บอยู่
   // จึงเป็นชั้นป้องกันซ้อน (ASVS 4.0.3 V13.2.5 · RFC 9110 §15.5.16) — แบบเดียวกับ F12 ของ /gold-price
   // แก้: ตอบ 415 เมื่อ content-type ไม่ใช่ application/json (แบบ routes/customers.ts ที่ตอบ 415 เมื่อไม่ใช่ multipart)
-  it.fails(
-    "F15 — /api/buy/quote และ POST /api/buy ที่ Content-Type ไม่ใช่ application/json (text/plain) → 415",
-    async () => {
-      const send = (path: string, body: unknown) =>
-        t.app.request(path, {
-          method: "POST",
-          headers: { cookie: cookies.staff ?? "", origin: "http://localhost:8787", "content-type": "text/plain" },
-          body: JSON.stringify(body),
-        });
-      await expectApiError(await send("/api/buy/quote", bill()), 415, "POST /api/buy/quote text/plain");
-      const key = `buy-gap-${randomUUID()}`;
-      await expectApiError(
-        await send("/api/buy", { ...bill(), idempotency_key: key }),
-        415,
-        "POST /api/buy text/plain",
-      );
-    },
-  );
+  // เดิมเป็น it.fails — แก้ใน PR #89 (dev 7d8436e) · ตอนนี้ตรึงพฤติกรรมที่ถูกไว้
+  it("F15 — /api/buy/quote และ POST /api/buy ที่ Content-Type ไม่ใช่ application/json (text/plain) → 415", async () => {
+    const send = (path: string, body: unknown) =>
+      t.app.request(path, {
+        method: "POST",
+        headers: { cookie: cookies.staff ?? "", origin: "http://localhost:8787", "content-type": "text/plain" },
+        body: JSON.stringify(body),
+      });
+    await expectApiError(await send("/api/buy/quote", bill()), 415, "POST /api/buy/quote text/plain");
+    const key = `buy-gap-${randomUUID()}`;
+    await expectApiError(await send("/api/buy", { ...bill(), idempotency_key: key }), 415, "POST /api/buy text/plain");
+  });
 });
