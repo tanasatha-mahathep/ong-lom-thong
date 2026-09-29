@@ -1,17 +1,9 @@
-import AxeBuilder from "@axe-core/playwright";
-import { type Page, expect, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { expectAccessible } from "./a11y";
 
 // บัญชีทดสอบใน DB local (สร้างด้วย apps/api `create-user`) — ไม่เก็บรหัสผ่านไว้ใน repo
 const email = process.env.E2E_EMAIL ?? "";
 const password = process.env.E2E_PASSWORD ?? "";
-
-/** WCAG 2.2 AA ด้วย axe — แสดงเฉพาะ rule + element ที่ผิดให้อ่านง่าย */
-async function expectAccessible(page: Page) {
-  const { violations } = await new AxeBuilder({ page })
-    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
-    .analyze();
-  expect(violations.map((v) => ({ rule: v.id, nodes: v.nodes.map((n) => n.target.join(" ")) }))).toEqual([]);
-}
 
 // ธีมเริ่มต้น "ตามระบบ" — จำลองเครื่องโหมดสว่าง/มืด แล้วตรวจ axe ทั้งสองธีม
 for (const colorScheme of ["light", "dark"] as const) {

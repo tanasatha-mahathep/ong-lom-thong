@@ -1,0 +1,69 @@
+name: testsprite
+
+# TestSprite = ชั้นเทสต์เสริมแบบ advisory: backend probes รันบน cloud ของ TestSprite (AWS สหรัฐฯ) กับ URL สาธารณะ
+# ไม่ใช่ gate — ไม่อยู่ใน ci.yml โดยตั้งใจ (make promote / Railway ดู ci.yml เท่านั้น) · คู่มือ: tests/testsprite/README.md
+# dormant จนกว่าจะตั้ง repo variable TESTSPRITE_PROJECT_ID → job ขึ้น skipped ไม่ใช่ fail ทุกคืน
+# ปิดชั่วคราว (เช่น ช่วง UAT บน staging): ลบค่า TESTSPRITE_PROJECT_ID
+on:
+  schedule:
+    # 02:37 เวลาไทย (UTC+7) นอกเวลาร้าน · เลี่ยงต้นชั่วโมงที่คิว GitHub แน่น · schedule รันจาก default branch เท่านั้น
+    - cron: "37 19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: testsprite
+  cancel-in-progress: false
+
+jobs:
+  backend:
+    name: backend (advisory)
+    if: github.repository == 'tanasatha-mahathep/ong-lom-thong' && vars.TESTSPRITE_PROJECT_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TESTSPRITE_PROJECT_ID: ${{ vars.TESTSPRITE_PROJECT_ID }}
+      TESTSPRITE_PROJECT_NAME: ${{ vars.TESTSPRITE_PROJECT_NAME }}
+      TESTSPRITE_TARGET_URL: ${{ vars.TESTSPRITE_TARGET_URL }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0 — เวอร์ชัน pnpm จาก packageManager
+      # job นี้ถือ API key ของบริการภายนอก — ไม่ใช้ cache (กัน cache poisoning)
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      # CLI ปักตรงตัว + integrity ใน lockfile · --ignore-scripts: ไม่มี install script ใดรันใน job ที่จะถือ key
+      - run: pnpm install --frozen-lockfile --filter @ong/testsprite --ignore-scripts
+
+      # fail-closed: ไม่มี key · ชื่อ/ชนิด project ไม่ตรง · URL นอก allow-list · โค้ดบน cloud ไม่ตรง repo = หยุด ไม่รัน
+      - name: doctor
+        env:
+          TESTSPRITE_API_KEY: ${{ secrets.TESTSPRITE_API_KEY }}
+        run: pnpm --filter @ong/testsprite run doctor
+
+      # advisory: เทสต์ไม่ผ่านไม่ทำให้ job แดง — ขั้น classify ตัดสินจาก reports/outcome.json
+      - name: run
+        id: run
+        continue-on-error: true
+        env:
+          TESTSPRITE_API_KEY: ${{ secrets.TESTSPRITE_API_KEY }}
+        run: pnpm --filter @ong/testsprite run run
+
+      # passed = เขียว · tests-failed = เขียว + warning · ไม่ได้รันจริง (auth · credits · CLI เก่า · guard · อื่น ๆ) = แดง
+      - name: classify
+        if: always() && steps.run.outcome != 'skipped'
+        run: pnpm --filter @ong/testsprite run classify
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: testsprite-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tests/testsprite/reports/
+          if-no-files-found: ignore
+          # ผลอาจมี response จาก environment เป้าหมาย (ข้อมูลสมมติเท่านั้น) — เก็บสั้นที่สุดที่ยังพอสืบสวน
+          retention-days: 7

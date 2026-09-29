@@ -25,6 +25,13 @@ const SetBody = z.object({ bar_sell: z.string(), confirm_typo: z.boolean().optio
 
 const BAR_SELL_ERROR = apiError("ต้องส่ง bar_sell เป็นข้อความตัวเลข", "bar_sell");
 const BRANCH_ID_ERROR = apiError("branch_id ไม่ถูกต้อง", "branch_id");
+const CONFIRM_TYPO_ERROR = apiError("confirm_typo ต้องเป็นจริงหรือเท็จ", "confirm_typo");
+
+/**
+ * ช่องที่ผิดจริงของ SetBody (F5) — zod คืน issue ของ bar_sell ก่อนเสมอถ้าทั้งคู่ผิด (ลำดับตาม schema)
+ * confirm_typo ผิดชนิด (เช่นส่ง "yes" แทน boolean) ต้องชี้ field "confirm_typo" ไม่ใช่ "bar_sell" ที่จริงแล้วถูก
+ */
+const setBodyError = (e: z.ZodError) => (e.issues[0]?.path[0] === "confirm_typo" ? CONFIRM_TYPO_ERROR : BAR_SELL_ERROR);
 
 const toJson = (p: TodayPrice, diff: string) => ({
   date: p.date,
@@ -100,7 +107,7 @@ export const goldPriceRoutes = new Hono<AppEnv>()
   // ตั้งราคากลางของวัน — manager/admin (spec §10) · ห่างเกินเกณฑ์ต้องยืนยัน (409 ชี้ confirm_typo)
   .put("/today", requireRole("manager", "admin"), async (c) => {
     const body = SetBody.safeParse(await c.req.json().catch(() => null));
-    if (!body.success) return c.json(BAR_SELL_ERROR, 400);
+    if (!body.success) return c.json(setBodyError(body.error), 400);
     const date = businessDate(c.var.now());
     try {
       const q = await quoteGoldPrice(c.var.db, body.data.bar_sell, date);
@@ -122,7 +129,7 @@ export const goldPriceRoutes = new Hono<AppEnv>()
     const target = await writableBranch(c);
     if (!target) return c.json(apiError("not found"), 404);
     const body = SetBody.safeParse(await c.req.json().catch(() => null));
-    if (!body.success) return c.json(BAR_SELL_ERROR, 400);
+    if (!body.success) return c.json(setBodyError(body.error), 400);
     const date = businessDate(c.var.now());
     try {
       const q = await quoteGoldPrice(c.var.db, body.data.bar_sell, date, target.id);

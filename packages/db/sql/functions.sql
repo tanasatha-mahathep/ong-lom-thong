@@ -2,6 +2,8 @@
 
 -- เลขที่เอกสารต่อสาขาต่องวด: INSERT … ON CONFLICT DO UPDATE ล็อกแถวเดียว → ไม่มีวันชนแม้เปิดบิลพร้อมกัน
 -- RC + ปี พ.ศ. 2 หลัก + เดือน + '-' + running 4 หลัก  เช่น RC6910-0001
+-- running ≥ 10000 ไม่ถูกตัด (lpad ของ Postgres ตัดสตริงที่ยาวกว่าความยาวเป้าหมาย) — migration 0005
+-- ตัวฟังก์ชันต้องตรงกับ migration ล่าสุดทุก byte (Postgres เก็บ body ตามตัวอักษร) — คอมเมนต์อยู่นอก $$ เท่านั้น
 CREATE OR REPLACE FUNCTION next_doc_no(p_branch uuid, p_prefix text, p_date date)
 RETURNS text
 LANGUAGE plpgsql
@@ -17,7 +19,6 @@ BEGIN
   ON CONFLICT (branch_id, prefix, period)
   DO UPDATE SET last_no = doc_sequence.last_no + 1
   RETURNING last_no INTO v_no;
-  -- ≥ 10000 ไม่ถูกตัด (lpad ของ Postgres ตัดสตริงที่ยาวกว่าความยาวเป้าหมาย) — migration 0005
   RETURN p_prefix || v_period || '-' || lpad(v_no::text, greatest(4, length(v_no::text)), '0');
 END
 $$;

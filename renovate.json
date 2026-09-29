@@ -20,11 +20,12 @@
       "groupName": "production dependencies (non-major)"
     },
     {
-      "description": "devDependencies minor/patch merge เองเมื่อ CI ผ่าน",
+      "description": "devDependencies minor/patch merge เองเมื่อ CI ผ่าน — รอ release อายุ 3 วันก่อน (กัน release ที่ถูกถอนเพราะมีของแฝง)",
       "matchDepTypes": ["devDependencies"],
       "matchUpdateTypes": ["minor", "patch"],
       "groupName": "dev dependencies (non-major)",
-      "automerge": true
+      "automerge": true,
+      "minimumReleaseAge": "3 days"
     },
     {
       "description": "GitHub Actions merge เองเมื่อ CI ผ่าน (ปักด้วย digest อยู่แล้ว)",
@@ -37,6 +38,37 @@
       "description": "Gotenberg / Node image: ทดสอบ PDF ภาษาไทยกับใบจริงก่อน — ไม่ automerge",
       "matchDatasources": ["docker"],
       "automerge": false
+    },
+    {
+      "description": "e2e (Playwright · axe-core · pdf-lib · unpdf): e2e รันแค่ ring 1 — PR ของ Renovate ต้องสั่ง make ci-full ให้ผ่านก่อน ห้าม automerge",
+      "matchPackageNames": ["@playwright/test", "@axe-core/playwright", "pdf-lib", "unpdf"],
+      "groupName": "e2e tooling",
+      "automerge": false
+    },
+    {
+      "description": "TestSprite CLI: server ตัดเวอร์ชันเก่า (HTTP 426 → exit 14 CLIENT_TOO_OLD) · ออกเกือบทุกสัปดาห์ → PR แยกทันที ไม่ automerge (ci.yml ไม่ได้รัน TestSprite — อ่าน changelog + workflow_dispatch testsprite ก่อน merge)",
+      "matchPackageNames": ["@testsprite/testsprite-cli"],
+      "groupName": "testsprite cli",
+      "schedule": ["at any time"],
+      "automerge": false
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "scanner images ปัก digest ใน scripts/ci (# renovate: datasource=docker depName=…)",
+      "managerFilePatterns": ["/^scripts/ci/[^/]+\\.sh$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>docker) depName=(?<depName>\\S+)\\n\\s*readonly [A-Z0-9_]+=\"[^\"@]+:(?<currentValue>[^\"@]+)@(?<currentDigest>sha256:[a-f0-9]{64})\""
+      ]
+    },
+    {
+      "customType": "regex",
+      "description": "commit ของ semgrep-rules ที่ปักใน scripts/ci/sast.sh",
+      "managerFilePatterns": ["/^scripts/ci/sast\\.sh$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>git-refs) depName=(?<depName>\\S+) currentValue=(?<currentValue>\\S+)\\n\\s*readonly [A-Z0-9_]+=\"(?<currentDigest>[a-f0-9]{40})\""
+      ]
     }
   ]
 }

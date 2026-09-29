@@ -1,5 +1,5 @@
-import AxeBuilder from "@axe-core/playwright";
-import { type APIRequestContext, type Page, expect, test } from "@playwright/test";
+import { type APIRequestContext, expect, test } from "@playwright/test";
+import { expectAccessible } from "./a11y";
 
 // ซื้อเข้าครบวงจรด้วยคีย์บอร์ด: เสียบบัตร (พิมพ์แบบ Siam ID) → 2 รายการ → เต็มจำนวน → Ctrl+Enter → ใบรับซื้อ + พิมพ์
 // ใช้ได้ทั้งเครื่อง local และ staging UAT — ข้อมูลที่สร้างเป็นลูกค้าสมมติ (เลขบัตร checksum ถูก ชื่อมี "ทดสอบ")
@@ -16,15 +16,6 @@ function makeFakeNationalId(): string {
 async function signIn(request: APIRequestContext, baseURL: string, who: { email: string; password: string }) {
   const res = await request.post("/api/auth/sign-in/email", { headers: { origin: baseURL }, data: who });
   expect(res.ok(), `login ${who.email}: HTTP ${res.status()}`).toBeTruthy();
-}
-
-async function expectAccessible(page: Page) {
-  // .ong-watermark: แถบ "STAGING" มุมจอ aria-hidden และขึ้นเฉพาะ staging ไม่ใช่ UI จริงที่ต้องตรวจ a11y
-  const { violations } = await new AxeBuilder({ page })
-    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
-    .exclude(".ong-watermark")
-    .analyze();
-  expect(violations.map((v) => ({ rule: v.id, nodes: v.nodes.map((n) => n.target.join(" ")) }))).toEqual([]);
 }
 
 test("ซื้อเข้าด้วยคีย์บอร์ดจนได้ใบรับซื้อ และพิมพ์อัตโนมัติหนึ่งครั้ง", async ({ page, playwright, baseURL }) => {

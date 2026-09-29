@@ -41,14 +41,6 @@ export function cleanQuery(text: string): string {
   return text.replace(UNUSABLE_CHARS, "").trim();
 }
 
-/**
- * เลขบัตรประชาชนเต็ม 13 หลัก (ไม่ตรวจ checksum — พิมพ์ผิดก็ยังเป็นรูปเลขบัตร ไม่ควรลง URL เหมือนกัน)
- * คำค้นแบบนี้ค้นได้ตามปกติแต่ไม่ส่งเข้า URL (ประวัติเบราว์เซอร์/ลิงก์ที่แชร์ไม่ควรมีเลขบัตรเต็ม)
- */
-export function looksLikeNationalId(q: string): boolean {
-  return /^\d{13}$/.test(q);
-}
-
 /** search ของหน้า → ตัวกรองของ API · หน้า 1 ไม่ใส่ page (key เดียวกับการ์ดบนหน้าแรก) */
 export function toListParams(search: BillsSearch): BuyListParams {
   const params: BuyListParams = {};

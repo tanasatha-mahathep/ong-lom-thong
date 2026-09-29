@@ -1,0 +1,35 @@
+# Project rules (scripts/ci/sast.sh). Test: semgrep --test .semgrep/rules (fixture = same name, .js).
+rules:
+  - id: ong-national-id-in-log
+    languages: [typescript, javascript]
+    severity: WARNING
+    message: >-
+      A Thai national ID number appears to be written to the log. Logs leave the database's access
+      control (Railway log drain, screenshots, support tickets), so this is personal data exposure under
+      PDPA (CLAUDE.md rule 7: mask the ID everywhere except the customer page and the PDF). Log the
+      customer id, or maskNationalId() from @ong/core, instead.
+    metadata:
+      category: security
+      subcategory: [audit]
+      technology: [pdpa]
+      cwe:
+        - "CWE-532: Insertion of Sensitive Information into Log File"
+      owasp:
+        - A09:2021 - Security Logging and Monitoring Failures
+        - A09:2025 - Security Logging and Alerting Failures
+      confidence: MEDIUM
+      likelihood: MEDIUM
+      impact: MEDIUM
+      references:
+        - https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html#data-to-exclude
+    patterns:
+      - pattern-inside: console.$METHOD(...)
+      - pattern-either:
+          - pattern: $OBJ.$FIELD
+          - pattern: $FIELD
+      - metavariable-regex:
+          metavariable: $FIELD
+          regex: (?i)^(national_?id|citizen_?id|id_?card_?(no|number))$
+      # the masked form (packages/core maskNationalId) is fine to log
+      - pattern-not-inside: maskNationalId(...)
+      - pattern-not-inside: $CORE.maskNationalId(...)

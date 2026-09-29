@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Me } from "@/lib/queries";
@@ -9,14 +9,18 @@ import { BILL, VOID_BILL, buyList, listRequests } from "./test-data";
 
 type ListHandler = Parameters<typeof fakeApi>[0][string];
 
-function openBills({ me = makeMe("staff"), list }: { me?: Me; list?: ListHandler } = {}) {
+function openBills({
+  me = makeMe("staff"),
+  list,
+  path = "/bills",
+}: { me?: Me; list?: ListHandler; path?: string } = {}) {
   const api = fakeApi({
     "GET /api/me": () => json(me),
     "GET /api/metals": () => json(METALS),
     "GET /api/buy": list ?? (() => buyList([BILL, VOID_BILL])),
   });
   const user = userEvent.setup();
-  const router = renderApp("/bills");
+  const router = renderApp(path);
   return { api, user, router };
 }
 
@@ -167,6 +171,180 @@ describe("หน้าค้นบิล — ช่องค้นหา", { tim
     await user.type(searchBox(), "สมชาย{Enter}");
     await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: "สมชาย" }));
     expect(router.state.location.search).toEqual({ q: "สมชาย" });
+  });
+
+  it.each([
+    ["จัดกลุ่มแบบหน้าบัตร", "1 1037 00123 45 8"],
+    ["ขีดคั่น", "1-1037-00123-45-8"],
+    ["12 หลัก", "110370012345"],
+    ["ตามด้วยชื่อ", "1103700123458 สมชาย"],
+  ])("เลขบัตรแบบ%s: ค้นได้แต่ไม่ลงใน URL", async (_name, typed) => {
+    const { api, user, router } = openBills();
+    await waitForRows();
+
+    await user.type(searchBox(), `${typed}{Enter}`);
+
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: typed }));
+    expect(router.state.location.search).toEqual({});
+    expect(searchBox()).toHaveValue(typed);
+  });
+
+  it.each([
+    ["ติดกัน", "11037001234", "58"],
+    ["จัดกลุ่มแบบหน้าบัตร", "1 1037 00123 4", "5 8"],
+  ])("พิมพ์เลขบัตรไม่ครบจนลง URL แล้วพิมพ์ต่อจนครบ (%s): ส่วนที่ค้างใน URL ถูกล้าง", async (_name, partial, rest) => {
+    const { api, user, router } = openBills();
+    await waitForRows();
+
+    // 11 หลัก: ยังไม่ถือเป็นเลขบัตร จึงลง URL หลังหน่วงเวลาตามปกติ
+    await user.type(searchBox(), partial);
+    await waitFor(() => expect(router.state.location.search).toEqual({ q: partial }));
+
+    // หยุดพักแล้วพิมพ์ต่อจนครบ — เลขที่พิมพ์ไปแล้วต้องไม่ค้างใน URL (รีโหลด/แชร์/redirect หลัง 401 จะพาไปด้วย)
+    await user.type(searchBox(), rest);
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: `${partial}${rest}` }));
+    expect(router.state.location.search).toEqual({});
+    expect(searchBox()).toHaveValue(`${partial}${rest}`);
+    await pastDebounce();
+    expect(router.state.location.search).toEqual({});
+  });
+
+  it("ตัวกรองอื่นหลังค้นด้วยเลขบัตร: เลขบัตรยังใช้อยู่ · มีแต่คำค้นปกติที่ทับ", async () => {
+    const { api, user, router } = openBills();
+    await waitForRows();
+    await user.type(searchBox(), "1103700123458{Enter}");
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: "1103700123458" }));
+
+    // โลหะ · ช่วงวันที่สำเร็จรูป: ต้องไปพร้อมเลขบัตร ไม่ใช่ตกไปเป็นผลของลูกค้าทุกคนขณะที่ช่องยังโชว์เลขบัตร
+    await screen.findByRole("option", { name: "ทอง" });
+    await user.selectOptions(screen.getByRole("combobox", { name: t("filters.metal") }), "ทอง");
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: "1103700123458", metal: "gold" }));
+    expect(router.state.location.search).toEqual({ metal: "gold" });
+    expect(searchBox()).toHaveValue("1103700123458");
+
+    await user.click(screen.getByRole("button", { name: t("presets.allDates") }));
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: "1103700123458", metal: "gold" }));
+    expect(router.state.location.search).toEqual({ metal: "gold" });
+
+    // คำค้นปกติทับเลขบัตร (โลหะที่เลือกไว้อยู่ต่อ)
+    await user.clear(searchBox());
+    await user.type(searchBox(), "สมชาย{Enter}");
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: "สมชาย", metal: "gold" }));
+    expect(router.state.location.search).toEqual({ q: "สมชาย", metal: "gold" });
+  });
+
+  it("ล้างตัวกรองล้างเลขบัตรที่ค้างในหน้านี้ด้วย", async () => {
+    const { user, router } = openBills({
+      list: ({ path }) => (path.includes("q=") ? buyList([BILL]) : buyList([BILL, VOID_BILL])),
+    });
+    await waitForRows();
+    await user.type(searchBox(), "1103700123458{Enter}");
+    await waitFor(() => expect(screen.queryByRole("link", { name: VOID_BILL.doc_no })).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: t("filters.clear") }));
+
+    expect(await screen.findByRole("link", { name: VOID_BILL.doc_no })).toBeInTheDocument();
+    expect(searchBox()).toHaveValue("");
+    expect(router.state.location.search).toEqual({});
+  });
+
+  it.each([
+    ["13 หลักติดกัน", "1103700123458", "?q=1103700123458"],
+    ["จัดกลุ่มแบบหน้าบัตร", "1 1037 00123 45 8", "?q=1%201037%2000123%2045%208"],
+  ])("ลิงก์เก่าที่มีเลขบัตรใน ?q= (%s): ค้นตามนั้น แต่แทนที่ URL ด้วยฉบับที่ไม่มีเลขบัตร", async (_name, id, query) => {
+    const { api, router } = openBills({ path: `/bills${query}&metal=gold` });
+
+    await waitFor(() => expect(router.state.location.search).toEqual({ metal: "gold" }));
+    await waitForRows();
+    // แทนที่ entry เดิม ไม่ใช่เพิ่ม entry — ปุ่มย้อนกลับไม่พากลับไปหน้าที่มีเลขบัตร
+    expect(router.history.length).toBe(1);
+    expect(router.state.location.href).toBe("/bills?metal=gold");
+    expect(searchBox()).toHaveValue(id);
+    // ค้นด้วยเลขบัตรตั้งแต่แรก · แทนที่ URL แล้วคำขอเดิมยังใช้ต่อ (ไม่ถามซ้ำ ไม่หลุดไปเป็นผลของทุกลูกค้า)
+    expect(listRequests(api)).toEqual([{ q: id, metal: "gold" }]);
+  });
+
+  it("URL ได้เลขบัตรระหว่างอยู่หน้าค้นบิล (ลิงก์ · ประวัติ): ค้นตามนั้นและล้างเลขออกจาก URL", async () => {
+    const { api, router } = openBills({ path: "/bills?q=somchai" });
+    await waitForRows();
+
+    await act(() => router.navigate({ to: "/bills", search: { q: "1103700123458" } }));
+
+    await waitFor(() => expect(router.state.location.search).toEqual({}));
+    await waitFor(() => expect(searchBox()).toHaveValue("1103700123458"));
+    expect(router.state.location.href).toBe("/bills");
+    expect(listRequests(api).at(-1)).toEqual({ q: "1103700123458" });
+  });
+
+  it("ปุ่มย้อนกลับ: URL กลับมามีคำค้นของตัวเอง — ช่องและผลตาม URL ไม่ค้างเป็นเลขบัตร", async () => {
+    const { user, router } = openBills({
+      path: "/bills?q=somchai",
+      list: ({ path }) => (path.includes("q=1103700123458") ? buyList([VOID_BILL]) : buyList([BILL])),
+    });
+    await waitForRows();
+    expect(searchBox()).toHaveValue("somchai");
+
+    // กดเมนู "ค้นบิล" (หน้าใหม่ ไม่มีคำค้น) แล้วค้นด้วยเลขบัตร — ผลเป็นของเลขบัตร
+    const menu = await screen.findByRole("navigation", { name: "เมนูหลัก" });
+    await user.click(within(menu).getByRole("link", { name: "ค้นบิล" }));
+    await waitFor(() => expect(searchBox()).toHaveValue(""));
+    await user.type(searchBox(), "1103700123458{Enter}");
+    expect(await screen.findByRole("link", { name: VOID_BILL.doc_no })).toBeInTheDocument();
+    expect(router.state.location.search).toEqual({});
+
+    act(() => router.history.back());
+
+    await waitFor(() => expect(router.state.location.search).toEqual({ q: "somchai" }));
+    await waitFor(() => expect(searchBox()).toHaveValue("somchai"));
+    expect(await screen.findByRole("link", { name: BILL.doc_no })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: VOID_BILL.doc_no })).not.toBeInTheDocument();
+  });
+
+  it("ค้นด้วยเลขบัตรจากหน้า 3: ขอหน้า 1 เลย ไม่ยิง “เลขบัตร + หน้า 3” ก่อน", async () => {
+    const { api, user, router } = openBills({ path: "/bills?page=3", list: () => buyList([BILL], { page: 3 }) });
+    await waitForRows();
+    expect(listRequests(api)).toEqual([{ page: "3" }]);
+
+    await user.type(searchBox(), "1103700123458{Enter}");
+
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: "1103700123458" }));
+    expect(listRequests(api)).toEqual([{ page: "3" }, { q: "1103700123458" }]);
+    expect(router.state.location.search).toEqual({});
+  });
+
+  it("เปลี่ยนหน้าผลค้นด้วยเลขบัตร: เลขบัตรอยู่ต่อ · เปลี่ยนตัวกรองแล้วกลับหน้า 1 โดยไม่ยิงคำขอหน้าเก่า", async () => {
+    const { api, user, router } = openBills({
+      list: ({ path }) =>
+        path.includes("page=2") ? buyList([VOID_BILL], { page: 2 }) : buyList([BILL], { has_more: true }),
+    });
+    await waitForRows();
+    await user.type(searchBox(), "1103700123458{Enter}");
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: "1103700123458" }));
+
+    await user.click(screen.getByRole("button", { name: "ถัดไป" }));
+    expect(await screen.findByRole("link", { name: VOID_BILL.doc_no })).toBeInTheDocument();
+    expect(listRequests(api).at(-1)).toEqual({ q: "1103700123458", page: "2" });
+    expect(router.state.location.search).toEqual({ page: 2 });
+    expect(searchBox()).toHaveValue("1103700123458");
+
+    await screen.findByRole("option", { name: "ทอง" });
+    await user.selectOptions(screen.getByRole("combobox", { name: t("filters.metal") }), "ทอง");
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ q: "1103700123458", metal: "gold" }));
+    expect(listRequests(api)).not.toContainEqual({ q: "1103700123458", metal: "gold", page: "2" });
+    expect(router.state.location.search).toEqual({ metal: "gold" });
+    expect(searchBox()).toHaveValue("1103700123458");
+  });
+
+  it("เบอร์โทร 10 หลักและเลขที่บิลไม่ใช่เลขบัตร: ลงใน URL ตามเดิม", async () => {
+    const { user, router } = openBills();
+    await waitForRows();
+
+    await user.type(searchBox(), "0812345678{Enter}");
+    await waitFor(() => expect(router.state.location.search).toEqual({ q: "0812345678" }));
+
+    await user.clear(searchBox());
+    await user.type(searchBox(), "RC6910-0001{Enter}");
+    await waitFor(() => expect(router.state.location.search).toEqual({ q: "RC6910-0001" }));
   });
 
   it("400 ที่ชี้ช่องคำค้น แสดงใต้ช่องนั้น ไม่ใช่กล่องแจ้งรวม", async () => {

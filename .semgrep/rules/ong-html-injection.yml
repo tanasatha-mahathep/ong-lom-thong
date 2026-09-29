@@ -1,0 +1,39 @@
+# Project rules (scripts/ci/sast.sh). Test: semgrep --test .semgrep/rules (fixture = same name, .js).
+rules:
+  - id: ong-hono-unescaped-html
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: >-
+      HTML built without escaping: raw() from hono/html, or a plain template literal / concatenation
+      passed to c.html(). Data such as customer names and addresses then becomes markup — XSS in the
+      browser, and in PDF templates rendered by Gotenberg (Chromium) a way to forge a tax document or
+      make Chromium fetch internal URLs. Use the html`…` tag from hono/html (escapes values) or JSX.
+    metadata:
+      category: security
+      subcategory: [vuln]
+      technology: [hono, gotenberg]
+      cwe:
+        - "CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"
+      owasp:
+        - A03:2021 - Injection
+        - A05:2025 - Injection
+      confidence: HIGH
+      likelihood: MEDIUM
+      impact: HIGH
+      references:
+        - https://hono.dev/docs/helpers/html
+        - https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern-inside: |
+                  import { raw } from "hono/html";
+                  ...
+              - pattern-inside: |
+                  import { raw } from "hono/utils/html";
+                  ...
+          - pattern: raw($HTML)
+          - pattern-not: raw("...")
+      - pattern: $C.html(`...${$X}...`, ...)
+      - pattern: $C.html("..." + $X, ...)
+      - pattern: $C.html($X + "...", ...)
