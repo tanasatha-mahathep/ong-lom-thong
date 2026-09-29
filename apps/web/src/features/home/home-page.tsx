@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TodayBillsCard } from "@/features/bills/TodayBillsCard";
+import { ReferencePricePanel } from "@/features/gold-price/reference-price";
 import { useBusinessDate } from "@/hooks/use-business-date";
 import { formatBoardPrice, formatInteger, formatMoney, formatThaiDate, formatWeight } from "@/lib/format";
 import { canCreateBill, canSetGoldPrice } from "@/lib/nav";
@@ -34,7 +35,10 @@ export function HomePage() {
   );
 }
 
-/** ราคาของสาขาปัจจุบัน 3 ค่า (R8) แบบกระดานราคาของระบบเดิม — ยังไม่ตั้ง = แจ้งตาม role (R7) */
+/**
+ * ราคาของสาขาปัจจุบัน 3 ค่า (R8) แบบกระดานราคาของระบบเดิม — ยังไม่ตั้ง = แจ้งตาม role (R7)
+ * ใต้กระดาน: ราคาสมาคม (อ้างอิง) แยกกรอบ — อ่านอย่างเดียว
+ */
 function PriceBoard({ role }: { role: Role }) {
   const { t } = useTranslation("home");
   const titleId = useId();
@@ -68,6 +72,8 @@ function PriceBoard({ role }: { role: Role }) {
       ) : (
         <NoPriceAlert role={role} />
       )}
+      {/* ราคาสมาคม (อ้างอิง) — แยกจากกระดานราคาของร้านข้างบน · ไม่ใช่ราคาที่ใช้เปิดบิล */}
+      <ReferencePricePanel />
     </section>
   );
 }

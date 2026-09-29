@@ -216,15 +216,24 @@ jobs:
           'pg_dump --version && pg_restore --version && rclone version | head -1 && command -v timeout awk'
 
   # ring 1 — image ที่ Railway build: build ครั้งเดียว → smoke → SBOM → Trivy gate → ส่ง bytes เดียวกันให้ e2e
+  #          + Gotenberg: build → SBOM → Trivy gate (CRITICAL ที่มี fix) · ผ่านทั้งคู่แล้วเท่านั้น → push ghcr.io
+  #          (tag = commit SHA + branch) → attest SLSA provenance + SBOM ลง registry — make verify-image REF=<sha>
   image:
     needs: [check, scan, db-verify]
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && contains(fromJSON('["refs/heads/testing", "refs/heads/staging", "refs/heads/main"]'), github.ref))
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45 # api + Gotenberg (~1.7 GB) build · scan · push
+    # สิทธิ์เขียนเฉพาะ job นี้ · ไม่มี cache (skill ci-pipeline กฎ 3) · token ใช้เฉพาะ step push/attest
+    permissions:
+      contents: read
+      packages: write # push ghcr.io/<repo>/{api,gotenberg}
+      id-token: write # OIDC → Sigstore signing certificate ของ attestation
+      attestations: write # เก็บ attestation ใน GitHub
     env:
       IMAGE: ong-api:ci
+      GOTENBERG_IMAGE: ong-gotenberg:ci
       # docker:// step รันโดยมี workspace เป็น cwd — DB ของ Trivy โหลดครั้งเดียวแล้วใช้ซ้ำทุก step
       TRIVY_CACHE_DIR: .trivy-cache
       TRIVY_NO_PROGRESS: "true"
@@ -274,7 +283,7 @@ jobs:
           args: image --input api-image.tar --scanners vuln,secret --format json --output trivy-report.json
       - name: vulnerability summary
         run: |
-          jq -r '"### Trivy — every finding in the api image (before .trivyignore.yaml)", "",
+          jq -r '"### Trivy — every finding in the api image", "",
             "| Severity | Findings | Fix available |", "| --- | --: | --: |",
             ([.Results[] | (.Vulnerabilities // [])[]] | group_by(.Severity)[]
             | "| \(.[0].Severity) | \(length) | \(map(select((.FixedVersion // "") != "")) | length) |")' \
@@ -284,7 +293,15 @@ jobs:
         with:
           args: >-
             image --input api-image.tar --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed
-            --ignorefile .trivyignore.yaml --show-suppressed --table-mode detailed --exit-code 1
+            --table-mode detailed --exit-code 1
+      # Gotenberg ตัวเดียวกับ Railway (services/gotenberg/Dockerfile) — SBOM + รายงานเต็ม + gate: CRITICAL ที่มี fix
+      # HIGH รายงานใน step summary ไม่ fail (Chromium แก้ได้จาก release ของ upstream เท่านั้น — docs/proposals/…)
+      - name: gotenberg image — build · SBOM · trivy gate
+        env:
+          IMAGE: ${{ env.GOTENBERG_IMAGE }}
+          # สคริปต์รัน Trivy ด้วย uid ของ runner — .trivy-cache ของ step docker:// ข้างบนเป็นของ root เขียนไม่ได้
+          TRIVY_CACHE_DIR: ${{ runner.temp }}/trivy-cache
+        run: scripts/ci/gotenberg-scan.sh
       - name: keep the evidence (SBOM + full report)
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -293,8 +310,57 @@ jobs:
           path: |
             sbom.cdx.json
             trivy-report.json
+            ${{ runner.temp }}/ong-sec/gotenberg/sbom.cdx.json
+            ${{ runner.temp }}/ong-sec/gotenberg/trivy-report.json
+            ${{ runner.temp }}/ong-sec/gotenberg/gate.txt
           if-no-files-found: ignore
           retention-days: 14
+      # ถึงตรงนี้ = smoke + Trivy ของทั้งสอง image ผ่านแล้ว → push bytes ที่ตรวจแล้ว (ไม่ build ใหม่) แล้วเซ็นที่ digest
+      # Railway ควร deploy ด้วย digest นี้หลัง ci.yml เขียวทั้ง run (docs/proposals/railway-deploy-attested-image.md)
+      - name: push the api image (tags = commit SHA + branch)
+        id: push-api
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: scripts/ci/push-image.sh "$IMAGE" api
+      - name: push the gotenberg image (tags = commit SHA + branch)
+        id: push-gotenberg
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.ref_name }}
+        run: scripts/ci/push-image.sh "$GOTENBERG_IMAGE" gotenberg
+      # actions/attest คือตัวที่ attest-build-provenance / attest-sbom (deprecated) ห่ออยู่ — ไม่มี sbom-path = SLSA provenance
+      # create-storage-record: false — storage record ใช้ได้เฉพาะ repo ขององค์กร (repo นี้เป็นบัญชีผู้ใช้)
+      - name: attest provenance — api
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-name: ${{ steps.push-api.outputs.name }}
+          subject-digest: ${{ steps.push-api.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+      - name: attest SBOM — api
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-name: ${{ steps.push-api.outputs.name }}
+          subject-digest: ${{ steps.push-api.outputs.digest }}
+          sbom-path: sbom.cdx.json
+          push-to-registry: true
+          create-storage-record: false
+      - name: attest provenance — gotenberg
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-name: ${{ steps.push-gotenberg.outputs.name }}
+          subject-digest: ${{ steps.push-gotenberg.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+      - name: attest SBOM — gotenberg
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-name: ${{ steps.push-gotenberg.outputs.name }}
+          subject-digest: ${{ steps.push-gotenberg.outputs.digest }}
+          sbom-path: ${{ runner.temp }}/ong-sec/gotenberg/sbom.cdx.json
+          push-to-registry: true
+          create-storage-record: false
       - name: hand the image to e2e
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -393,11 +459,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency: release
+    # ruleset ของ dev/testing/staging/main บล็อก push ตรงทุกทาง — bypass ได้เฉพาะ deploy key (secret RELEASE_DEPLOY_KEY)
+    # repo ของบัญชีส่วนตัวใส่ GitHub Actions เป็น bypass ไม่ได้ → git push ทุกครั้งใน job นี้ไปทาง SSH + deploy key
+    # GITHUB_TOKEN เหลือไว้แค่ API: GitHub Release + คอมเมนต์ใน issue/PR
     permissions:
-      contents: write # tag + GitHub Release + commit CHANGELOG.md + sync branches
-      actions: write # สั่ง ci บน branch ที่ sync แล้ว
+      contents: write # สร้าง GitHub Release ผ่าน API
       issues: write # คอมเมนต์ใน issue ที่ถูกปิดโดย release
-      pull-requests: write
+      pull-requests: write # คอมเมนต์ใน PR ที่อยู่ใน release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -410,20 +478,33 @@ jobs:
           node-version-file: .node-version
           package-manager-cache: false
       - run: pnpm install --frozen-lockfile
+      # deploy key ลงไฟล์ 0600 ใน RUNNER_TEMP (ไม่เขียนลง .git/config) · host key ของ GitHub จาก api.github.com/meta (TLS)
+      - name: deploy key for release pushes
+        env:
+          RELEASE_DEPLOY_KEY: ${{ secrets.RELEASE_DEPLOY_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -n "$RELEASE_DEPLOY_KEY" ] || { echo "::error::secret RELEASE_DEPLOY_KEY ไม่ได้ตั้ง — ruleset จะปฏิเสธ push ของ release"; exit 1; }
+          umask 077
+          printf '%s\n' "$RELEASE_DEPLOY_KEY" > "$RUNNER_TEMP/release_key"
+          gh api meta --jq '.ssh_keys[] | "github.com " + .' > "$RUNNER_TEMP/known_hosts"
+          [ -s "$RUNNER_TEMP/known_hosts" ]
+      # .releaserc.json ชี้ repositoryUrl เป็น SSH → commit CHANGELOG.md + tag push ด้วย deploy key
       - run: pnpm exec semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_SSH_COMMAND: ssh -i ${{ runner.temp }}/release_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${{ runner.temp }}/known_hosts
 
       # release commit (CHANGELOG.md) อยู่บน main แล้ว — ไล่ตามลำดับ promotion: staging ← main · testing ← staging · dev ← testing
       # merge --no-ff เสมอ (ข้ามถ้า merge เข้าไปแล้ว) → ได้ merge commit เป็นขั้น ๆ ไม่ fast-forward
-      # push ด้วย GITHUB_TOKEN ไม่ trigger ci → สั่ง ci เองบน branch ที่ขยับ
+      # push ด้วย deploy key trigger ci บน branch ที่ขยับเอง (ต่างจาก GITHUB_TOKEN) — ไม่ต้องสั่ง ci ซ้ำ
       - name: sync branches with main
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_SSH_COMMAND: ssh -i ${{ runner.temp }}/release_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${{ runner.temp }}/known_hosts
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          remote="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          remote="git@github.com:${GITHUB_REPOSITORY}.git"
           git fetch -q "$remote" "+refs/heads/*:refs/remotes/origin/*"
           upstream=origin/main
           for branch in staging testing dev; do
@@ -437,7 +518,9 @@ jobs:
             else
               git merge --no-ff --no-edit "$upstream"
               git push "$remote" "HEAD:$branch"
-              gh workflow run ci.yml --ref "$branch"
             fi
             upstream=$branch
           done
+      - name: remove the deploy key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release_key"

@@ -24,7 +24,7 @@ function NewCustomerPage() {
 
   return (
     <>
-      <PageHeader description={from === "buy" ? t("create.fromBuy") : undefined} />
+      <PageHeader back="/customers" description={from === "buy" ? t("create.fromBuy") : undefined} />
       <CustomerForm
         mode="create"
         autoFocus

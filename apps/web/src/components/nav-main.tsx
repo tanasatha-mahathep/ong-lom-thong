@@ -1,5 +1,4 @@
-import { Link, useMatchRoute } from "@tanstack/react-router";
-import { CirclePlus } from "lucide-react";
+import { Link, useRouterState } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import {
   SidebarGroup,
@@ -9,54 +8,47 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { canCreateBill, navFor } from "@/lib/nav";
+import { activeNavPath, navFor } from "@/lib/nav";
 import type { Role } from "@/lib/queries";
 
-/** เมนูหลักตาม role (spec §10) — ปุ่ม "ซื้อเข้า" อยู่ตำแหน่ง Quick Create ของ dashboard-01 */
+/**
+ * เมนูที่เลือกอยู่แบบ sidebar ของ Next.js docs — พื้นนุ่ม ๆ มุมมนเต็มแถว + ตัวอักษรเข้มขึ้นเล็กน้อย (น้ำหนักเท่าเดิม ไม่มีแถบซ้าย)
+ * hover ของเมนูอื่นอ่อนกว่า (60%) — แยกออกจากเมนูที่เลือกได้ · แถบไอคอนตอนย่อได้พื้นสี่เหลี่ยมเดียวกัน
+ */
+const ITEM =
+  "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 data-[active=true]:bg-sidebar-accent data-[active=true]:font-normal data-[active=true]:text-sidebar-accent-foreground data-[active=true]:hover:bg-sidebar-accent";
+
+/**
+ * เมนูหลักตาม role (spec §10) — ทุกเมนูมีไอคอน + tooltip (แถบไอคอนตอนย่อ sidebar แบบ sidebar-07)
+ * ชื่อกลุ่มซ่อนเองตอนย่อ · เลือกอยู่ได้ทีละเมนู (activeNavPath: หน้าลูกเป็นของเมนูแม่ · /buy/$id = ค้นบิล)
+ */
 export function NavMain({ role }: { role: Role }) {
   const { t } = useTranslation("shell");
-  const matchRoute = useMatchRoute();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const active = activeNavPath(pathname, role);
 
   return (
     <nav aria-label={t("mainNav")} className="flex flex-col gap-2">
-      {canCreateBill(role) && (
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  className="h-9 bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground"
-                >
-                  <Link to="/buy">
-                    <CirclePlus aria-hidden="true" />
-                    <span>{t("quickBuy")}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      )}
       {navFor(role).map((group) => (
         <SidebarGroup key={group.title ?? "main"}>
           {group.title && <SidebarGroupLabel>{t(`groups.${group.title}`)}</SidebarGroupLabel>}
           <SidebarGroupContent>
             <SidebarMenu>
-              {group.items.map((item) => (
-                <SidebarMenuItem key={item.to}>
-                  <SidebarMenuButton
-                    asChild
-                    // "/" ต้องตรงตัว ไม่งั้นทุกหน้าจะนับเป็นหน้าแรก · หน้าลูก (เช่น /customers/new) นับเป็นเมนูแม่
-                    isActive={!!matchRoute({ to: item.to, fuzzy: item.to !== "/" })}
-                  >
-                    <Link to={item.to} activeOptions={{ exact: item.to === "/" }}>
-                      <item.icon aria-hidden="true" />
-                      <span>{t(`nav.${item.title}`)}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {group.items.map((item) => {
+                const label = t(`nav.${item.title}`);
+                const isActive = item.to === active;
+                return (
+                  <SidebarMenuItem key={item.to}>
+                    <SidebarMenuButton asChild tooltip={label} className={ITEM} isActive={isActive}>
+                      {/* aria-current ตาม activeNavPath (Link ของ router ติดเองเฉพาะตรงตัว — exact กันเมนูที่สองติดซ้อน) */}
+                      <Link to={item.to} activeOptions={{ exact: true }} aria-current={isActive ? "page" : undefined}>
+                        <item.icon aria-hidden="true" />
+                        <span>{label}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

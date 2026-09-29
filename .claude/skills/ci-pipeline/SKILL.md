@@ -8,10 +8,10 @@ description: วงแหวน CI ของ repo ร้านทอง (PR/dev 
 ## วงแหวน
 
 - **ring 0 — ทุก PR + push ทุก branch** (`ci.yml`, ขนานกัน): `check` (commitlint · lint · format · typecheck · test ทุก project · coverage gate ของ core · test ของตัวห่อ TestSprite · build · bundle budget) · `scan` (actionlint · zizmor · shellcheck · gitleaks · Semgrep CE — ไม่ติดตั้ง dependency ของ repo) · `db-verify` · `backup-image`
-- **ring 1 — push `testing`/`staging`/`main` · `workflow_dispatch`** (`make ci-full` บน branch ใดก็ได้ก่อน merge): `image` (build Dockerfile ที่ Railway ใช้ครั้งเดียว → smoke → SBOM CycloneDX → Trivy gate → ส่ง tar ให้ e2e) → `e2e` (Playwright บน stack จริงจาก image เดียวกัน ตรวจ image ID) · `sca` (OSV-Scanner บน lockfile — advisory ใหม่ออกได้ทุกวันแม้ SHA เดิม)
+- **ring 1 — push `testing`/`staging`/`main` · `workflow_dispatch`** (`make ci-full` บน branch ใดก็ได้ก่อน merge): `image` (build Dockerfile ที่ Railway ใช้ครั้งเดียว → smoke → SBOM CycloneDX → Trivy gate → ส่ง tar ให้ e2e · Gotenberg: `scripts/ci/gotenberg-scan.sh` gate CRITICAL ที่มี fix · ผ่านทั้งคู่ → `scripts/ci/push-image.sh` push ghcr.io tag SHA + branch → `actions/attest` provenance + SBOM ลง registry · job เดียวที่มี `packages`/`id-token`/`attestations: write` · ตรวจ: `make verify-image REF=<sha>`) → `e2e` (Playwright บน stack จริงจาก image เดียวกัน ตรวจ image ID) · `sca` (OSV-Scanner บน lockfile — advisory ใหม่ออกได้ทุกวันแม้ SHA เดิม)
 - **ring 2 — หลัง Railway deploy** (`deploy-smoke.yml`, `deployment_status` ของ `railway-app[bot]`): Playwright project `smoke` (อ่านอย่างเดียว) ยิงเว็บจริง · URL จาก repo variables `E2E_URL_STAGING` · `E2E_URL_PRODUCTION` (ไม่ตั้ง = ข้าม)
-- **advisory** — `security.yml` (ทุกวันจันทร์บน `main` + dispatch · fail → เปิด/คอมเมนต์ issue) · `testsprite.yml` (ทุกคืน · เงียบจนตั้ง `vars.TESTSPRITE_PROJECT_ID`) — ไม่ block promote เพราะอยู่นอก `ci.yml`
-- **ไม่มี** CodeQL / dependency review / secret scanning ของ GitHub: repo private ของบัญชีส่วนตัวบน Free ใช้ไม่ได้ และใบอนุญาต CodeQL CLI ห้ามใช้กับโค้ด private → Semgrep CE · OSV-Scanner · gitleaks แทน · Dependabot alerts (ฟรี) เปิดอยู่
+- **advisory** — `security.yml` (ทุกวันจันทร์บน `main` + dispatch · มี job `gotenberg-image` · fail → เปิด/คอมเมนต์ issue) · `codeql.yml` (PR → `dev` · push `dev`/`testing`/`staging`/`main` · ทุกพุธ + dispatch) · `dependency-review.yml` (ทุก PR) · `testsprite.yml` (ทุกคืน · เงียบจนตั้ง `vars.TESTSPRITE_PROJECT_ID`) — ไม่ block promote เพราะอยู่นอก `ci.yml`
+- repo public (28 ก.ย. 2026) — GitHub code scanning (CodeQL) · dependency review ใช้ได้ฟรีแล้ว (secret scanning ของ GitHub เปิดเองใน repo settings) เสริม Semgrep CE · OSV-Scanner · gitleaks (defence in depth ไม่ใช่แทนที่) · Dependabot alerts (ฟรี) เปิดอยู่
 - **release** — push `main` เท่านั้น · `needs` ทุก gate ของ ring 0 + ring 1 · ขั้น sync merge `main` กลับลงไปด้วย `--no-ff`
 
 promote ทีละขั้นด้วย **merge commit** (`make promote` → PR promotion → CI ของ PR ผ่าน → `gh pr merge --merge` · **ห้าม `--delete-branch`** · ห้าม fast-forward / push ตรง) → ring 1 รันบน merge commit ของ branch ปลายทาง: เนื้อโค้ดเท่ากับต้นทางที่ผ่าน ring 0 แล้ว ring 1 จึงเป็นสัญญาณใหม่ · repo private บน GitHub Free = นาที Actions และ artifact 500 MB จำกัด → ของหนักอยู่ ring 1 เท่านั้น · ส่งต่อได้เฉพาะ image ของ api (~90 MB zipped · retention 1 วัน) — gotenberg (~1.7 GB) ให้ job ที่ใช้ build เอง
@@ -32,5 +32,6 @@ promote ทีละขั้นด้วย **merge commit** (`make promote` �
 
 ## ข้อห้ามของ repo
 
+- ruleset บังคับ PR + check · scan · db-verify · backup-image บน dev/testing/staging/main — job `release` push ผ่าน SSH ด้วย deploy key (`RELEASE_DEPLOY_KEY`) ที่ bypass ได้ · ห้ามกลับไปใช้ `GITHUB_TOKEN` push (ถูกปฏิเสธ) และห้ามเพิ่ม deploy key สิทธิ์เขียนตัวอื่น
 - ห้ามเปิด "Automatically delete head branches" · PR promotion merge ด้วย merge commit เท่านั้น ห้าม `--delete-branch` ห้าม rebase/squash/fast-forward
 - Bash tool ของเครื่องนี้คือ zsh — ใส่ `${var}` เสมอก่อน `:` ตอนลองคำสั่งใน tool (script ใน `scripts/ci/` รันด้วย bash ไม่โดน)

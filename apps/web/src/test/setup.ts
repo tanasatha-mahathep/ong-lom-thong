@@ -6,6 +6,9 @@ import "@/i18n";
 import { cleanup, configure } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, vi } from "vitest";
+import { resetBackTargets } from "@/lib/back-target";
+import { resetBlocking } from "@/lib/blocking";
+import { resetUnsavedChanges } from "@/lib/unsaved-changes";
 
 // เทสต์ทั้งแอปรอ router + query หลายชั้น — เครื่องที่รัน make check ของหลายเอเจนต์พร้อมกัน (load 70+)
 // ใช้เวลาเกิน 3 วินาทีได้ · เทสต์ที่พังจริงยังพังเหมือนเดิม แค่รอนานขึ้นก่อนรายงาน
@@ -16,8 +19,14 @@ afterEach(() => {
   cleanup();
   // sonner เก็บ toast ไว้ใน store ระดับโมดูลและ replay ให้ Toaster ที่ mount ใหม่ — ปิดทิ้งไม่ให้ค้างไปเทสต์ถัดไป
   toast.dismiss();
+  // ชั้นบังหน้าจอ (lib/blocking.ts) เป็น store ระดับโมดูล — ไม่ให้ค้างไปเทสต์ถัดไป
+  resetBlocking();
+  resetBackTargets();
+  resetUnsavedChanges();
   // ธีม/ภาษาที่เทสต์ก่อนหน้าตั้งไว้ไม่ค้างมาเทสต์ถัดไป
   localStorage.clear();
+  // sidebar ย่อ/ขยาย (lib/sidebar-state.ts)
+  document.cookie = "sidebar_state=; path=/; max-age=0";
   sessionStorage.clear();
   document.documentElement.classList.remove("dark");
   vi.unstubAllGlobals();

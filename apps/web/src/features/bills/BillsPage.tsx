@@ -1,20 +1,25 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
+import { LoaderCircle } from "lucide-react";
 import { type KeyboardEvent, useEffect, useEffectEvent, useId, useMemo, useRef } from "react";
+import { useTranslation as useCommonTranslation } from "react-i18next";
 import { DataTable } from "@/components/data-table";
+import { LabeledSelect } from "@/components/labeled-select";
 import { PageHeader } from "@/components/page-header";
+import { ThaiDateField } from "@/components/thai-date-field";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { NativeSelectOption } from "@/components/ui/native-select";
 import { metalsQuery } from "@/features/buy/queries";
 import { useBusinessDate } from "@/hooks/use-business-date";
 import { ApiError, errorMessage } from "@/lib/api";
 import { formatInteger, formatMoney, formatWeight } from "@/lib/format";
 import { type Branch, useMe } from "@/lib/queries";
 import { looksLikeNationalId } from "@/lib/sensitive-query";
-import { isoToThaiInput, todayIso } from "@/lib/thai-date";
+import { isoToThaiInput, parseDateField, todayIso } from "@/lib/thai-date";
 import { useHeldQuery } from "@/lib/use-held-query";
 import { cn } from "@/lib/utils";
 import { type BillListTotals, buyListQuery } from "./api";
@@ -66,6 +71,13 @@ function describedBy(...ids: (string | false | undefined)[]): string | undefined
 
 /** Enter เปล่า ๆ ที่ไม่ได้อยู่ระหว่างพิมพ์แบบ IME */
 const isEnter = (e: KeyboardEvent) => e.key === "Enter" && !e.nativeEvent.isComposing;
+
+/** Enter ในช่องกรอก = ใช้ตัวกรองทันที (ไม่ส่งฟอร์ม) */
+function commitOnEnter(e: KeyboardEvent, commit: () => void) {
+  if (!isEnter(e)) return;
+  e.preventDefault();
+  commit();
+}
 
 /**
  * ค้นบิลซื้อเข้าย้อนหลัง (spec §3) — ตัวกรองทั้งหมดอยู่ใน URL: กลับจากหน้าบิลได้ผลเดิม · ส่งลิงก์ต่อกันได้
@@ -144,7 +156,7 @@ export function BillsPage() {
         </Alert>
       )}
       {(list.data || list.isPending) && (
-        <div className="grid gap-3" aria-busy={list.isPlaceholderData}>
+        <div className="grid grid-cols-1 gap-3" aria-busy={list.isPlaceholderData}>
           <DataTable
             columns={columns}
             data={list.data?.items ?? []}
@@ -178,6 +190,7 @@ interface BillFiltersProps {
 /** การ์ดตัวกรอง — ลำดับ DOM = ลำดับ Tab: คำค้น → วันที่ → โลหะ → สาขา → ช่วงวันที่สำเร็จรูป → ล้าง */
 function BillFilters({ search, branches, problem, onApply, onSensitiveQuery, onClear }: BillFiltersProps) {
   const { t } = useTranslation("bills");
+  const { t: tc } = useCommonTranslation("common");
   const id = useId();
   const today = useBusinessDate();
   const { data: metals = [] } = useQuery(metalsQuery);
@@ -212,14 +225,26 @@ function BillFilters({ search, branches, problem, onApply, onSensitiveQuery, onC
     timer.current = setTimeout(() => commitQuery(text), SEARCH_DEBOUNCE_MS);
   };
 
-  /** blur / Enter — อ่านไม่ได้แสดง error ใต้ช่องและไม่แตะ URL · อ่านได้จัดรูปข้อความเป็น วว/ดด/ปปปป */
+  /**
+   * blur / Enter — ตรวจก่อนส่งเข้า URL (U2): อ่านไม่ได้ · ก่อน ค.ศ. 2000 · ช่วงกลับด้าน (ตั้งแต่ > ถึง) แสดง error ใต้ช่องและไม่แตะ URL
+   * อ่านได้จัดรูปข้อความเป็น วว/ดด/ปปปป พ.ศ. แล้วใช้ทันที (ตัวกรองรายการเบา — ต่างจากรายงานที่รอ Enter/ปุ่ม)
+   */
   const commitDate = (key: "from" | "to", draft: UrlDraft) => {
-    const iso = parseDateFilter(draft.text);
-    if (iso === null) {
-      draft.fail(t("filters.dateInvalid"));
+    const parsed = parseDateField(draft.text);
+    if ("error" in parsed && parsed.error !== "required") {
+      draft.fail(tc(`dateField.${parsed.error}`));
+      return;
+    }
+    const iso = "iso" in parsed ? parsed.iso : "";
+    const other = parseDateFilter((key === "from" ? to : from).text);
+    const [rangeFrom, rangeTo] = key === "from" ? [iso, other] : [other, iso];
+    if (rangeFrom && rangeTo && rangeFrom > rangeTo) {
+      to.fail(tc("dateField.range"));
       return;
     }
     draft.commit(iso, isoToThaiInput(iso));
+    // แก้ “ตั้งแต่” จนช่วงถูกแล้ว — error ช่วงกลับด้านที่ค้างอยู่ใต้ “ถึง” หมดเหตุ
+    if (key === "from" && to.error === tc("dateField.range")) to.edit(to.text);
     const value = iso || undefined;
     if (value !== search[key]) onApply(key === "from" ? { from: value } : { to: value });
   };
@@ -272,19 +297,25 @@ function BillFilters({ search, branches, problem, onApply, onSensitiveQuery, onC
         </Field>
 
         <div className="grid items-start gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <DateField
+          <ThaiDateField
             id={`${id}-from`}
             label={t("filters.from")}
-            draft={from}
+            value={from.text}
             error={from.error ?? (problem?.field === "date_from" ? problem.message : undefined)}
-            onCommit={() => commitDate("from", from)}
+            onChange={(e) => from.edit(e.target.value)}
+            onFormat={from.edit}
+            onBlur={() => commitDate("from", from)}
+            onKeyDown={(e) => commitOnEnter(e, () => commitDate("from", from))}
           />
-          <DateField
+          <ThaiDateField
             id={`${id}-to`}
             label={t("filters.to")}
-            draft={to}
+            value={to.text}
             error={to.error ?? (problem?.field === "date_to" ? problem.message : undefined)}
-            onCommit={() => commitDate("to", to)}
+            onChange={(e) => to.edit(e.target.value)}
+            onFormat={to.edit}
+            onBlur={() => commitDate("to", to)}
+            onKeyDown={(e) => commitOnEnter(e, () => commitDate("to", to))}
           />
           <FilterSelect
             id={`${id}-metal`}
@@ -333,46 +364,6 @@ function BillFilters({ search, branches, problem, onApply, onSensitiveQuery, onC
   );
 }
 
-interface DateFieldProps {
-  id: string;
-  label: string;
-  draft: UrlDraft;
-  error: string | undefined;
-  onCommit: () => void;
-}
-
-/** ช่องวันที่ พ.ศ. แบบพิมพ์เอง (CLAUDE.md กฎ 6: `<input type="text">` ห้าม date picker / input mask) */
-function DateField({ id, label, draft, error, onCommit }: DateFieldProps) {
-  const { t } = useTranslation("bills");
-  return (
-    <Field data-invalid={!!error}>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <Input
-        id={id}
-        type="text"
-        autoComplete="off"
-        placeholder={t("filters.datePlaceholder")}
-        value={draft.text}
-        onChange={(e) => draft.edit(e.target.value)}
-        onBlur={onCommit}
-        onKeyDown={(e) => {
-          if (!isEnter(e)) return;
-          e.preventDefault();
-          onCommit();
-        }}
-        aria-invalid={!!error}
-        aria-describedby={error ? `${id}-error` : undefined}
-        className="tabular-nums"
-      />
-      <FieldError id={`${id}-error`}>{error}</FieldError>
-    </Field>
-  );
-}
-
-/** หน้าตาเดียวกับ Input (โทนสีจาก token ใช้ได้ทั้งโหมดสว่าง/มืด) */
-const SELECT_CLASS =
-  "h-9 w-full min-w-0 rounded-md border border-input bg-background px-3 py-1 text-base text-foreground shadow-xs outline-none md:text-sm focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50";
-
 interface FilterSelectProps {
   id: string;
   label: string;
@@ -388,23 +379,15 @@ function FilterSelect({ id, label, allLabel, value, options, onChange }: FilterS
   // ค่าใน URL ที่ไม่อยู่ในรายการ (ลิงก์เก่า · รายการยังโหลดไม่เสร็จ) แสดงเป็นตัวเลือกดิบ — ช่องต้องตรงกับตัวกรองที่ใช้จริง
   const unlisted = value && !options.some((option) => option.value === value) ? value : null;
   return (
-    <Field>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <select
-        id={id}
-        value={value ?? ""}
-        onChange={(e) => onChange(e.target.value || undefined)}
-        className={SELECT_CLASS}
-      >
-        <option value="">{allLabel}</option>
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-        {unlisted && <option value={unlisted}>{unlisted}</option>}
-      </select>
-    </Field>
+    <LabeledSelect id={id} label={label} value={value ?? ""} onChange={(e) => onChange(e.target.value || undefined)}>
+      <NativeSelectOption value="">{allLabel}</NativeSelectOption>
+      {options.map((option) => (
+        <NativeSelectOption key={option.value} value={option.value}>
+          {option.label}
+        </NativeSelectOption>
+      ))}
+      {unlisted && <NativeSelectOption value={unlisted}>{unlisted}</NativeSelectOption>}
+    </LabeledSelect>
   );
 }
 
@@ -413,7 +396,8 @@ function BillTotals({ totals, stale }: { totals: BillListTotals; stale: boolean 
   const { t } = useTranslation("bills");
   return (
     <div className="flex flex-wrap items-baseline justify-end gap-x-3 gap-y-1 text-right">
-      <p aria-live="polite" className="font-medium tabular-nums">
+      <p aria-live="polite" className="flex items-center gap-2 font-medium tabular-nums">
+        {stale && <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" />}
         {stale
           ? t("results.loading")
           : t("results.totals", {

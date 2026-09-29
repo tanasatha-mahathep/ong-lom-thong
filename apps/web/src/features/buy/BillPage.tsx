@@ -57,7 +57,7 @@ export function BillPage({ id, autoPrint }: { id: string; autoPrint: boolean }) 
   if (!bill) {
     return (
       <>
-        <PageHeader />
+        <PageHeader back="/bills" />
         <Alert>
           <CircleAlert aria-hidden="true" />
           <AlertTitle>{t("bill.notFound")}</AlertTitle>
@@ -105,6 +105,7 @@ function BillView({ bill, autoPrint }: { bill: Bill; autoPrint: boolean }) {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
       <PageHeader
+        back="/bills"
         description={
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-lg font-semibold text-foreground">{t("bill.title", { docNo: bill.doc_no })}</span>

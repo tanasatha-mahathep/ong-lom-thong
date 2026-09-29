@@ -3,6 +3,7 @@ import { type Db, auditLog, goldPrice, goldPriceSetting } from "@ong/db";
 import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { BranchRef } from "../lib/scope";
 import type { Executor } from "./adminCommon";
+import type { referenceAudit } from "./goldReference";
 
 export class GoldPriceInputError extends Error {}
 
@@ -147,6 +148,12 @@ const auditValues = (r: GoldPriceRow) => ({
   set_by: r.setBy,
 });
 
+/**
+ * ราคาสมาคม (อ้างอิง) ตอนบันทึก — ที่มา + เวลาประกาศ + ผู้จัดการกดเติมจากราคาสมาคมหรือไม่ (ไม่ต้อง migration: audit_log.diff เป็น jsonb)
+ * null = ไม่มีราคาสมาคมและไม่ได้กดเติม → ไม่ใส่คีย์ reference
+ */
+export type ReferenceAudit = ReturnType<typeof referenceAudit>;
+
 const branchRef = (b: BranchRef) => ({ id: b.id, code: b.code, name: b.name });
 
 /**
@@ -168,6 +175,7 @@ export async function setCentralPrice(
   quote: GoldQuote,
   userId: string,
   confirmedWarning: boolean,
+  reference: ReferenceAudit = null,
 ) {
   return db.transaction(async (tx) => {
     await lockPriceRow(tx, null, date);
@@ -193,6 +201,7 @@ export async function setCentralPrice(
         before: before ? auditValues(before) : null,
         after: auditValues(row),
         typo_warning_confirmed: confirmedWarning,
+        ...(reference ? { reference } : {}),
       },
     });
     return row;
@@ -210,6 +219,7 @@ export async function setBranchPrice(
   quote: GoldQuote,
   userId: string,
   confirmedWarning: boolean,
+  reference: ReferenceAudit = null,
 ) {
   return db.transaction(async (tx) => {
     await lockPriceRow(tx, target.id, date);
@@ -236,6 +246,7 @@ export async function setBranchPrice(
         before: before ? auditValues(before) : null,
         after: auditValues(row),
         typo_warning_confirmed: confirmedWarning,
+        ...(reference ? { reference } : {}),
       },
     });
     return row;
