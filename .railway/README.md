@@ -338,6 +338,21 @@ SELECT b.code, s.prefix, s.period, s.last_no FROM doc_sequence s JOIN branch b O
 - `INSERT` ไม่มี `ON CONFLICT` โดยตั้งใจ — ถ้าขึ้น `duplicate key` แปลว่างวดนั้นออกเลขในระบบใหม่ไปแล้ว **ห้าม UPDATE `last_no` ย้อนหรือข้าม** (เลขชนกับบิลที่มีอยู่ = บันทึกไม่ได้ · เลขกระโดด = เอกสารภาษีขาดช่วง) ให้ปรึกษาบัญชีก่อน
 - ทำทีละสาขา/ทีละงวด · ตัวนับถูกแก้ผ่าน `next_doc_no()` ในทรานแซกชันของการบันทึกบิลเท่านั้น (บิลที่บันทึกไม่สำเร็จคืนเลข ไม่มีเลขหาย)
 
+## ราคาอ้างอิงสมาคมค้าทองคำ (ปิดอยู่)
+
+> **⚠ ก่อนเปิดใน production ต้องทำให้ครบ:** (1) เปิดใน staging แล้วเทียบ `GET /api/gold-price/reference` กับประกาศบนเว็บสมาคม ทั้ง 4 ราคา + เวลา + ครั้งที่ — selector ของหน้า HTML และรูปแบบ JSON **ยังไม่เคยตรวจกับของจริง** (สร้างจาก fixture สังเคราะห์) (2) ตรวจ/ขออนุญาตเงื่อนไขการใช้ข้อมูลกับสมาคมค้าทองคำ
+
+`GET /api/gold-price/reference` แสดงราคาประกาศสมาคม (ทองคำแท่ง/รูปพรรณ รับซื้อ-ขายออก · เวลาประกาศ · ครั้งที่) บนหน้าแรก `/buy` และ `/settings/gold-price` — **แสดง/เติมค่าเริ่มต้นเท่านั้น** ระบบไม่ตั้งราคาของร้านเอง ผู้จัดการต้องกดบันทึก (ลง audit ว่าเติมจากราคาสมาคมหรือไม่)
+
+- ค่าเริ่มต้น `GOLD_REFERENCE_PROVIDER=none` (ไม่ประกาศใน `railway.ts`) → ตอบ 503 `reason: "disabled"` หน้าเว็บบอก "ยังไม่ได้เปิดใช้"
+- เปิดใช้: ประกาศทั้งสองค่าใน `railway.ts` (ไม่ใช่ค่าลับ — literal ได้) แล้ว `pnpm railway:apply` · ค่าที่ไม่ได้ประกาศถูกล้างตอน apply
+  - `GOLD_REFERENCE_PROVIDER=goldtraders-html` + `GOLD_REFERENCE_URL=https://classic.goldtraders.or.th/default.aspx` — อ่านหน้า HTML ของสมาคมตาม id `DetailPlace_uc_goldprices1_lbl…` **ยังไม่ได้ตรวจกับหน้าจริง** (เครื่องที่เขียนเข้าเว็บสมาคมไม่ได้) · หน้าเปลี่ยนโครง = 503 `invalid` ไม่เดาราคา
+  - หรือ `GOLD_REFERENCE_PROVIDER=thai-gold-api` + URL ของ JSON (`…/thai-gold-api/latest` ตาม github.com/max180643/thai-gold-api, MIT) — **บุคคลที่สาม** ไม่มี SLA ถ้าจะใช้ควร host เองจากโค้ดนั้น
+- ก่อนเปิดใน production: ขออนุญาต/ตรวจเงื่อนไขการใช้ข้อมูลกับสมาคมค้าทองคำ (ไม่พบ API ทางการหรือเงื่อนไขที่เผยแพร่) · เปิดใน staging แล้วดูว่า `GET /api/gold-price/reference` ได้ 200 ตรงกับประกาศบนเว็บ
+- ดึงจากเซิร์ฟเวอร์: timeout 5 วินาที · cache 5 นาทีต่อ process · ล้มแล้วพัก 60 วินาที · ค่าเดิมของวันนี้ใช้ต่อได้ไม่เกิน 1 ชม. (`stale: true`) · log แค่ `[gold-reference] fetch failed: <reason>` · ไม่ตาม redirect · content-type ต้องตรง (text/html หรือ application/json) · body เกิน 2 MB ตัดทิ้ง · ถอดรหัสเป็น UTF-8 (หน้าจริงเป็น encoding อื่น = ภาษาไทยเพี้ยน → 503 `invalid` — ตรวจตอนเปิดใน staging)
+- ตรวจราคาเข้ม: ทองคำแท่งเป็นบาทเต็ม · ส่วนต่างแท่ง ≤ 1% · รูปพรรณขายออก > แท่งขายออก · รูปพรรณรับซื้อ < แท่งรับซื้อ · รูปพรรณห่างจากแท่งขายออก ≤ 5% — แถว/ช่องสลับ = 503 `invalid`
+- ประกาศเก่า (`stale`) เติมเป็นค่าเริ่มต้นไม่ได้ · audit ตอนบันทึกเก็บ `client_*` (คำอ้างของ browser) แยกจาก `server_seen` (ที่เซิร์ฟเวอร์ดึงได้เอง)
+
 ## หมุนค่าลับ
 
 export `RAILWAY_SET_*` ค่าใหม่แล้ว `pnpm railway:apply` — ไม่ export = `preserve()` คงค่าเดิม

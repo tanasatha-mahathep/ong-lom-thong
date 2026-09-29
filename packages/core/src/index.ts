@@ -1,5 +1,6 @@
 export * from "./money";
 export * from "./goldPrice";
+export * from "./goldReference";
 export * from "./docNo";
 export * from "./card";
 export * from "./buy";

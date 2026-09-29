@@ -109,3 +109,22 @@ describe("loadEnv — Gotenberg + หัวใบรับซื้อ", () => {
     expect(message).not.toContain(PRODUCTION.BETTER_AUTH_SECRET);
   });
 });
+
+describe("loadEnv — ราคาอ้างอิงสมาคม", () => {
+  it("ค่าเริ่มต้น = ปิด (none) ไม่ต้องมี URL", () => {
+    const env = loadEnv(EXAMPLE);
+    expect(env.GOLD_REFERENCE_PROVIDER).toBe("none");
+    expect(env.GOLD_REFERENCE_URL).toBeUndefined();
+    expect(loadEnv({ ...EXAMPLE, GOLD_REFERENCE_URL: " " }).GOLD_REFERENCE_URL).toBeUndefined();
+  });
+
+  it("เปิด provider ต้องมี URL https ไม่มี user/password", () => {
+    const url = "https://classic.goldtraders.or.th/default.aspx";
+    const on = { ...EXAMPLE, GOLD_REFERENCE_PROVIDER: "goldtraders-html" };
+    expect(loadEnv({ ...on, GOLD_REFERENCE_URL: url }).GOLD_REFERENCE_URL).toBe(url);
+    expect(problem(on)).toContain("GOLD_REFERENCE_URL");
+    expect(problem({ ...on, GOLD_REFERENCE_URL: "http://classic.goldtraders.or.th/" })).toContain("GOLD_REFERENCE_URL");
+    expect(problem({ ...on, GOLD_REFERENCE_URL: "https://u:p@example.test/" })).toContain("GOLD_REFERENCE_URL");
+    expect(problem({ ...EXAMPLE, GOLD_REFERENCE_PROVIDER: "scrape-anything" })).toContain("GOLD_REFERENCE_PROVIDER");
+  });
+});

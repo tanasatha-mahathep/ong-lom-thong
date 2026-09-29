@@ -8,6 +8,7 @@ import { loadEnv } from "../env";
 import { type BackgroundTasks, createBackgroundTasks, createManualTasks } from "../lib/background";
 import { type HtmlToPdfInput, PdfRenderError, type PdfRenderer, createGotenbergClient } from "../lib/gotenberg";
 import { createMemoryStorage } from "../lib/storage";
+import type { GoldReferenceService } from "../services/goldReference";
 import { companyFromEnv, createReceiptPdfService, loadPdfFonts } from "../services/receiptPdf";
 
 const BASE_URL = process.env.TEST_DATABASE_URL ?? "postgres://ong:ong@localhost:5432/postgres";
@@ -105,7 +106,12 @@ export interface TestUser {
  * tasks.idle() (บิลยัง pending ให้ตรวจได้) · "auto" = รันทันทีแบบเดียวกับ production
  */
 export async function startTestApp(
-  options: { now?: () => Date; renderer?: PdfRenderer; pdfTasks?: "manual" | "auto" } = {},
+  options: {
+    now?: () => Date;
+    renderer?: PdfRenderer;
+    pdfTasks?: "manual" | "auto";
+    goldReference?: GoldReferenceService;
+  } = {},
 ) {
   const admin = postgres(BASE_URL, { max: 1, onnotice: () => {} });
   const name = `test_${randomUUID().replaceAll("-", "")}`;
@@ -152,7 +158,7 @@ export async function startTestApp(
     now: options.now ?? (() => new Date()),
     watermark: env.RECEIPT_WATERMARK,
   });
-  const app = createApp({ db, auth, env, storage, pdf, now: options.now });
+  const app = createApp({ db, auth, env, storage, pdf, now: options.now, goldReference: options.goldReference });
   const branches = Object.fromEntries((await db.select().from(branch)).map((b) => [b.code, b.id]));
 
   async function createUser(u: TestUser) {
