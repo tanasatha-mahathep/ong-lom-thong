@@ -698,6 +698,26 @@ describe.skipIf(!available)("ส่งบัญชีรายเดือน (s
     expect(await exportAudits()).toHaveLength(before + 3);
   });
 
+  // ด่านเทียบ c.req.path ตรงตัวอักษร — พิสูจน์กับ router จริงว่าไม่มีรูป path ที่ "ถึง handler ได้แต่ข้ามด่าน"
+  // (Hono decode ก่อน middleware · รูปที่ regex ไม่ match router ก็ไม่ match → 404 ไม่ลง audit)
+  it("path ที่ percent-encode / trailing slash ข้ามด่านไม่ได้ และไม่ลง audit", async () => {
+    const before = (await exportAudits()).length;
+    const raw = (path: string) =>
+      t.app.request(`http://localhost${path}`, {
+        headers: { origin: "http://localhost:8787", cookie: cookies.acct ?? "", "sec-fetch-site": "cross-site" },
+      });
+
+    // decode แล้วยังเป็นเส้นทางเดิม → ด่านจับได้ 403
+    for (const path of [`/api/reports/e%78port?${OCT}`, `/api/reports/%65xport?${OCT}`]) {
+      expect((await raw(path)).status, path).toBe(403);
+    }
+    // รูปที่ regex ไม่ match ต้องไม่ถึง handler (404) — ห้ามเป็น 200
+    for (const path of [`/api/reports/export/?${OCT}`, `/api/reports//export?${OCT}`, `/API/reports/export?${OCT}`]) {
+      expect((await raw(path)).status, path).toBe(404);
+    }
+    expect(await exportAudits()).toHaveLength(before);
+  });
+
   it("เลขบัตรเต็ม/ชื่อไม่หลุดในไฟล์ที่ไม่ใช่ PDF (manifest · README) · CSV มาสก์เลขบัตร", async () => {
     const z = await download(OCT);
     const manifest = new TextDecoder().decode(z.entry("manifest.json"));

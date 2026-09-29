@@ -6,6 +6,13 @@ const ALLOWED_SITES = new Set(["same-origin", "none"]);
 
 /**
  * เส้นทางที่ส่งของสำคัญออกไปด้วย GET — ของพวกนี้ sameOriginOnly ไม่ได้กัน (เมธอดปลอดภัยถูกยกเว้น)
+ *
+ * เทียบกับ c.req.path ตรงตัวอักษรได้อย่างปลอดภัย: Hono decode + normalize path ก่อนถึง middleware และ
+ * router ก็ match ด้วยค่าเดียวกัน → path ที่ไปถึง handler ได้ ด่านเห็นรูป normalize แล้วเสมอ
+ * (`/api/reports/e%78port` ด่านเห็น `/api/reports/export`) ส่วนรูปที่ regex ไม่ match เช่น trailing slash ·
+ * slash เกิน · %2F · ตัวพิมพ์ใหญ่ router ก็ไม่ match → ตก /api/* 404 ไม่ถึง handler ไม่ลง audit
+ * มีเทสต์ยืนยันไว้ใน fetchSite.test.ts ("path ที่ encode / รูปแปลก") กัน Hono เปลี่ยนพฤติกรรมวันหลัง
+ *
  * - /reports/export  = zip บัญชีรายเดือน (ลง audit export.monthly)
  * - /buy/:id/idcard  = สำเนาบัตรประชาชน (ลง audit buy.idcard_view)
  * - /buy/:id/pdf     = ใบรับซื้อ มีเลขบัตรเต็ม (CLAUDE.md กฎ 7)

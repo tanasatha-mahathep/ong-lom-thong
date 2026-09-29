@@ -105,3 +105,58 @@ describe("requireSameOriginFetch", () => {
     expect(res.status).toBe(403);
   });
 });
+
+/**
+ * path แปลก ๆ ต้องไม่ทำให้ด่านถูกข้าม — GUARDED_PATHS เทียบกับ c.req.path ตรงตัวอักษร คำถามคือ
+ * "มี path รูปไหนที่ไปถึง handler ได้ แต่ regex ไม่ match" (ถ้ามี = ดูดไฟล์และลง audit ได้โดยไม่ผ่านด่าน)
+ *
+ * คำตอบจากการวัดจริงข้างล่าง: **ไม่มี** — Hono decode + normalize path ก่อนส่งให้ middleware และ router
+ * ก็ match ด้วยค่าเดียวกันนั้น ฉะนั้น "handler ถึงได้" ⇒ "ด่านเห็น path ที่ normalize แล้ว" เสมอ
+ * ส่วน path ที่ normalize ไม่เป็นรูปนั้น (slash เกิน · trailing slash · %2F · ตัวพิมพ์ใหญ่) router ก็ไม่ match
+ * → ตกที่ /api/* 404 ไม่ถึง handler และไม่ลง audit · เทียบ raw path จึงปลอดภัย
+ *
+ * เทสต์กลุ่มนี้คือ regression guard: ถ้า Hono เปลี่ยนพฤติกรรม decode/normalize วันหลัง จะ fail ที่นี่
+ */
+describe("requireSameOriginFetch — path ที่ encode / รูปแปลก", () => {
+  /** เลียนโครง app.ts: sub-app ที่ /api มี route จริง แล้วปิดท้ายด้วย /api/* = 404 */
+  function realistic() {
+    const api = new Hono()
+      .use(requireSameOriginFetch)
+      .get("/reports/export", (c) => c.json({ ok: true }))
+      .get("/buy/:id/pdf", (c) => c.json({ ok: true }));
+    const outer = new Hono();
+    outer.route("/api", api);
+    outer.all("/api/*", (c) => c.json({ error: "not found" }, 404));
+    return outer;
+  }
+  const hit = (raw: string, site = "cross-site") =>
+    realistic().request(`http://localhost${raw}`, { headers: { "Sec-Fetch-Site": site } });
+
+  // Hono decode ก่อน middleware — ด่านจึงยังจับได้ (ถ้าวันหนึ่งไม่ decode เทสต์นี้จะ fail = ช่องโหว่)
+  it.each([
+    ["percent-encode ตัวอักษรกลางคำ", "/api/reports/e%78port"],
+    ["percent-encode ตัวแรก", "/api/reports/%65xport"],
+    ["มี ./ คั่น", "/api/./reports/export"],
+    ["percent-encode ใน path ของบิล", `/api/buy/${BILL}/%70df`],
+  ])("%s → ยังถูกกัน 403", async (_label, raw) => {
+    const res = await hit(raw);
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual(CROSS_SITE);
+  });
+
+  // รูปที่ regex ไม่ match — ต้องเป็น 404 (ไม่ถึง handler) ไม่ใช่ 200
+  it.each([
+    ["trailing slash", "/api/reports/export/"],
+    ["slash เกิน", "/api/reports//export"],
+    ["%2F แทน /", "/api%2Freports%2Fexport"],
+    ["ช่องว่างต่อท้าย", "/api/reports/export%20"],
+    ["ตัวพิมพ์ใหญ่", "/API/reports/export"],
+  ])("%s → 404 ไม่ถึง handler (ไม่ใช่ 200)", async (_label, raw) => {
+    expect((await hit(raw)).status).toBe(404);
+  });
+
+  it("path ปกติยังทำงาน — เทียบว่า 404 ข้างบนมาจากรูป path ไม่ใช่จากด่าน", async () => {
+    expect((await hit("/api/reports/export", "same-origin")).status).toBe(200);
+    expect((await hit("/api/reports/e%78port", "same-origin")).status).toBe(200);
+  });
+});
