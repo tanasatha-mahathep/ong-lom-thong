@@ -1,6 +1,8 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { SWITCH_TIMEOUT_MS } from "@/hooks/use-branch-switch";
+import { page } from "@/lib/app-update";
 import { t as buyT } from "@/features/buy/i18n";
 import type { Branch, Me, Role } from "@/lib/queries";
 import { BRANCH_2, BRANCH_HQ, GOLD_PRICE, fakeApi, json, makeMe, renderApp } from "@/test/app";
@@ -43,7 +45,12 @@ function setup({ role = "manager", branches = [BRANCH_HQ, BRANCH_2], me, switchT
   });
   const router = renderApp(path.replace("$bill", bill.id));
   const user = userEvent.setup();
-  return { api, router, user, bill };
+  /** สาขาถูกเปลี่ยนจากที่อื่น (แท็บอื่น) — เซิร์ฟเวอร์ตอบสาขาใหม่ แล้วแอปถาม me ใหม่ */
+  const changeElsewhere = async (branch: Branch) => {
+    current = branch;
+    await act(() => router.options.context.queryClient.invalidateQueries({ queryKey: ["me"] }));
+  };
+  return { api, router, user, bill, changeElsewhere };
 }
 
 const switcher = () => screen.findByRole("button", { name: /^สาขาปัจจุบัน/ });
@@ -217,5 +224,130 @@ describe("ฟอร์มที่ยังไม่บันทึก", () => {
 
     await waitFor(() => expect(switchCalls(api)).toEqual([{ branch_id: BRANCH_2.id }]));
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+});
+
+const alt = (code: string) => fireEvent.keyDown(document.body, { key: code.slice(-1), code, altKey: true });
+
+describe("ผลการสลับที่ไม่แน่นอน (fail-closed)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("กำลังบันทึกอยู่ (mutation ค้าง/ลองซ้ำ) → ไม่สลับ แจ้งให้รอ", async () => {
+    const { api, router, user } = setup();
+    await switcher();
+    // บันทึกบิลที่ยังไม่จบ (รวมช่วง retry ของ TanStack Query) = mutation ที่ pending
+    const queryClient = router.options.context.queryClient;
+    void queryClient
+      .getMutationCache()
+      .build(queryClient, { mutationKey: ["buy-save"], mutationFn: () => new Promise(() => {}) })
+      .execute(undefined);
+
+    await user.keyboard("{Alt>}2{/Alt}");
+    expect(await screen.findByText("กำลังบันทึก… รอให้เสร็จก่อนเปลี่ยนสาขา")).toBeInTheDocument();
+    const menu = await openSwitcher(user);
+    await user.click(within(menu).getByRole("menuitemradio", { name: /สาขา 2/ }));
+    expect(switchCalls(api)).toEqual([]);
+    expect(await switcher()).toHaveTextContent(BRANCH_HQ.name);
+  });
+
+  it("5xx (เซิร์ฟเวอร์อาจสลับไปแล้ว) → โหลดทั้งหน้าใหม่ ไม่ใช่แค่ toast", async () => {
+    const reload = vi.spyOn(page, "reload").mockImplementation(() => undefined);
+    const { user } = setup({ switchTo: () => json({ error: "boom" }, 502) });
+    const menu = await openSwitcher(user);
+    await user.click(within(menu).getByRole("menuitemradio", { name: /สาขา 2/ }));
+
+    await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(/^เปลี่ยนสาขาไม่สำเร็จ/)).not.toBeInTheDocument();
+  });
+
+  it("ไม่ตอบเกิน SWITCH_TIMEOUT_MS (ก่อน watchdog ของชั้นบัง) → ยกเลิกแล้วโหลดทั้งหน้าใหม่", async () => {
+    const reload = vi.spyOn(page, "reload").mockImplementation(() => undefined);
+    const { api } = setup({ switchTo: () => new Promise<Response>(() => {}) });
+    await switcher();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    alt("Digit2");
+    await waitFor(() => expect(switchCalls(api)).toHaveLength(1));
+    expect(SWITCH_TIMEOUT_MS).toBeLessThan(25_000);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SWITCH_TIMEOUT_MS);
+    });
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("สาขาเปลี่ยนจากที่อื่น (แท็บอื่น)", () => {
+  it("ไม่มีฟอร์มค้าง → ล้างข้อมูลสาขาเดิม แสดงข้อมูลสาขาใหม่ และแจ้งเตือน", async () => {
+    const { changeElsewhere } = setup();
+    expect(await screen.findByText("67,850.00")).toBeInTheDocument();
+    await changeElsewhere(BRANCH_2);
+
+    expect(await screen.findByText("สาขาถูกเปลี่ยนเป็น สาขา 2 จากที่อื่น")).toBeInTheDocument();
+    expect(await screen.findByText("68,000.00")).toBeInTheDocument();
+    expect(screen.queryByText("67,850.00")).not.toBeInTheDocument();
+    expect(await switcher()).toHaveTextContent(BRANCH_2.name);
+  });
+
+  it("บิลกรอกค้าง → ไม่ล้างเงียบ ๆ แต่กันทั้งหน้าด้วย dialog ให้โหลดใหม่ (บันทึกลงสาขาที่ไม่เห็นไม่ได้)", async () => {
+    const reload = vi.spyOn(page, "reload").mockImplementation(() => undefined);
+    const { user, changeElsewhere, api } = setup({ path: "/buy" });
+    const idBox = await screen.findByLabelText(buyT("customer.idLabel"));
+    await user.type(idBox, "1909");
+    await changeElsewhere(BRANCH_2);
+
+    const notice = await screen.findByRole("alertdialog", { name: "สาขาถูกเปลี่ยนจากที่อื่น" });
+    expect(notice).toHaveTextContent(BRANCH_2.name);
+    expect(screen.getByLabelText(buyT("customer.idLabel"))).toHaveValue("1909");
+    // Esc ปิดไม่ได้ · Ctrl+Enter (บันทึก) ไม่ถึงหน้า
+    await user.keyboard("{Escape}{Control>}{Enter}{/Control}");
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(api.callsTo("POST", "/api/buy")).toEqual([]);
+
+    await user.click(within(notice).getByRole("button", { name: "โหลดหน้าใหม่" }));
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ชื่อสาขาเมื่อ sidebar ย่อ", () => {
+  it("ย่อ → หัวหน้ามีป้ายสาขา · ปุ่มเลือกสาขา/เมนูผู้ใช้มี tooltip", async () => {
+    document.cookie = "sidebar_state=false; path=/";
+    setup();
+    const banner = await screen.findByRole("banner");
+    expect(await within(banner).findByText(BRANCH_HQ.name)).toBeInTheDocument();
+
+    (await switcher()).focus();
+    expect(await screen.findByRole("tooltip", { name: BRANCH_HQ.name })).toBeInTheDocument();
+    screen.getByRole("button", { name: /ทดสอบ manager/ }).focus();
+    expect(await screen.findByRole("tooltip", { name: "ทดสอบ manager" })).toBeInTheDocument();
+  });
+
+  it("ขยาย → หัวหน้าไม่มีป้ายสาขา (อยู่ใน sidebar แล้ว)", async () => {
+    setup();
+    const banner = await screen.findByRole("banner");
+    await within(banner).findByRole("group", { name: "ราคาทองวันนี้" });
+    expect(within(banner).queryByText(BRANCH_HQ.name)).not.toBeInTheDocument();
+  });
+});
+
+describe("ปุ่มลัดไม่ทำงานเมื่อมีชั้นอื่นเปิดอยู่", () => {
+  it("เมนูเลือกสาขาเปิดอยู่ / sheet (dialog modal) เปิดอยู่ / Alt+numpad → ไม่สลับ", async () => {
+    const { api, user } = setup();
+    await openSwitcher(user);
+    alt("Digit2");
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+
+    const sheet = document.createElement("div");
+    sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("aria-modal", "true");
+    document.body.append(sheet);
+    alt("Digit2");
+    sheet.remove();
+
+    // Alt+numpad คือ Alt code ของ Windows (พิมพ์อักขระ) ไม่ใช่ปุ่มลัด
+    alt("Numpad2");
+    expect(switchCalls(api)).toEqual([]);
   });
 });

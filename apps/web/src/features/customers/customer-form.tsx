@@ -30,7 +30,7 @@ import {
   fieldElementId,
   isTextField,
 } from "./fields";
-import { useUnsavedChanges } from "@/lib/unsaved-changes";
+import { hasUnsavedChanges, useSavingInProgress, useUnsavedChanges } from "@/lib/unsaved-changes";
 import { type CustomersKey, isCustomersKey, useTranslation } from "./i18n";
 import { type CustomerFormValues, EMPTY_CUSTOMER } from "./model";
 import { photoProblem } from "./photo";
@@ -92,6 +92,11 @@ function blockPlainEnter(event: KeyboardEvent<HTMLFormElement>) {
  * ลำดับ DOM = ลำดับ Tab = SIAM_ID_FIELDS · element อื่นที่รับโฟกัสได้ก่อนปุ่มบันทึกเป็น tabIndex −1 ทั้งหมด
  * ค่าที่ส่งคือค่าดิบตามที่พิมพ์ · ตรวจหลังออกจากช่องเท่านั้น · บันทึกด้วยปุ่มหรือ Ctrl+Enter
  */
+/** ค่าในฟอร์มต่างจากค่าตั้งต้น (เทียบทีละช่อง — ข้อความ/ไฟล์รูป) */
+function differsFrom(values: CustomerFormValues, initial: CustomerFormValues): boolean {
+  return (Object.keys(initial) as (keyof CustomerFormValues)[]).some((key) => values[key] !== initial[key]);
+}
+
 export function CustomerForm({
   mode,
   defaultValues = EMPTY_CUSTOMER,
@@ -132,9 +137,11 @@ export function CustomerForm({
     },
   });
   const submitting = useStore(form.store, (state) => state.isSubmitting);
-  const dirty = useStore(form.store, (state) => state.isDirty);
-  // สลับสาขาล้างฟอร์มนี้ — ถามยืนยันก่อน (components/branch-switcher.tsx)
+  // เทียบค่าจริงกับค่าตั้งต้น (isDirty ของ TanStack ติดค้างแม้พิมพ์กลับเป็นค่าเดิม)
+  const dirty = useStore(form.store, (state) => differsFrom(state.values, initialValues));
+  // สลับสาขาล้างฟอร์มนี้ — ถามยืนยันก่อน · ระหว่างส่งห้ามสลับ (hooks/use-branch-switch.ts)
   useUnsavedChanges(dirty);
+  useSavingInProgress(submitting);
 
   /** กดซ้ำ/Ctrl+Enter ซ้ำระหว่างส่ง = ส่งครั้งเดียว */
   const submit = async () => {
@@ -162,7 +169,10 @@ export function CustomerForm({
   // ข้อมูลที่ยังไม่บันทึก — เตือนก่อนรีโหลด/ปิดแท็บ (เช่น Tab เกินไปถึงแถบที่อยู่แล้วกด Enter)
   useEffect(() => {
     if (!dirty) return;
-    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    // ผู้ใช้ยอมทิ้งแล้ว (releaseUnsavedChanges ก่อน reload หลังสลับสาขา) = ไม่ถามซ้ำ
+    const warn = (event: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges()) event.preventDefault();
+    };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);

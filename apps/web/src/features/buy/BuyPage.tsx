@@ -69,6 +69,7 @@ function isBillDirty(state: BuyState): boolean {
       state.lineEntry.weight_g,
       state.lineEntry.amount,
       state.paymentEntry.amount,
+      state.paymentEntry.bank,
     ].some((text) => text.trim() !== "")
   );
 }

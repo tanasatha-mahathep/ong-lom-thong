@@ -20,6 +20,7 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { RailTooltip } from "@/components/rail-tooltip";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
 import type { useBranchSwitch } from "@/hooks/use-branch-switch";
 import { type Branch, type Me, canSwitchBranch } from "@/lib/queries";
@@ -44,6 +45,30 @@ export function BranchSwitchConfirm({ state }: { state: ReturnType<typeof useBra
           <AlertDialogAction variant="destructive" onClick={state.confirm}>
             {t("branchSwitcher.confirmSwitch")}
           </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
+/**
+ * สาขาถูกเปลี่ยนจากที่อื่นขณะมีฟอร์มค้าง — กันทั้งหน้า (ปิดไม่ได้ · Esc ไม่ปิด) ให้โหลดหน้าใหม่เท่านั้น
+ * ไม่บันทึกลงสาขาที่ผู้ใช้ไม่ได้เห็นบนจอ
+ */
+export function BranchChangedNotice({ state }: { state: ReturnType<typeof useBranchSwitch> }) {
+  const { t } = useTranslation("shell");
+  const branch = state.changedElsewhere;
+  return (
+    <AlertDialog open={branch !== undefined}>
+      <AlertDialogContent onEscapeKeyDown={(event) => event.preventDefault()}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t("branchSwitcher.changedTitle")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t("branchSwitcher.changedBody", { name: branch?.name ?? t("noBranch", { ns: "common" }) })}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogAction onClick={state.reload}>{t("branchSwitcher.changedReload")}</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -99,16 +124,18 @@ export function BranchSwitcher({ me, onSelect }: { me: Me; onSelect: (branch: Br
     <SidebarMenu>
       <SidebarMenuItem>
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <SidebarMenuButton
-              size="lg"
-              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-            >
-              <BranchTile />
-              <BranchLabel me={me} />
-              <ChevronsUpDown className="ml-auto" aria-hidden="true" />
-            </SidebarMenuButton>
-          </DropdownMenuTrigger>
+          <RailTooltip label={me.branch?.name ?? t("noBranch", { ns: "common" })}>
+            <DropdownMenuTrigger asChild>
+              <SidebarMenuButton
+                size="lg"
+                className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+              >
+                <BranchTile />
+                <BranchLabel me={me} />
+                <ChevronsUpDown className="ml-auto" aria-hidden="true" />
+              </SidebarMenuButton>
+            </DropdownMenuTrigger>
+          </RailTooltip>
           <DropdownMenuContent
             className="w-(--radix-dropdown-menu-trigger-width) min-w-60 rounded-lg"
             align="start"

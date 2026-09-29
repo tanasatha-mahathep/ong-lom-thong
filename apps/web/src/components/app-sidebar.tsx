@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
-import { BranchSwitchConfirm, BranchSwitcher } from "@/components/branch-switcher";
+import { BranchChangedNotice, BranchSwitchConfirm, BranchSwitcher } from "@/components/branch-switcher";
 import { NavMain } from "@/components/nav-main";
 import { NavUser } from "@/components/nav-user";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarRail } from "@/components/ui/sidebar";
@@ -34,6 +34,7 @@ export function AppSidebar(props: ComponentProps<typeof Sidebar>) {
         <SidebarRail />
       </Sidebar>
       <BranchSwitchConfirm state={branchSwitch} />
+      <BranchChangedNotice state={branchSwitch} />
     </>
   );
 }

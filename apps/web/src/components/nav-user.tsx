@@ -16,6 +16,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { RailTooltip } from "@/components/rail-tooltip";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
 import { errorMessage } from "@/lib/api";
 import type { Me } from "@/lib/queries";
@@ -78,16 +79,18 @@ export function NavUser({ me }: { me: Me }) {
     <SidebarMenu>
       <SidebarMenuItem>
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <SidebarMenuButton
-              size="lg"
-              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-            >
-              <UserAvatar name={me.user.name} />
-              <UserText me={me} />
-              <ChevronsUpDown className="ml-auto size-4" aria-hidden="true" />
-            </SidebarMenuButton>
-          </DropdownMenuTrigger>
+          <RailTooltip label={me.user.name}>
+            <DropdownMenuTrigger asChild>
+              <SidebarMenuButton
+                size="lg"
+                className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+              >
+                <UserAvatar name={me.user.name} />
+                <UserText me={me} />
+                <ChevronsUpDown className="ml-auto size-4" aria-hidden="true" />
+              </SidebarMenuButton>
+            </DropdownMenuTrigger>
+          </RailTooltip>
           <DropdownMenuContent
             className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg"
             side={isMobile ? "bottom" : "right"}
