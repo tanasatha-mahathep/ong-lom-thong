@@ -75,7 +75,7 @@ describe("ตั้งราคาทองวันนี้ — live preview �
 });
 
 describe("ตั้งราคาทองวันนี้ — บันทึก", () => {
-  it("Enter ในช่องบันทึก → หัวหน้าอ่านราคาใหม่ · แจ้งผล · ล้างช่อง", async () => {
+  it("Enter ในช่องบันทึก → แจ้งผล · ล้างช่อง", async () => {
     let today = GOLD_PRICE;
     const { api, user } = await openAs("manager", {
       "GET /api/gold-price/today": () => json(today),
@@ -84,11 +84,13 @@ describe("ตั้งราคาทองวันนี้ — บันท�
         return json(SAVED);
       },
     });
+    const before = api.callsTo("GET", "/api/gold-price/today").length;
     await user.keyboard("70850{Enter}");
 
     expect(await screen.findByText("บันทึกราคาทองวันนี้แล้ว")).toBeInTheDocument();
     expect(putBodies(api)).toEqual([{ bar_sell: "70850" }]);
-    await waitFor(() => expect(screen.getByRole("group", { name: "ราคาทองวันนี้" })).toHaveTextContent("70,850.00"));
+    // ราคาวันนี้ (query ที่หน้าแรกใช้) ถูกถามใหม่ — หัวหน้าไม่แสดงราคาแล้ว
+    await waitFor(() => expect(api.callsTo("GET", "/api/gold-price/today").length).toBeGreaterThan(before));
     expect(screen.getByLabelText(LABEL)).toHaveValue("");
   });
 

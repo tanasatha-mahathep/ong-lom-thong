@@ -47,11 +47,13 @@ function UserAvatar({ name }: { name: string }) {
   );
 }
 
+/** ชื่อ (ตัวหนา) + ตำแหน่ง — ไม่แสดงอีเมล (หน้าร้านใช้เครื่องร่วมกัน · ตำแหน่งบอกสิทธิ์ที่ใช้อยู่) */
 function UserText({ me }: { me: Me }) {
+  const { t } = useTranslation("common");
   return (
     <span className="grid flex-1 text-left text-sm leading-tight">
-      <span className="truncate font-medium">{me.user.name}</span>
-      <span className="truncate text-xs text-muted-foreground">{me.user.email}</span>
+      <span className="truncate font-semibold">{me.user.name}</span>
+      <span className="truncate text-xs text-muted-foreground">{t(`roles.${me.role}`)}</span>
     </span>
   );
 }
@@ -81,7 +83,7 @@ export function NavUser({ me }: { me: Me }) {
     <SidebarMenu>
       <SidebarMenuItem>
         <DropdownMenu>
-          <RailTooltip label={me.user.name}>
+          <RailTooltip label={`${me.user.name} · ${t(`roles.${me.role}`, { ns: "common" })}`}>
             <DropdownMenuTrigger asChild>
               <SidebarMenuButton
                 size="lg"
@@ -102,13 +104,7 @@ export function NavUser({ me }: { me: Me }) {
             <DropdownMenuLabel className="p-0 font-normal">
               <span className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
                 <UserAvatar name={me.user.name} />
-                <span className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">{me.user.name}</span>
-                  <span className="truncate text-xs text-muted-foreground">{me.user.email}</span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {t(`roles.${me.role}`, { ns: "common" })}
-                  </span>
-                </span>
+                <UserText me={me} />
               </span>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />

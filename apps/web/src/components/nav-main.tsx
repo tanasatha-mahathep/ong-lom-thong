@@ -1,4 +1,4 @@
-import { Link, useMatchRoute } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import { useTranslation } from "react-i18next";
 import {
   SidebarGroup,
@@ -8,20 +8,21 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { navFor } from "@/lib/nav";
+import { activeNavPath, navFor } from "@/lib/nav";
 import type { Role } from "@/lib/queries";
 
-/** ปุ่มสีหลัก (ซื้อเข้า) — คงสีตอน hover/active/เลือกอยู่ ไม่กลายเป็นสีของเมนูธรรมดา */
-const PRIMARY =
-  "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground active:bg-primary/90 active:text-primary-foreground data-[active=true]:bg-primary data-[active=true]:text-primary-foreground";
+/** เมนูที่เลือกอยู่ — พื้น sidebar-accent + ตัวหนา + แถบซ้าย (เห็นชัดทั้งตอนขยาย แถบไอคอน และ sheet มือถือ) */
+const ACTIVE =
+  "data-[active=true]:bg-sidebar-accent data-[active=true]:font-semibold data-[active=true]:text-sidebar-accent-foreground data-[active=true]:shadow-[inset_3px_0_0_var(--sidebar-primary)]";
 
 /**
  * เมนูหลักตาม role (spec §10) — ทุกเมนูมีไอคอน + tooltip (แถบไอคอนตอนย่อ sidebar แบบ sidebar-07)
- * ชื่อกลุ่มซ่อนเองตอนย่อ · "ซื้อเข้า" เป็นเมนูเดียวแบบปุ่มสีหลัก
+ * ชื่อกลุ่มซ่อนเองตอนย่อ · เลือกอยู่ได้ทีละเมนู (activeNavPath: หน้าลูกเป็นของเมนูแม่ · /buy/$id = ค้นบิล)
  */
 export function NavMain({ role }: { role: Role }) {
   const { t } = useTranslation("shell");
-  const matchRoute = useMatchRoute();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const active = activeNavPath(pathname, role);
 
   return (
     <nav aria-label={t("mainNav")} className="flex flex-col gap-2">
@@ -32,16 +33,12 @@ export function NavMain({ role }: { role: Role }) {
             <SidebarMenu>
               {group.items.map((item) => {
                 const label = t(`nav.${item.title}`);
+                const isActive = item.to === active;
                 return (
                   <SidebarMenuItem key={item.to}>
-                    <SidebarMenuButton
-                      asChild
-                      tooltip={label}
-                      className={item.primary ? PRIMARY : undefined}
-                      // "/" ต้องตรงตัว ไม่งั้นทุกหน้าจะนับเป็นหน้าแรก · หน้าลูก (เช่น /customers/new) นับเป็นเมนูแม่
-                      isActive={!!matchRoute({ to: item.to, fuzzy: item.to !== "/" })}
-                    >
-                      <Link to={item.to} activeOptions={{ exact: item.to === "/" }}>
+                    <SidebarMenuButton asChild tooltip={label} className={ACTIVE} isActive={isActive}>
+                      {/* aria-current ตาม activeNavPath (Link ของ router ติดเองเฉพาะตรงตัว — exact กันเมนูที่สองติดซ้อน) */}
+                      <Link to={item.to} activeOptions={{ exact: true }} aria-current={isActive ? "page" : undefined}>
                         <item.icon aria-hidden="true" />
                         <span>{label}</span>
                       </Link>
