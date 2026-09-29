@@ -63,6 +63,28 @@ describe("/customers — รายการและค้นหา", () => {
     expect(await screen.findByRole("table", { name: "ผลค้นหาลูกค้า “0812”" })).toBeInTheDocument();
   });
 
+  it("เลขบัตรเต็ม 13 หลัก: ค้นได้ตามปกติแต่ไม่ลงใน URL · คำค้นปกติทับได้", async () => {
+    const api = fakeApi({
+      ...shell,
+      "GET /api/customers": () => json({ items: [CUSTOMER_ROW], page: 1, has_more: false }),
+      "GET /api/customers?q=1103700123458": () => json({ items: [CUSTOMER_ROW], page: 1, has_more: false }),
+    });
+    const router = renderApp("/customers");
+    const user = userEvent.setup();
+    const box = await screen.findByLabelText("ค้นหาลูกค้า");
+
+    await user.type(box, "1103700123458{Enter}");
+
+    await waitFor(() => expect(api.callsTo("GET", "/api/customers?q=1103700123458")).toHaveLength(1));
+    expect(router.state.location.search).toEqual({});
+    expect(box).toHaveValue("1103700123458");
+
+    // คำค้นปกติทับคำค้นที่เป็นเลขบัตรได้ (ไม่ค้างอยู่นอก URL ตลอดไป)
+    await user.clear(box);
+    await user.type(box, "สมชาย{Enter}");
+    await waitFor(() => expect(router.state.location.search).toEqual({ q: "สมชาย" }));
+  });
+
   it("URL ?q=ตัวเลขล้วน (พิมพ์เอง) ยังค้นได้ · Esc ล้างคำค้น · ไม่พบ → บอกคำค้นที่ใช้", async () => {
     fakeApi({
       ...shell,

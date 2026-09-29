@@ -13,6 +13,7 @@ import { useBusinessDate } from "@/hooks/use-business-date";
 import { ApiError, errorMessage } from "@/lib/api";
 import { formatInteger, formatMoney, formatWeight } from "@/lib/format";
 import { type Branch, useMe } from "@/lib/queries";
+import { looksLikeNationalId } from "@/lib/sensitive-query";
 import { isoToThaiInput, todayIso } from "@/lib/thai-date";
 import { cn } from "@/lib/utils";
 import { type BillListTotals, buyListQuery } from "./api";
@@ -25,7 +26,6 @@ import {
   MAX_QUERY_LENGTH,
   MIN_QUERY_LENGTH,
   cleanQuery,
-  looksLikeNationalId,
   parseDateFilter,
   toListParams,
 } from "./search";

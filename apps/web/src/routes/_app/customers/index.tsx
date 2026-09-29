@@ -16,6 +16,7 @@ import { type CustomerListItem, MAX_QUERY_LENGTH, MIN_QUERY_LENGTH, normalizeQue
 import { customerListQuery } from "@/features/customers/queries";
 import { useCustomerSync } from "@/features/customers/sync";
 import { EMPTY } from "@/lib/format";
+import { looksLikeNationalId } from "@/lib/sensitive-query";
 
 const SearchSchema = z.object({
   // router แปลงค่าที่เป็นตัวเลขล้วนใน URL เป็น number (?q=0812345678 จากที่พิมพ์เอง) — แปลงกลับเป็นข้อความ
@@ -40,8 +41,11 @@ function CustomersPage() {
   const navigate = Route.useNavigate();
   useCustomerSync();
 
+  // เลขบัตรเต็ม 13 หลัก: ค้นได้แต่เก็บไว้ในหน้านี้เท่านั้น ไม่ลง URL (ประวัติเบราว์เซอร์/ลิงก์ที่แชร์)
+  const [sensitiveQ, setSensitiveQ] = useState<string | undefined>(undefined);
   // q 1 ตัวอักษร (พิมพ์ URL เอง) API ตอบ 400 — แสดงทั้งหมดแทน
-  const q = search.q.length < MIN_QUERY_LENGTH ? "" : search.q;
+  const urlQ = search.q.length < MIN_QUERY_LENGTH ? "" : search.q;
+  const q = sensitiveQ ?? urlQ;
   const list = useQuery(customerListQuery({ q, page: search.page }));
 
   const columns = useMemo(
@@ -93,7 +97,14 @@ function CustomersPage() {
           </Button>
         }
       />
-      <SearchBox q={q} onSearch={(value) => void navigate({ search: { q: value, page: 1 }, replace: true })} />
+      <SearchBox
+        q={q}
+        onSearch={(value) => {
+          const sensitive = looksLikeNationalId(value);
+          setSensitiveQ(sensitive ? value : undefined);
+          void navigate({ search: { q: sensitive ? "" : value, page: 1 }, replace: true });
+        }}
+      />
       {list.isError && (
         <Alert variant="destructive">
           <CircleAlert aria-hidden="true" />
