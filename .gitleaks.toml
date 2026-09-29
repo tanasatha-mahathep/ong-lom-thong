@@ -53,3 +53,49 @@ description = "Reading a secret from the environment (env.X, process.env.X, c.en
 targetRules = ["generic-api-key"]
 regexTarget = "secret"
 regexes = ['''^(?:[A-Za-z_$][A-Za-z0-9_$]*\.)*env\.[A-Z][A-Z0-9_]*$''']
+
+[[allowlists]]
+description = "curl --user with compose variable references ($$S3_ACCESS_KEY:$$S3_SECRET_KEY in tests/e2e/stack/compose.yml): stack.sh generates the values per run, nothing literal is committed"
+targetRules = ["curl-auth-user"]
+regexTarget = "match"
+regexes = ['''--user "\$\$[A-Z][A-Z0-9_]*:\$\$[A-Z][A-Z0-9_]*"''']
+
+[[allowlists]]
+description = "PASSWORD_ALPHABET in apps/api/src/services/users.ts is the character set temporary passwords are drawn from (ambiguous glyphs removed), not a password"
+targetRules = ["generic-api-key"]
+regexTarget = "line"
+regexes = ['''^\s*const PASSWORD_ALPHABET = "[0-9A-Za-z]+";\s*$''']
+
+# Test fixtures: each allowlist needs BOTH the one test file AND the one fixture value (condition AND),
+# so a real secret pasted into the same file, or the same value anywhere else, is still reported.
+[[allowlists]]
+description = "Synthetic password fixture in the admin users test (created and discarded with the test's own database)"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^apps/api/src/routes/admin\.users\.test\.ts$''']
+regexTarget = "match"
+regexes = ['''Somchai-Pass-2569''']
+
+[[allowlists]]
+description = "Idempotency-key fixture in the buy-in model unit test"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^apps/web/src/features/buy/model\.test\.ts$''']
+regexTarget = "match"
+regexes = ['''key-1234567890abcdef''']
+
+[[allowlists]]
+description = "Forged session-cookie fixture in the read-only e2e smoke (the api must answer 401); c2lnbmF0dXJl is base64 for 'signature'"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^tests/e2e/specs/smoke/smoke\.spec\.ts$''']
+regexTarget = "match"
+regexes = ['''forged\.c2lnbmF0dXJl''']
+
+[[allowlists]]
+description = "Dictionary-word DATABASE_URL password fixtures in the backup script's tests (Railway generates random alphanumeric passwords, never hyphenated words)"
+targetRules = ["postgres-url-with-password"]
+condition = "AND"
+paths = ['''^services/backup/backup\.test\.ts$''']
+regexTarget = "secret"
+regexes = ['''^[a-z]+(?:-[a-z]+)+$''']
