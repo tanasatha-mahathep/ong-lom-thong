@@ -81,7 +81,7 @@ const schema = useMemo(
 const f = useAppForm({
   defaultValues: { name_th: "", mobile: "" },
   schema, // ข้อความใน schema = แปลแล้ว
-  submit: (values) => createCustomer(values), // throw ApiError → error ใต้ช่องที่ API ชี้ + toast
+  submit: (values) => createCustomer(values), // values = schema.parse แล้ว (trim แล้ว) · throw ApiError → error ใต้ช่อง + toast
   successMessage: (c) => t("saved", { name: c.name_th }),
   onSuccess: (c) => navigate({ to: "/customers/$id", params: { id: c.id } }), // ฟอร์มยังปิดจนไปถึง
   // submitOnEnter: false,                   // ฟอร์ม Siam ID: บันทึกด้วยปุ่ม/Ctrl+Enter เท่านั้น
@@ -104,11 +104,14 @@ return (
 ```
 
 - `f.bind(field)` คืน `id name value onChange onBlur error` (ช่องค่าเป็น string) — ช่องอื่น (checkbox/radio) ใช้ `field.handleChange` + `f.errorOf(field)` เอง · `name` ต้องอยู่บนช่องจริง (ใช้หาช่องแรกที่ผิดตามลำดับ DOM)
-- ทุกช่องมี `placeholder` = ตัวอย่าง/รูปแบบจาก locale (`วว/ดด/ปปปป` · `081-234-5678` · `0.000`) — โปร่งใสจนโฟกัส ไม่ใช่ป้าย
+- ทุกช่องมี `placeholder` = ตัวอย่าง/รูปแบบจาก locale (`วว/ดด/ปปปป` · `081-234-5678` · `0.000`) — โปร่งใสจนโฟกัส ไม่ใช่ป้าย · `FloatingInput`/`FloatingTextarea` บังคับ prop นี้ใน type (ไม่มีตัวอย่างที่มีความหมายจริง ๆ ส่ง `""`)
+- `submit` / `onSuccess` / `successMessage` ได้ค่า **output ของ `schema.parse`** (trim · pipe · transform แล้ว) ไม่ใช่ข้อความดิบในช่อง — ไม่ต้อง trim ซ้ำ · refine ที่ไม่มี `path` = error ของทั้งฟอร์ม → `f.formError` + toast + โฟกัสปุ่มบันทึก
 - จังหวะ error: ไม่แสดงระหว่างพิมพ์ครั้งแรก → แสดงเมื่อออกจากช่อง → หลังจากนั้นอัปเดตทุกครั้งที่พิมพ์ · กดบันทึกทั้งที่ผิด = แสดงทุกช่อง + โฟกัสช่องแรกที่ผิด · ไม่ต้องเขียน `onBlur`/`onSubmitInvalid` เอง
-- error ของ API: ค่าเริ่มต้น `ApiError.field` (ตัด `.2` ท้าย) ถ้าตรงชื่อช่อง → ใต้ช่องนั้น + โฟกัส · ชื่อไม่ตรง/ต้องแปลข้อความเอง → `fieldOfError` / `errorMessage` (เช่น `mapServerError` ของ customers) · ไม่ชี้ช่อง → toast + `f.formError` (แสดง Alert ในฟอร์มด้วยได้) + โฟกัสปุ่มบันทึก หรือ `focusOnFormError`
-- `submit` ส่งข้อความที่ผู้ใช้พิมพ์ให้ API — **ห้ามคำนวณเงิน/น้ำหนักใน schema หรือ submit** (ตรวจแค่รูปแบบ) · idempotency key ของบิลยังเป็นหน้าที่ของหน้า
-- ชั้นบังหน้าจอเปิดเองไม่ได้ปิดเอง: ใช้ผ่าน helper เท่านั้น (นับซ้อน · ปิดใน `finally`) · เทสต์รีเซ็ตให้ใน `src/test/setup.ts`
+- error ของ API: ค่าเริ่มต้น `ApiError.field` — path แบบ API แปลงเป็นชื่อช่อง TanStack ให้เอง (`lines.1.weight_g` → `lines[1].weight_g`) · ไม่มีช่องนั้นในฟอร์ม → ลองช่องแม่ (`allowed_branch_ids.1` → `allowed_branch_ids`) · เจอ → ใต้ช่องนั้น + โฟกัส · ไม่เจอ = error ของทั้งฟอร์ม · ชื่อไม่ตรง/ต้องแปลข้อความเอง → `fieldOfError` / `errorMessage` (เช่น `mapServerError` ของ customers) · ไม่ชี้ช่อง → toast + `f.formError` (แสดง Alert ในฟอร์มด้วยได้) + โฟกัสปุ่มบันทึก หรือ `focusOnFormError`
+- **ห้ามคำนวณเงิน/น้ำหนักใน schema หรือ submit** (ตรวจแค่รูปแบบ · ส่งข้อความทศนิยมให้ API) · idempotency key ของบิลยังเป็นหน้าที่ของหน้า
+- บันทึกสำเร็จแต่ `onSuccess` throw (นำทาง/พิมพ์ล้ม) ≠ บันทึกไม่สำเร็จ: ฟอร์ม **ล็อกค้าง** (`f.saved` = true · ส่งซ้ำไม่ได้ กันบิลซ้ำ) + toast "บันทึกแล้ว แต่เปิดหน้าถัดไปไม่ได้" · `f.reset()` ปลดล็อกพร้อมล้างค่า (เช่น ปุ่ม "เริ่มบิลใหม่")
+- toast ของฟอร์มหนึ่งใช้ id เดียว: ล้มซ้ำไม่กองกัน · เริ่มส่งใหม่ = toast error เดิมหาย · สำเร็จ = แทนที่ด้วย toast สำเร็จ
+- ชั้นบังหน้าจอเปิด/ปิดผ่าน helper เท่านั้น (นับซ้อน · ปิดใน `finally`) · มี watchdog 25 วินาที (loader ค้าง / navigation ถูกยกเลิก) → เลิกบัง + toast error · `reloadBlocking()` / `navigate({ reloadDocument })` / href ไปเว็บอื่น บังจนหน้าหาย ถ้าถูกยกเลิก (beforeunload "อยู่ต่อ") เลิกบังเองหลัง 5 วินาที · toaster อยู่นอก `#root` (portal ที่ body) จึงยังประกาศ toast ระหว่างบัง · เทสต์รีเซ็ตให้ใน `src/test/setup.ts`
 - เทสต์ของหน้า: ป้ายหาได้ด้วย `getByLabelText` ตามเดิม · error อยู่ใน `toHaveAccessibleDescription` · ระหว่างส่ง `toBeDisabled()` · toast ค้นด้วยข้อความ / ปุ่ม "ปิดการแจ้งเตือน" · ชั้นบัง `getByRole("dialog", { name: "กำลังทำงาน…" })`
 
 ## ฟอร์มลูกค้า — Siam ID (CLAUDE.md กฎ 6)
