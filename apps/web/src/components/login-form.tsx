@@ -1,11 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { CircleAlert } from "lucide-react";
 import { type KeyboardEvent, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 import { AppForm, SubmitButton } from "@/components/app-form";
 import { BrandMark } from "@/components/brand-mark";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Field,
@@ -57,15 +55,6 @@ function StepHeading({ title, description }: { title: string; description: strin
   );
 }
 
-function FormAlert({ id, message }: { id: string; message: string }) {
-  return (
-    <Alert id={id} variant="destructive">
-      <CircleAlert aria-hidden="true" />
-      <AlertDescription className="text-destructive">{message}</AlertDescription>
-    </Alert>
-  );
-}
-
 function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => Promise<void> | void }) {
   const { t } = useTranslation("auth");
   const queryClient = useQueryClient();
@@ -103,14 +92,11 @@ function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => Promise<void> | vo
     successMessage: (me) => (canSwitchBranch(me) ? undefined : t("signIn.welcome", { name: me.user.name })),
     onSuccess: onSignedIn,
     // 401 = รหัสผิด (ไม่ใช่ session หมดอายุ — sign-in ไม่ผ่านตัวดัก 401 กลางเพราะไม่ใช่ useMutation)
-    // better-auth ไม่ชี้ช่อง → ข้อความรวมเหนือช่อง + toast · เลือกรหัสผ่านไว้ให้พิมพ์ใหม่
+    // better-auth ไม่ชี้ช่อง → toast บนกลางจออย่างเดียว (ไม่มีกล่องเตือนในฟอร์ม) · ช่องเป็นสีแดง · เลือกรหัสผ่านไว้ให้พิมพ์ใหม่
     errorMessage: (error) => signInErrorMessage(error, window.location.origin),
     fieldOfError: () => undefined,
     focusOnFormError: "password",
   });
-
-  const formErrorId = f.fieldId("form-error");
-  const describedBy = f.formError ? formErrorId : undefined;
 
   return (
     <AppForm form={f} className="p-6 md:p-8">
@@ -119,7 +105,6 @@ function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => Promise<void> | vo
           title={t("signIn.title")}
           description={t("signIn.description", { shop: t("shopName", { ns: "common" }) })}
         />
-        {f.formError && <FormAlert id={formErrorId} message={f.formError} />}
         <f.form.Field name="email">
           {(field) => (
             <FloatingInput
@@ -133,7 +118,6 @@ function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => Promise<void> | vo
               autoFocus
               required
               aria-invalid={f.formError ? true : undefined}
-              aria-describedby={describedBy}
             />
           )}
         </f.form.Field>
@@ -147,7 +131,6 @@ function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => Promise<void> | vo
               autoComplete="current-password"
               required
               aria-invalid={f.formError ? true : undefined}
-              aria-describedby={describedBy}
             />
           )}
         </f.form.Field>
@@ -183,7 +166,6 @@ function BranchStep({ me, onDone }: { me: Me; onDone: () => Promise<void> | void
     fieldOfError: () => undefined,
   });
   const ids = f.fieldId("branch");
-  const formErrorId = `${ids}-form-error`;
 
   // radio ของ Radix ไม่ส่งฟอร์มเมื่อกด Enter — ส่งเองให้คีย์บอร์ดจบได้ในปุ่มเดียว
   const submitOnEnter = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -201,7 +183,6 @@ function BranchStep({ me, onDone }: { me: Me; onDone: () => Promise<void> | void
           title={t("branch.title")}
           description={t("branch.greeting", { name: me.user.name, count: me.branches.length })}
         />
-        {f.formError && <FormAlert id={formErrorId} message={f.formError} />}
         <FieldSet>
           <FieldLegend variant="label">{t("branch.legend")}</FieldLegend>
           <f.form.Field name="branchId">
@@ -211,7 +192,6 @@ function BranchStep({ me, onDone }: { me: Me; onDone: () => Promise<void> | void
                 value={field.state.value}
                 onValueChange={field.handleChange}
                 onKeyDown={submitOnEnter}
-                aria-describedby={f.formError ? formErrorId : undefined}
               >
                 {me.branches.map((branch) => {
                   const id = `${ids}-${branch.id}`;

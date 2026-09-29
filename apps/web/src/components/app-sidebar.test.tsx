@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { BRANCH_2, BRANCH_HQ, GOLD_PRICE, fakeApi, json, makeMe, renderApp } from "@/test/app";
-import { navFor } from "@/lib/nav";
+import { activeNavPath, navFor } from "@/lib/nav";
 import type { Me, Role } from "@/lib/queries";
 
 const titles = (role: Role) => navFor(role).flatMap((group) => group.items.map((item) => item.title));
@@ -73,23 +73,26 @@ describe("sidebar ของแอป", () => {
     expect(within(nav).queryByRole("link", { name: "สาขา" })).not.toBeInTheDocument();
   });
 
-  it("หัวหน้าแสดงราคาทองวันนี้ 3 ค่าจากข้อความของ API", async () => {
-    renderShell("staff");
-    const prices = await screen.findByRole("group", { name: "ราคาทองวันนี้" });
-
-    expect(within(prices).getByText("67,850.00")).toBeInTheDocument();
-    expect(within(prices).getByText("67,650.00")).toBeInTheDocument();
-    expect(within(prices).getByText("64,268")).toBeInTheDocument();
-  });
-
-  it("ยังไม่ตั้งราคาทอง (404) → ป้ายเตือน · ผู้จัดการกดไปหน้าตั้งราคาได้", async () => {
-    fakeApi({ "GET /api/me": () => json(makeMe("manager")) });
-    renderApp("/");
-
-    // หน้าแรกโหลดทั้งหน้า (ราคา · ยอดวันนี้ · ตารางบิลวันนี้) ก่อนหัวหน้าจะแสดงป้าย — เผื่อเครื่องที่รันเทสต์ขนานกัน
-    const warning = await screen.findByRole("link", { name: "ยังไม่ได้ตั้งราคาทองวันนี้" }, { timeout: 10_000 });
-    expect(warning).toHaveAttribute("href", "/settings/gold-price");
-  });
+  it.each([
+    ["ขยาย", "true"],
+    ["ย่อ", "false"],
+  ])(
+    "หัวหน้า (%s) = ปุ่มย่อ/ขยาย + breadcrumb เท่านั้น — ไม่มีป้ายสาขา ไม่มีราคาทอง/ป้ายเตือนราคา",
+    async (_, open) => {
+      document.cookie = `sidebar_state=${open}; path=/`;
+      fakeApi({ "GET /api/me": () => json(makeMe("manager")) });
+      renderApp("/");
+      const banner = await screen.findByRole("banner");
+      // หน้าแรกยังแสดงป้ายเตือนราคา (ไม่ได้ลบ query) — แต่ไม่อยู่ในหัวหน้า
+      expect(await screen.findByText("ยังไม่ได้ตั้งราคาทองวันนี้", {}, { timeout: 10_000 })).toBeInTheDocument();
+      expect(within(banner).getByRole("button", { name: "แสดง/ซ่อนเมนู" })).toBeInTheDocument();
+      expect(within(banner).getByRole("navigation", { name: "ตำแหน่งของหน้า" })).toBeInTheDocument();
+      expect(within(banner).queryByRole("group", { name: "ราคาทองวันนี้" })).not.toBeInTheDocument();
+      expect(within(banner).queryByText("ยังไม่ได้ตั้งราคาทองวันนี้")).not.toBeInTheDocument();
+      expect(within(banner).queryByText(BRANCH_HQ.name)).not.toBeInTheDocument();
+      expect(within(banner).queryByText("สาขาปัจจุบัน")).not.toBeInTheDocument();
+    },
+  );
 
   it("เมนูผู้ใช้ออกจากระบบได้", async () => {
     const { api, router } = renderShell("staff");
@@ -198,7 +201,9 @@ describe("sidebar ย่อเป็นแถบไอคอน (sidebar-07 coll
     await waitFor(() => expect(sidebarRoot()).toHaveAttribute("data-state", "collapsed"));
     expect(document.cookie).toContain("sidebar_state=false");
 
-    // ปุ่ม panel-left อยู่ในหัวหน้า (แถบ rail ข้าง sidebar ก็สลับได้ด้วยเมาส์)
+    // สลับได้ด้วยปุ่ม panel-left ในหัวหน้าเท่านั้น — ไม่มีแถบ rail ที่ขอบ (ไม่มีเส้น/เงาตอน hover)
+    expect(document.querySelector('[data-slot="sidebar-rail"]')).toBeNull();
+    expect(screen.getAllByRole("button", { name: "แสดง/ซ่อนเมนู" })).toHaveLength(1);
     await user.click(within(screen.getByRole("banner")).getByRole("button", { name: "แสดง/ซ่อนเมนู" }));
     await waitFor(() => expect(sidebarRoot()).toHaveAttribute("data-state", "expanded"));
     expect(document.cookie).toContain("sidebar_state=true");
@@ -206,5 +211,57 @@ describe("sidebar ย่อเป็นแถบไอคอน (sidebar-07 coll
     // แป้นภาษาไทย: ปุ่มเดียวกันได้ key "ิ" — ใช้ตำแหน่งปุ่ม (code KeyB)
     fireEvent.keyDown(document.body, { key: "ิ", code: "KeyB", ctrlKey: true });
     await waitFor(() => expect(sidebarRoot()).toHaveAttribute("data-state", "collapsed"));
+  });
+});
+
+describe("เมนูที่เลือกอยู่ตามหน้า (มีได้เมนูเดียว)", () => {
+  it.each([
+    ["/", "/"],
+    ["/buy", "/buy"],
+    ["/buy/7f1c2d3e-0000-4000-8000-000000000001", "/bills"],
+    ["/bills", "/bills"],
+    ["/customers", "/customers"],
+    ["/customers/new", "/customers"],
+    ["/customers/abc", "/customers"],
+    ["/reports/purchase", "/reports/purchase"],
+    ["/reports/stock", "/reports/stock"],
+    ["/reports/export", "/reports/export"],
+    ["/settings/gold-price", "/settings/gold-price"],
+    ["/settings/branches", "/settings/branches"],
+    ["/settings/users/", "/settings/users"],
+  ])("%s → %s", (pathname, expected) => {
+    expect(activeNavPath(pathname, "admin")).toBe(expected);
+  });
+
+  it.each([
+    ["/bills", "ค้นบิล"],
+    ["/buy/7f1c2d3e-0000-4000-8000-000000000001", "ค้นบิล"],
+    ["/customers/new", "ลูกค้า"],
+    ["/buy", "ซื้อเข้า"],
+  ])("เปิด %s → เมนู %s เท่านั้นที่ active + aria-current (ซื้อเข้าไม่ติดสีค้าง)", async (path, label) => {
+    fakeApi({ "GET /api/me": () => json(makeMe("manager")), "GET /api/gold-price/today": () => json(GOLD_PRICE) });
+    renderApp(path);
+    const nav = await screen.findByRole("navigation", { name: "เมนูหลัก" });
+    await waitFor(() => expect(within(nav).getByRole("link", { name: label })).toHaveAttribute("aria-current", "page"));
+    const links = within(nav).getAllByRole("link");
+    expect(links.filter((link) => link.getAttribute("aria-current") === "page")).toHaveLength(1);
+    expect(links.filter((link) => link.getAttribute("data-active") === "true").map((l) => l.textContent)).toEqual([
+      label,
+    ]);
+    const buy = within(nav).getByRole("link", { name: "ซื้อเข้า" });
+    // ซื้อเข้าเป็นเมนูธรรมดา — ไม่มีพื้นสีหลักถาวร
+    expect(buy.className).not.toMatch(/(^|\s)bg-primary(\s|$)/);
+  });
+});
+
+describe("เวอร์ชันใต้เมนูผู้ใช้", () => {
+  it("แสดง v<เวอร์ชัน> · <commit> ใต้ปุ่มผู้ใช้ใน sidebar · ซ่อนตอนย่อเป็นแถบไอคอน", async () => {
+    renderShell("staff");
+    const sidebar = await screen.findByRole("complementary", { name: "แถบเมนู" });
+    const version = within(sidebar).getByText("v0.4.2 · a1b2c3d");
+    const userButton = within(sidebar).getByRole("button", { name: /ทดสอบ staff/ });
+    // อยู่ถัดจากเมนูผู้ใช้ (ท้าย sidebar)
+    expect(userButton.compareDocumentPosition(version) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(version).toHaveClass("group-data-[collapsible=icon]:hidden");
   });
 });

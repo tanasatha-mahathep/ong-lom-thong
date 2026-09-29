@@ -132,6 +132,11 @@ export default {
         "ตอนนี้บัญชีนี้ทำงานที่ {{name}} (เปลี่ยนจากแท็บหรือเครื่องอื่น) — ข้อมูลที่กรอกค้างไว้บันทึกไม่ได้ กรุณาโหลดหน้าใหม่",
       changedReload: "โหลดหน้าใหม่",
     },
+    /** เวอร์ชันใต้เมนูผู้ใช้ (components/app-version.tsx) */
+    appVersion: {
+      plain: "v{{version}}",
+      withCommit: "v{{version}} · {{commit}}",
+    },
     userMenu: {
       signOut: "ออกจากระบบ",
       signOutFailed: "ออกจากระบบไม่สำเร็จ — {{reason}}",

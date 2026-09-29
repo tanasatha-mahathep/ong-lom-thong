@@ -117,7 +117,7 @@ describe("ราคาเฉพาะสาขา — ตาราง", () => {
 });
 
 describe("ราคาเฉพาะสาขา — ตั้งราคา", () => {
-  it("Dialog: quote พร้อม branch_id → Enter บันทึก → ตาราง + ราคาบนหัวหน้าอ่านใหม่ · โฟกัสกลับปุ่มเดิม", async () => {
+  it("Dialog: quote พร้อม branch_id → Enter บันทึก → ตารางอ่านใหม่ · โฟกัสกลับปุ่มเดิม", async () => {
     const { api, user } = await openAs("manager");
     const trigger = within(await rowOf("00000 สำนักงานใหญ่")).getByRole("button", {
       name: "ตั้งราคาสาขา สำนักงานใหญ่ (สาขา 1)",
@@ -144,8 +144,6 @@ describe("ราคาเฉพาะสาขา — ตั้งราคา",
     const hq = await rowOf("00000 สำนักงานใหญ่");
     await waitFor(() => expect(hq).toHaveTextContent("70,850"));
     expect(within(hq).getByText("สาขา", { selector: "[data-slot=badge]" })).toBeInTheDocument();
-    // หัวหน้าแสดงราคาที่สาขาปัจจุบันใช้จริง (GET /today อ่านใหม่)
-    await waitFor(() => expect(screen.getByRole("group", { name: "ราคาทองวันนี้" })).toHaveTextContent("70,850.00"));
     await waitFor(() => expect(within(hq).getByRole("button", { name: /^ตั้งราคาสาขา/ })).toHaveFocus());
   });
 
