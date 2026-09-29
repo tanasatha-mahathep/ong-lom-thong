@@ -253,3 +253,15 @@ describe("เมนูที่เลือกอยู่ตามหน้า 
     expect(buy.className).not.toMatch(/(^|\s)bg-primary(\s|$)/);
   });
 });
+
+describe("เวอร์ชันใต้เมนูผู้ใช้", () => {
+  it("แสดง v<เวอร์ชัน> · <commit> ใต้ปุ่มผู้ใช้ใน sidebar · ซ่อนตอนย่อเป็นแถบไอคอน", async () => {
+    renderShell("staff");
+    const sidebar = await screen.findByRole("complementary", { name: "แถบเมนู" });
+    const version = within(sidebar).getByText("v0.4.2 · a1b2c3d");
+    const userButton = within(sidebar).getByRole("button", { name: /ทดสอบ staff/ });
+    // อยู่ถัดจากเมนูผู้ใช้ (ท้าย sidebar)
+    expect(userButton.compareDocumentPosition(version) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(version).toHaveClass("group-data-[collapsible=icon]:hidden");
+  });
+});

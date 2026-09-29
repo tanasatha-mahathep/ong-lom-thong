@@ -1,5 +1,6 @@
 import type { ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
+import { AppVersion } from "@/components/app-version";
 import { BranchChangedNotice, BranchSwitchConfirm, BranchSwitcher } from "@/components/branch-switcher";
 import { NavMain } from "@/components/nav-main";
 import { NavUser } from "@/components/nav-user";
@@ -29,6 +30,7 @@ export function AppSidebar(props: ComponentProps<typeof Sidebar>) {
           </SidebarContent>
           <SidebarFooter>
             <NavUser me={me} />
+            <AppVersion />
           </SidebarFooter>
         </aside>
       </Sidebar>
