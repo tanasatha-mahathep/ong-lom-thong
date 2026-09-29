@@ -35,6 +35,24 @@ describe("toast หลังส่งฟอร์ม (U5)", () => {
     await waitFor(() => expect(screen.queryByText("บันทึกไม่สำเร็จ")).not.toBeInTheDocument());
   });
 
+  it("ปุ่มปิดมีปุ่มเดียว เป็นไอคอน X ด้านขวาในกล่อง (ไม่ใช่วงกลมมุมซ้ายบน) · กดแล้ว toast หาย", async () => {
+    await renderRoot();
+    act(() => void notifyError("อีเมลหรือรหัสผ่านไม่ถูกต้อง"));
+    await screen.findByText("อีเมลหรือรหัสผ่านไม่ถูกต้อง");
+
+    const closes = screen.getAllByRole("button", { name: "ปิดการแจ้งเตือน" });
+    expect(closes).toHaveLength(1);
+    const close = closes[0] as HTMLElement;
+    // ขวา + กึ่งกลางแนวตั้ง · ไม่มีวง/ขอบ (ทับสไตล์ของ sonner ด้วย !important)
+    expect(close).toHaveClass("!left-auto", "!right-3", "!top-1/2", "!border-0", "!bg-transparent");
+    expect(close.querySelector("svg.lucide-x")).not.toBeNull();
+    // กล่อง toast เว้นขวาไว้ให้ปุ่ม ข้อความยาวไม่วิ่งไปใต้ปุ่ม
+    expect(close.closest("[data-sonner-toast]")).toHaveClass("has-[[data-close-button]]:!pr-12");
+
+    act(() => close.click());
+    await waitFor(() => expect(screen.queryByText("อีเมลหรือรหัสผ่านไม่ถูกต้อง")).not.toBeInTheDocument());
+  });
+
   it("สำเร็จหายเองใน 4 วินาที · error ไม่มีกำหนดหาย", () => {
     const success = vi.spyOn(toast, "success").mockReturnValue(1);
     const error = vi.spyOn(toast, "error").mockReturnValue(2);
