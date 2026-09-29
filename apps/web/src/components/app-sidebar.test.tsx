@@ -60,13 +60,14 @@ describe("sidebar ของแอป", () => {
     expect(within(nav).getByRole("link", { name: "ผู้ใช้" })).toHaveAttribute("href", "/settings/users");
   });
 
-  it("ผู้จัดการมีปุ่มซื้อเข้า (Quick Create) + เมนูซื้อเข้า และตั้งราคาทองได้", async () => {
+  it("ผู้จัดการมีเมนูซื้อเข้า (ปุ่มสีหลัก ไม่ซ้ำ) และตั้งราคาทองได้", async () => {
     renderShell("manager");
     const nav = await screen.findByRole("navigation", { name: "เมนูหลัก" });
 
+    // ปุ่มซื้อเข้า (Quick Create เดิม) กับเมนูซื้อเข้าเป็นเมนูเดียว
     const buyLinks = within(nav).getAllByRole("link", { name: "ซื้อเข้า" });
-    expect(buyLinks).toHaveLength(2);
-    for (const link of buyLinks) expect(link).toHaveAttribute("href", "/buy");
+    expect(buyLinks).toHaveLength(1);
+    expect(buyLinks[0]).toHaveAttribute("href", "/buy");
     expect(within(nav).getByRole("link", { name: "ราคาทองวันนี้" })).toHaveAttribute("href", "/settings/gold-price");
     expect(within(nav).queryByRole("link", { name: "ส่งบัญชีรายเดือน" })).not.toBeInTheDocument();
     expect(within(nav).queryByRole("link", { name: "สาขา" })).not.toBeInTheDocument();
@@ -146,5 +147,60 @@ describe("เมนูบนมือถือ (sheet)", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "เมนู" })).not.toBeInTheDocument());
     expect(router.state.location.pathname).toBe("/customers");
     await waitFor(() => expect(screen.getByRole("button", { name: "แสดง/ซ่อนเมนู" })).toHaveFocus());
+  });
+});
+
+describe("sidebar ย่อเป็นแถบไอคอน (sidebar-07 collapsible=icon)", () => {
+  const sidebarRoot = () => document.querySelector<HTMLElement>('[data-slot="sidebar"]');
+
+  it("cookie ย่อไว้ → แถบไอคอน: เมนูทุกตัวมีไอคอน + tooltip · ตัวเลือกสาขาและเมนูผู้ใช้ยังเปิดได้", async () => {
+    document.cookie = "sidebar_state=false; path=/";
+    renderShell("admin", [BRANCH_HQ, BRANCH_2]);
+    const user = userEvent.setup();
+    const nav = await screen.findByRole("navigation", { name: "เมนูหลัก" });
+    expect(sidebarRoot()).toHaveAttribute("data-state", "collapsed");
+    expect(sidebarRoot()).toHaveAttribute("data-collapsible", "icon");
+
+    // ทุกเมนูมีไอคอนและยังมีชื่อ (ข้อความถูกตัดด้วย CSS ไม่ได้หายจาก accessibility tree)
+    const links = within(nav).getAllByRole("link");
+    expect(links.map((link) => link.getAttribute("href"))).toEqual(
+      navFor("admin").flatMap((g) => g.items.map((i) => i.to)),
+    );
+    for (const link of links) expect(link.querySelector("svg")).not.toBeNull();
+
+    // โฟกัสเมนูด้วยคีย์บอร์ด → tooltip ชื่อเมนู
+    within(nav).getByRole("link", { name: "ค้นบิล" }).focus();
+    expect(await screen.findByRole("tooltip", { name: "ค้นบิล" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^สาขาปัจจุบัน/ }));
+    expect(await screen.findByRole("menuitemradio", { name: /สาขา 2/ })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: /ทดสอบ admin/ }));
+    expect(await screen.findByRole("menuitem", { name: "ออกจากระบบ" })).toBeInTheDocument();
+  });
+
+  it("ขยายอยู่ → tooltip ไม่แสดง (ชื่อเมนูเห็นอยู่แล้ว)", async () => {
+    renderShell("staff");
+    const nav = await screen.findByRole("navigation", { name: "เมนูหลัก" });
+    expect(sidebarRoot()).toHaveAttribute("data-state", "expanded");
+    within(nav).getByRole("link", { name: "ค้นบิล" }).focus();
+    await waitFor(() => expect(document.querySelector('[data-slot="tooltip-content"]')).toHaveAttribute("hidden"));
+  });
+
+  it("Ctrl+B สลับย่อ/ขยาย และจำไว้ใน cookie", async () => {
+    renderShell("staff");
+    const user = userEvent.setup();
+    await screen.findByRole("navigation", { name: "เมนูหลัก" });
+
+    await user.keyboard("{Control>}b{/Control}");
+    await waitFor(() => expect(sidebarRoot()).toHaveAttribute("data-state", "collapsed"));
+    expect(document.cookie).toContain("sidebar_state=false");
+
+    // ปุ่ม panel-left อยู่ในหัวหน้า (แถบ rail ข้าง sidebar ก็สลับได้ด้วยเมาส์)
+    await user.click(within(screen.getByRole("banner")).getByRole("button", { name: "แสดง/ซ่อนเมนู" }));
+    await waitFor(() => expect(sidebarRoot()).toHaveAttribute("data-state", "expanded"));
+    expect(document.cookie).toContain("sidebar_state=true");
   });
 });

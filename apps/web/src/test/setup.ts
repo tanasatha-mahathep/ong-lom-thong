@@ -23,6 +23,8 @@ afterEach(() => {
   resetUnsavedChanges();
   // ธีม/ภาษาที่เทสต์ก่อนหน้าตั้งไว้ไม่ค้างมาเทสต์ถัดไป
   localStorage.clear();
+  // sidebar ย่อ/ขยาย (lib/sidebar-state.ts)
+  document.cookie = "sidebar_state=; path=/; max-age=0";
   sessionStorage.clear();
   document.documentElement.classList.remove("dark");
   vi.unstubAllGlobals();

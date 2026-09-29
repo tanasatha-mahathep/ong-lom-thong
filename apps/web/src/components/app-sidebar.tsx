@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { BranchSwitchConfirm, BranchSwitcher } from "@/components/branch-switcher";
 import { NavMain } from "@/components/nav-main";
 import { NavUser } from "@/components/nav-user";
-import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader } from "@/components/ui/sidebar";
+import { Sidebar, SidebarContent, SidebarFooter, SidebarHeader, SidebarRail } from "@/components/ui/sidebar";
 import { useBranchHotkeys, useBranchSwitch } from "@/hooks/use-branch-switch";
 import { useMe } from "@/lib/queries";
 
@@ -17,7 +17,8 @@ export function AppSidebar(props: ComponentProps<typeof Sidebar>) {
 
   return (
     <>
-      <Sidebar collapsible="offcanvas" {...props}>
+      {/* ย่อเป็นแถบไอคอนแบบ sidebar-07 (collapsible="icon") — Ctrl/⌘+B หรือปุ่มในหัวหน้า · จำใน cookie */}
+      <Sidebar collapsible="icon" {...props}>
         {/* landmark ของทั้งแถบ — หัว (สาขา) และเมนูผู้ใช้ไม่หลุดอยู่นอก landmark */}
         <aside aria-label={t("sidebar")} className="flex h-full min-h-0 w-full flex-col">
           <SidebarHeader>
@@ -30,6 +31,7 @@ export function AppSidebar(props: ComponentProps<typeof Sidebar>) {
             <NavUser me={me} />
           </SidebarFooter>
         </aside>
+        <SidebarRail />
       </Sidebar>
       <BranchSwitchConfirm state={branchSwitch} />
     </>

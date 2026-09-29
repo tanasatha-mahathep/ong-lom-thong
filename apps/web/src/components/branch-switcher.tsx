@@ -78,14 +78,13 @@ function BranchLabel({ me }: { me: Me }) {
  */
 export function BranchSwitcher({ me, onSelect }: { me: Me; onSelect: (branch: Branch) => void }) {
   const { t } = useTranslation("shell");
-  const { isMobile, state } = useSidebar();
-  const collapsed = state === "collapsed" && !isMobile;
+  const { isMobile } = useSidebar();
 
   if (!canSwitchBranch(me)) {
     return (
       <SidebarMenu>
         <SidebarMenuItem>
-          <SidebarMenuButton size="lg" asChild tooltip={collapsed ? (me.branch?.name ?? undefined) : undefined}>
+          <SidebarMenuButton size="lg" asChild tooltip={me.branch?.name}>
             <Link to="/">
               <BranchTile />
               <BranchLabel me={me} />

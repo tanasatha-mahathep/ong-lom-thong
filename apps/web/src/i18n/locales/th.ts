@@ -69,7 +69,6 @@ export default {
     notifications: "การแจ้งเตือน",
     closeNotification: "ปิดการแจ้งเตือน",
     currentBranch: "สาขาปัจจุบัน",
-    quickBuy: "ซื้อเข้า",
     groups: {
       reports: "รายงาน",
       settings: "ตั้งค่า",

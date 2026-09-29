@@ -27,6 +27,8 @@ export interface NavItem {
   icon: LucideIcon;
   /** role ที่เห็นเมนูนี้ — ไม่ระบุ = ทุก role */
   roles?: readonly Role[];
+  /** งานหลักของหน้าร้าน — แสดงเป็นปุ่มสีหลัก (ตำแหน่ง Quick Create เดิม · มีเมนูเดียว ไม่ซ้ำ) */
+  primary?: boolean;
 }
 
 export interface NavGroup {
@@ -50,7 +52,7 @@ const NAV: readonly NavGroup[] = [
   {
     items: [
       { title: "home", to: "/", icon: House },
-      { title: "buy", to: "/buy", icon: HandCoins, roles: BILL_CREATORS },
+      { title: "buy", to: "/buy", icon: HandCoins, roles: BILL_CREATORS, primary: true },
       { title: "bills", to: "/bills", icon: ReceiptText },
       { title: "customers", to: "/customers", icon: Users },
     ],

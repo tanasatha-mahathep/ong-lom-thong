@@ -1,5 +1,5 @@
 import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
-import type { CSSProperties } from "react";
+import { type CSSProperties, useState } from "react";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SiteHeader } from "@/components/site-header";
 import { SkipLink } from "@/components/skip-link";
@@ -7,6 +7,7 @@ import { NotFoundPage } from "@/components/status-page";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { ApiError } from "@/lib/api";
 import { meQueryOptions, useMe } from "@/lib/queries";
+import { readSidebarOpen } from "@/lib/sidebar-state";
 
 /** ทุกหน้าหลัง login — guard: ต้องมี session (401 → /login พร้อม redirect กลับ) */
 export const Route = createFileRoute("/_app")({
@@ -32,8 +33,11 @@ export const Route = createFileRoute("/_app")({
 /** โครงของ dashboard-01: sidebar แบบ inset + หัวหน้า + เนื้อหา */
 function AppLayout() {
   const me = useMe();
+  // อ่าน cookie ครั้งเดียวตอน mount — ย่อ sidebar ค้างไว้ข้ามการโหลดหน้า
+  const [defaultOpen] = useState(readSidebarOpen);
   return (
     <SidebarProvider
+      defaultOpen={defaultOpen}
       style={
         {
           "--sidebar-width": "calc(var(--spacing) * 64)",
