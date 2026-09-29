@@ -16,6 +16,8 @@ import { type CustomerListItem, MAX_QUERY_LENGTH, MIN_QUERY_LENGTH, normalizeQue
 import { customerListQuery } from "@/features/customers/queries";
 import { useCustomerSync } from "@/features/customers/sync";
 import { EMPTY } from "@/lib/format";
+import { looksLikeNationalId } from "@/lib/sensitive-query";
+import { useHeldQuery } from "@/lib/use-held-query";
 
 const SearchSchema = z.object({
   // router แปลงค่าที่เป็นตัวเลขล้วนใน URL เป็น number (?q=0812345678 จากที่พิมพ์เอง) — แปลงกลับเป็นข้อความ
@@ -40,9 +42,21 @@ function CustomersPage() {
   const navigate = Route.useNavigate();
   useCustomerSync();
 
+  // เลขบัตรที่พิมพ์ค้นอยู่ในหน้านี้เท่านั้น ไม่ลง URL · ลิงก์เก่า/บุ๊กมาร์กที่มีเลขบัตรใน ?q= ก็ถูกเก็บไว้แบบนี้
+  // แล้ว effect ด้านล่างแทนที่ URL ด้วยฉบับที่ไม่มีเลขบัตร
+  const { held, hold, release, setPage } = useHeldQuery(search);
+  const scrubLegacyLink = useEffectEvent(() => {
+    void navigate({ search: { q: "", page: search.page }, replace: true });
+  });
+  useEffect(() => {
+    if (looksLikeNationalId(search.q)) scrubLegacyLink();
+  }, [search.q]);
   // q 1 ตัวอักษร (พิมพ์ URL เอง) API ตอบ 400 — แสดงทั้งหมดแทน
-  const q = search.q.length < MIN_QUERY_LENGTH ? "" : search.q;
-  const list = useQuery(customerListQuery({ q, page: search.page }));
+  const urlQ = search.q.length < MIN_QUERY_LENGTH ? "" : search.q;
+  const q = held?.q ?? urlQ;
+  // หน้าตามเลขบัตรที่ค้าง: ค้นเลขบัตรจากหน้า 3 ต้องขอหน้า 1 เลย ไม่ใช่ "เลขบัตร + หน้า 3" ก่อน URL จะทัน
+  const page = held?.page ?? search.page;
+  const list = useQuery(customerListQuery({ q, page }));
 
   const columns = useMemo(
     () => [
@@ -93,7 +107,16 @@ function CustomersPage() {
           </Button>
         }
       />
-      <SearchBox q={q} onSearch={(value) => void navigate({ search: { q: value, page: 1 }, replace: true })} />
+      <SearchBox
+        q={q}
+        onSearch={(value) => {
+          // เลขบัตรเต็ม: ค้นได้แต่ไม่ลง URL — เก็บไว้ที่หน้านี้ แล้ว URL เหลือแค่หน้า 1 ไม่มี ?q=
+          const sensitive = looksLikeNationalId(value);
+          if (sensitive) hold(value);
+          else release();
+          void navigate({ search: { q: sensitive ? "" : value, page: 1 }, replace: true });
+        }}
+      />
       {list.isError && (
         <Alert variant="destructive">
           <CircleAlert aria-hidden="true" />
@@ -110,9 +133,12 @@ function CustomersPage() {
         columns={columns}
         data={list.data?.items ?? []}
         getRowId={(customer) => customer.id}
-        page={search.page}
+        page={page}
         hasMore={list.data?.has_more ?? false}
-        onPageChange={(page) => void navigate({ search: (prev) => ({ ...prev, page }) })}
+        onPageChange={(next) => {
+          setPage(next);
+          void navigate({ search: (prev) => ({ ...prev, page: next }) });
+        }}
         onRowClick={(customer) => void navigate({ to: "/customers/$id", params: { id: customer.id } })}
         isLoading={list.isPending}
         emptyMessage={q ? t("list.emptySearch", { q }) : t("list.empty")}
