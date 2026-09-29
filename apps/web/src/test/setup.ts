@@ -6,6 +6,7 @@ import "@/i18n";
 import { cleanup, configure } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, vi } from "vitest";
+import { resetBackTargets } from "@/lib/back-target";
 import { resetBlocking } from "@/lib/blocking";
 import { resetUnsavedChanges } from "@/lib/unsaved-changes";
 
@@ -20,6 +21,7 @@ afterEach(() => {
   toast.dismiss();
   // ชั้นบังหน้าจอ (lib/blocking.ts) เป็น store ระดับโมดูล — ไม่ให้ค้างไปเทสต์ถัดไป
   resetBlocking();
+  resetBackTargets();
   resetUnsavedChanges();
   // ธีม/ภาษาที่เทสต์ก่อนหน้าตั้งไว้ไม่ค้างมาเทสต์ถัดไป
   localStorage.clear();

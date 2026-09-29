@@ -6,6 +6,7 @@ import { SkipLink } from "@/components/skip-link";
 import { NotFoundPage } from "@/components/status-page";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { ApiError } from "@/lib/api";
+import { useRememberListSearch } from "@/lib/back-target";
 import { useContentEpoch } from "@/lib/branch-epoch";
 import { meQueryOptions } from "@/lib/queries";
 import { readSidebarOpen } from "@/lib/sidebar-state";
@@ -34,6 +35,8 @@ export const Route = createFileRoute("/_app")({
 /** โครงของ dashboard-01: sidebar แบบ inset + หัวหน้า + เนื้อหา */
 function AppLayout() {
   const contentEpoch = useContentEpoch();
+  // ปุ่มย้อนกลับของหน้าเอกสารพากลับไปรายการพร้อมตัวกรองเดิม (components/page-header.tsx)
+  useRememberListSearch();
   // อ่าน cookie ครั้งเดียวตอน mount — ย่อ sidebar ค้างไว้ข้ามการโหลดหน้า
   const [defaultOpen] = useState(readSidebarOpen);
   return (

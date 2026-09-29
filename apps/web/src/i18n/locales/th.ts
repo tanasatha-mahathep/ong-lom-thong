@@ -78,6 +78,11 @@ export default {
     notifications: "การแจ้งเตือน",
     closeNotification: "ปิดการแจ้งเตือน",
     currentBranch: "สาขาปัจจุบัน",
+    /** ปุ่มย้อนกลับ [←] หน้าชื่อหน้าเอกสาร (PageHeader `back`) */
+    back: {
+      customers: "กลับไปรายการลูกค้า",
+      bills: "กลับไปค้นบิล",
+    },
     groups: {
       reports: "รายงาน",
       settings: "ตั้งค่า",
