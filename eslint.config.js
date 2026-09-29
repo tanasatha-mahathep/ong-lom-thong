@@ -18,6 +18,12 @@ export default defineConfig(
     "apps/web/src/routeTree.gen.ts",
     "apps/web/.tanstack/",
     "packages/db/migrations/",
+    // Playwright output: the HTML report bundles the trace viewer's JS
+    "tests/e2e/test-results/",
+    "tests/e2e/playwright-report/",
+    "tests/e2e/blob-report/",
+    // Python venv ของ tests/testsprite มีไฟล์ .js ของ urllib3
+    "**/.venv/",
   ]),
   js.configs.recommended,
   tseslint.configs.recommendedTypeChecked,
@@ -63,6 +69,13 @@ export default defineConfig(
     // @ong/core/receipt — component ที่ render ทั้งบนเว็บและใน API (PDF) · ไม่ใช่แอป vite จึงไม่ใช้ react-refresh
     files: ["packages/core/src/**/*.tsx"],
     extends: [reactHooks.configs.flat.recommended],
+  },
+  {
+    // ด่าน coverage 100% ต่อไฟล์ของ packages/core (vitest.config.ts) — ห้ามข้ามด้วยคอมเมนต์ ignore
+    files: ["packages/core/src/**/*.{ts,tsx}"],
+    rules: {
+      "no-warning-comments": ["error", { terms: ["v8 ignore", "istanbul ignore", "c8 ignore"], location: "anywhere" }],
+    },
   },
   { files: ["**/*.js"], extends: [tseslint.configs.disableTypeChecked] },
   {

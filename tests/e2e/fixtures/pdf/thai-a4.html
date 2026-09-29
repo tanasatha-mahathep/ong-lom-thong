@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <title>E2E-THAI-A4</title>
+    <!--
+      Golden fixture of specs/pdf/thai-a4.spec.ts: synthetic data only (CLAUDE.md rule 8), nothing from the clock.
+      Each h1/p element is one expected line of text. Sarabun is an installed system font of the Gotenberg image (no
+      font file is sent); keep font-family "Sarabun" declared exactly once — the negative control swaps it out.
+    -->
+    <style>
+      @page {
+        size: A4;
+        margin: 15mm 18mm;
+      }
+      body {
+        margin: 0;
+        font-family: "Sarabun", sans-serif;
+        font-size: 14pt;
+        line-height: 1.6;
+        color: #000;
+      }
+      h1 {
+        margin: 0 0 6mm;
+        font-size: 18pt;
+        font-weight: 700;
+      }
+      p {
+        margin: 0 0 2mm;
+      }
+      b {
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>ใบรับซื้อทองคำ (ทดสอบ)</h1>
+    <p>ซื้อ ที่ น้ำ ทองคำ</p>
+    <p>ปู่ย่า กี่ ผู้ นี้ จี๊ด ตี๋ ญี่ปุ่น กตัญญู</p>
+    <p>ก่ ก้ ก๊ ก๋ กั กิ กี กึ กื กุ กู ก็ ก์</p>
+    <p>๐๑๒๓๔๕๖๗๘๙ 0123456789</p>
+    <p>รวมเป็นเงิน 67,850.00 บาท (๖๗,๘๕๐.๐๐ บาท)</p>
+    <p><b>หกหมื่นเจ็ดพันแปดร้อยห้าสิบบาทถ้วน</b></p>
+    <p>ชื่อผู้ขาย : ทดสอบ ใจดี เลขประจำตัวประชาชน 1 0000 12345 67 7</p>
+  </body>
+</html>

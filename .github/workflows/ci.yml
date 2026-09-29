@@ -1,11 +1,19 @@
 name: ci
 
+# วงแหวน CI (.claude/skills/ci-pipeline/SKILL.md)
+#   ring 0 — ทุก PR + push ทุก branch: check · scan · db-verify (รันขนานกัน)
+#   ring 1 — push testing/staging/main · workflow_dispatch: image → e2e · sca
+#            promote ทีละขั้นด้วย merge commit (make promote) → ring 1 รันบน merge commit ของ branch ปลายทาง
+#            เนื้อโค้ดเท่ากับต้นทางที่ผ่าน ring 0 แล้ว — ring 1 คือสัญญาณใหม่ ไม่ใช่รัน ring 0 ซ้ำ
+#            รัน ring 1 บน branch ก่อน merge: make ci-full (= gh workflow run ci.yml --ref <branch>)
+#   release — push main เมื่อทุก gate ข้างบนผ่าน
+# gate ที่ make promote และ Railway (รอ check suite) พึ่ง ต้องอยู่ในไฟล์นี้ · งาน advisory: security.yml · testsprite.yml · deploy-smoke.yml
 on:
   push:
-    # dev → testing → staging → main (promote ทีละขั้นด้วย merge commit ผ่าน PR promotion) · release ออกจาก main เท่านั้น
+    # dev → testing → staging → main (promote ทีละขั้นด้วย merge commit) · release ออกจาก main เท่านั้น
     branches: [main, staging, testing, dev]
   pull_request:
-  # ขั้น sync หลัง release สั่งรันบน branch ที่ขยับ (push ด้วย GITHUB_TOKEN ไม่ trigger ci เอง) · รันซ้ำเองได้
+  # ring 1 ก่อน merge · ขั้น sync หลัง release สั่งรันบน branch ที่ขยับ (push ด้วย GITHUB_TOKEN ไม่ trigger ci เอง)
   workflow_dispatch:
 
 concurrency:
@@ -15,15 +23,17 @@ concurrency:
 permissions:
   contents: read
 
-# actions ปักที่ commit SHA (กัน tag ถูกย้าย) — Renovate (helpers:pinGitHubActionDigests) อัปเดตให้พร้อมคอมเมนต์เวอร์ชัน
+# actions ปักที่ commit SHA · image ปักที่ digest (กัน tag ถูกย้าย) — Renovate อัปเดตให้พร้อมคอมเมนต์เวอร์ชัน
 jobs:
+  # ring 0 — ด่านของ node toolchain: commit · lint · format · type · เทสต์ทุกชั้นในโปรเซส + coverage เงิน · build · งบ bundle
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     # เทสต์ของ apps/api ใช้ Postgres จริง (สร้าง database ต่อไฟล์เทสต์) — รุ่นเดียวกับ Railway
     services:
       postgres:
-        image: postgres:18-alpine
+        # digest เดียวกับ docker-compose.yml — Renovate (docker:pinDigests) อัปเดตพร้อมกัน
+        image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
         env:
           POSTGRES_USER: ong
           POSTGRES_PASSWORD: ong
@@ -48,7 +58,8 @@ jobs:
             && docker run -d --name gotenberg -p 3000:3000 \
               -e GOTENBERG_API_BASIC_AUTH_USERNAME=ong -e GOTENBERG_API_BASIC_AUTH_PASSWORD=ongongong ong-gotenberg
           } > "$RUNNER_TEMP/gotenberg.log" 2>&1 &
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0 — เวอร์ชัน pnpm จาก packageManager
+      # เวอร์ชัน pnpm มาจาก packageManager ใน package.json
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
@@ -84,11 +95,300 @@ jobs:
           done
           cat "$RUNNER_TEMP/gotenberg.log"; docker logs gotenberg || true
           exit 1
+      # unit + integration ทุก project (Postgres · Gotenberg จริง)
       - run: pnpm test
+      # ด่าน coverage 100% ต่อไฟล์ของโมดูลเงิน/ภาษีใน packages/core — วัดจากเทสต์หน่วยของ core อย่างเดียว (vitest.config.ts)
+      - name: coverage gate (packages/core)
+        run: pnpm test:coverage
+      # ตารางและไฟล์รายงานยังออกแม้ด่าน/เทสต์ fail (coverage.reportOnFailure) — ข้ามเฉพาะตอนถูกยกเลิกหรือไม่มีรายงาน
+      - name: coverage summary
+        if: ${{ !cancelled() && hashFiles('coverage/coverage-summary.json') != '' }}
+        run: |
+          node --input-type=module >> "$GITHUB_STEP_SUMMARY" <<'JS'
+          import { readFileSync } from "node:fs";
+          import { relative } from "node:path";
+          const summary = JSON.parse(readFileSync("coverage/coverage-summary.json", "utf8"));
+          const metrics = ["lines", "branches", "functions", "statements"];
+          const cell = (m) => `${m.pct}% (${m.covered}/${m.total})`;
+          const rows = Object.entries(summary)
+            .filter(([file]) => file !== "total")
+            .map(([file, s]) => [relative(process.cwd(), file), s])
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([file, s]) => `| \`${file}\` | ${metrics.map((k) => cell(s[k])).join(" | ")} |`);
+          console.log("### Coverage gate: packages/core (100% per file; exceptions in vitest.config.ts)\n");
+          console.log(`| File | ${metrics.join(" | ")} |`);
+          console.log(`| --- | ${metrics.map(() => "---:").join(" | ")} |`);
+          console.log(rows.join("\n"));
+          console.log(`| **Total** | ${metrics.map((k) => `**${cell(summary.total[k])}**`).join(" | ")} |`);
+          JS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() && hashFiles('coverage/coverage-summary.json') != '' }}
+        with:
+          name: coverage-core
+          path: coverage/
+          retention-days: 14
+      # guard ของตัวห่อ TestSprite (ออฟไลน์ · < 1 วินาที) — vitest ที่ root ไม่ครอบ tests/*
+      - run: pnpm --filter @ong/testsprite test
       - run: pnpm build
+      - name: web bundle budget
+        run: node scripts/ci/bundle-budget.js
+
+  # ring 0 — scanner ใน container ปัก digest (ไม่ติดตั้ง dependency ของ repo → ไม่มีโค้ดจาก npm ได้รันใน job นี้)
+  # คำสั่งเดียวกับ make ci-lint · secret-scan · sast · ผลอยู่ใน step summary · รายงานเต็มอัปโหลดเมื่อ fail
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # gitleaks สแกนประวัติทั้งหมด
+          persist-credentials: false
+      - name: workflow lint (actionlint · zizmor · shellcheck)
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }} # zizmor online audits (impostor-commit · known-vulnerable-actions) — อ่านอย่างเดียว
+        run: make ci-lint
+      - name: secret scan (gitleaks · tree + full history)
+        timeout-minutes: 5
+        run: make secret-scan
+      - name: SAST (semgrep CE · apps + packages)
+        timeout-minutes: 10
+        run: make sast
+      - name: security reports
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: security-reports
+          path: ${{ runner.temp }}/ong-sec
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # ring 0 — migration ต้อง deploy ได้ปลอดภัย (scripts/ci/db-verify.sh): drift ของ schema.ts · append-only เทียบ tag ที่
+  # production ใช้ · upgrade จาก tag นั้นด้วย runner + seed ของมันเอง · fresh install ×2 · schema ตรงกันทั้งสองทาง · functions.sql
+  db-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+        env:
+          POSTGRES_USER: ong
+          POSTGRES_PASSWORD: ong
+          POSTGRES_DB: ong
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ong" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://ong:ong@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # BASE_REF = tag v* ล่าสุดที่ถึงได้จาก origin/main — ต้องมีประวัติเต็ม + tags
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      # ติดตั้งเต็มเหมือน check — cache ของ pnpm ใช้ key เดียวกัน ถ้า job นี้ save store ที่ไม่ครบ check จะต้องโหลดใหม่ทุกครั้ง
+      - run: pnpm install --frozen-lockfile
+      - run: make db-verify
+
+  # ring 0 — cron สำรองข้อมูล (services/backup) — Railway build Dockerfile นี้เองตอน deploy · ให้พังใน PR ไม่ใช่ตอน cron รันตีสอง
+  # เทสต์ของสคริปต์อยู่ใน pnpm test ของ job check แล้ว · job นี้ตรวจ shell + image ที่จะรันจริง
+  backup-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: shellcheck
+        run: |
+          command -v shellcheck >/dev/null || { sudo apt-get update -q && sudo apt-get install -yq shellcheck; }
+          shellcheck --version
+          shellcheck services/backup/*.sh
+      - run: docker build -t ong-backup services/backup
+      # คำสั่งที่ backup.sh ต้องใช้มีครบใน image (pg_dump 18 · rclone · timeout ของ busybox)
+      - name: tools in the image
+        run: >-
+          docker run --rm --entrypoint /bin/bash ong-backup -c
+          'pg_dump --version && pg_restore --version && rclone version | head -1 && command -v timeout awk'
+
+  # ring 1 — image ที่ Railway build: build ครั้งเดียว → smoke → SBOM → Trivy gate → ส่ง bytes เดียวกันให้ e2e
+  image:
+    needs: [check, scan, db-verify]
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && contains(fromJSON('["refs/heads/testing", "refs/heads/staging", "refs/heads/main"]'), github.ref))
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      IMAGE: ong-api:ci
+      # docker:// step รันโดยมี workspace เป็น cwd — DB ของ Trivy โหลดครั้งเดียวแล้วใช้ซ้ำทุก step
+      TRIVY_CACHE_DIR: .trivy-cache
+      TRIVY_NO_PROGRESS: "true"
+      TRIVY_TIMEOUT: 15m # ลำพังโหลด DB ก็เกิน default 5 นาทีได้
+      # ไม่มีอะไรของ repo private ออกจาก runner: ปิด telemetry และการเช็คเวอร์ชัน
+      TRIVY_DISABLE_TELEMETRY: "true"
+      TRIVY_SKIP_VERSION_CHECK: "true"
+    outputs:
+      api-image-id: ${{ steps.build.outputs.api-image-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: build apps/api/Dockerfile (context = repo root, like Railway)
+        id: build
+        run: |
+          docker buildx build --load -f apps/api/Dockerfile -t "$IMAGE" .
+          echo "api-image-id=$(docker image inspect -f '{{.Id}}' "$IMAGE")" >> "$GITHUB_OUTPUT"
+      - name: smoke the image
+        env:
+          SKIP_BUILD: "1"
+        run: scripts/ci/image-smoke.sh
+      - name: save the image (the exact bytes e2e will test)
+        run: docker save "$IMAGE" -o api-image.tar
+      # Trivy ผ่าน image ปัก digest ไม่ใช่ trivy-action — tag ของ action ชุดนั้นถูกเจาะเมื่อ มี.ค. 2026 (GHSA-69fq-xp46-6x23)
+      # และ action แบบ composite ปัก SHA ได้แค่ชั้นบนสุด · image digest = bytes ที่รันจริง (Renovate อัปเดตให้)
+      - name: SBOM (CycloneDX)
+        uses: docker://aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+        with:
+          args: image --input api-image.tar --format cyclonedx --output sbom.cdx.json
+      - name: SBOM metadata (NTIA minimum elements — author, supplier, primary component)
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          jq --arg repo "$REPO" --arg sha "$GITHUB_SHA" '.metadata.authors = [{name: "GitHub Actions ci.yml, \($repo)"}]
+            | .metadata.supplier = {name: ($repo | split("/")[0]), url: ["https://github.com/\($repo)"]}
+            | .metadata.lifecycles = [{phase: "post-build"}]
+            | .metadata.component.name = "\($repo)/api" | .metadata.component.version = $sha' sbom.cdx.json > sbom.json
+          mv sbom.json sbom.cdx.json
+      - name: validate the SBOM (CycloneDX 1.7 schema)
+        uses: docker://cyclonedx/cyclonedx-cli:0.33.1@sha256:252c2e26f468c25fea1e63ecde1bc3198ad6e9dbb57f5ed3236bddcb2281b3a7
+        with:
+          args: validate --input-file sbom.cdx.json --input-format json --input-version v1_7 --fail-on-errors
+      - name: vulnerability report (every severity, nothing suppressed)
+        uses: docker://aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+        with:
+          args: image --input api-image.tar --scanners vuln,secret --format json --output trivy-report.json
+      - name: vulnerability summary
+        run: |
+          jq -r '"### Trivy — every finding in the api image (before .trivyignore.yaml)", "",
+            "| Severity | Findings | Fix available |", "| --- | --: | --: |",
+            ([.Results[] | (.Vulnerabilities // [])[]] | group_by(.Severity)[]
+            | "| \(.[0].Severity) | \(length) | \(map(select((.FixedVersion // "") != "")) | length) |")' \
+            trivy-report.json >> "$GITHUB_STEP_SUMMARY"
+      - name: trivy gate — HIGH/CRITICAL with a fix available fails
+        uses: docker://aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+        with:
+          args: >-
+            image --input api-image.tar --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed
+            --ignorefile .trivyignore.yaml --show-suppressed --table-mode detailed --exit-code 1
+      - name: keep the evidence (SBOM + full report)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-evidence
+          path: |
+            sbom.cdx.json
+            trivy-report.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: hand the image to e2e
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: api-image
+          path: api-image.tar
+          if-no-files-found: error
+          retention-days: 1 # ส่งต่อ ไม่ใช่หลักฐาน (~90 MB zipped) — เหลือโควตา artifact 500 MB ของ repo private
+
+  # ring 1 — Playwright บน stack จริง (tests/e2e) จาก image ที่ job image build และตรวจแล้ว — ห้าม build api ซ้ำที่นี่
+  e2e:
+    name: e2e (Playwright)
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      API_IMAGE: ong-api:ci # = tag ที่ job image save ลง artifact api-image
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: api-image
+          path: ${{ runner.temp }}/api-image
+      # image ID คือ digest ของเนื้อหา — ตรงกัน = bytes เดียวกับที่ smoke และ Trivy ตรวจ
+      - name: load the api image the image job tested
+        env:
+          API_IMAGE_ID: ${{ needs.image.outputs.api-image-id }}
+        run: |
+          docker load --input "$RUNNER_TEMP/api-image/api-image.tar"
+          test "$(docker image inspect -f '{{.Id}}' "$API_IMAGE")" = "$API_IMAGE_ID"
+          rm "$RUNNER_TEMP/api-image/api-image.tar"
+      # คำแนะนำของ Playwright: ดาวน์โหลด browser ทุกรอบ ไม่ cache
+      - name: install Chromium
+        run: pnpm --filter @ong/e2e exec playwright install --with-deps chromium
+      # API_IMAGE ตั้งไว้ → stack ไม่ build api · build เฉพาะ gotenberg (~1.7 GB — ไม่ส่งเป็น artifact)
+      - name: start the e2e stack
+        run: bash tests/e2e/stack/stack.sh up
+      - name: playwright (smoke · api · pdf · ui)
+        run: pnpm --filter @ong/e2e exec playwright test
+      - name: summary
+        if: ${{ !cancelled() }}
+        run: |
+          junit=tests/e2e/test-results/junit.xml
+          [ -f "$junit" ] || exit 0
+          totals=$(grep -o '<testsuites [^>]*>' "$junit" | grep -oE '(tests|failures|skipped|errors|time)="[^"]*"' | tr '\n' ' ')
+          { echo "### e2e (Playwright)"; echo; echo "$totals"; echo; echo "on failure: artifact e2e-report (HTML report · traces · junit · stack log)"; } >> "$GITHUB_STEP_SUMMARY"
+      - name: stack log
+        if: failure()
+        run: bash tests/e2e/stack/stack.sh logs --no-color --timestamps > tests/e2e/test-results/stack.log 2>&1 || true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: e2e-report
+          path: |
+            tests/e2e/playwright-report/
+            tests/e2e/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: stop the e2e stack
+        if: always()
+        run: bash tests/e2e/stack/stack.sh down
+
+  # ring 1 — advisory ใหม่ประกาศได้ทุกวันแม้ SHA เดิม → ให้สัญญาณใหม่ตอน promote
+  # fail = run ของ ci.yml บน branch นั้นแดง → make promote ขั้นถัดไปไม่ได้ · แก้ด้วยการอัปเกรด หรือ ignore ที่มีเหตุผล + วันหมดอายุ
+  sca:
+    name: sca (osv-scanner · pnpm-lock.yaml)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && contains(fromJSON('["refs/heads/testing", "refs/heads/staging", "refs/heads/main"]'), github.ref))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: make sca
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sca-report
+          path: ${{ runner.temp }}/ong-sec/sca
+          retention-days: 14
+          if-no-files-found: ignore
 
   release:
-    needs: check
+    # ออก release เมื่อทุก gate ของ main ผ่าน (ring 1 รันบน push main เสมอ)
+    needs: [check, scan, db-verify, backup-image, image, e2e, sca]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10

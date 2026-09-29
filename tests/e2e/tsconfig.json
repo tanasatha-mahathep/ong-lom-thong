@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // specs run code in the page too (page.evaluate) — DOM types for those callbacks
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  "include": ["playwright.config.ts", "lib", "specs"]
+}

@@ -1,0 +1,61 @@
+{
+  "$comment": "สำเนาที่ commit ของเทสต์ backend บน TestSprite — ของที่รันจริงคือสำเนาบน cloud ที่ `pnpm --filter @ong/testsprite run sync --apply` อัปโหลด · ชื่อ project ต้องตรง name_pattern และ URL เป้าหมายต้องเป็น host ของ environment นั้นเท่านั้น (แก้ allow-list ผ่าน PR) · known_failure = บั๊กที่รู้แล้ว: ไม่ sync และ pytest ถือเป็น xfail(strict)",
+  "project": {
+    "type": "backend",
+    "name_pattern": "^ong-lom-thong-(testing|staging-readonly)-backend$",
+    "hosts": {
+      "testing": "ong-lom-thong-testing.up.railway.app",
+      "staging-readonly": "ong-lom-thong-staging.up.railway.app"
+    }
+  },
+  "tests": [
+    {
+      "file": "backend/test_health.py",
+      "name": "ong-probe-health",
+      "description": "GET /healthz และ /api/healthz = 200 JSON {ok, time} ไม่มีข้อมูลภายใน",
+      "sync": true
+    },
+    {
+      "file": "backend/test_auth_required.py",
+      "name": "ong-probe-auth-required",
+      "description": "route ข้อมูลใต้ /api ไม่มี session / cookie ปลอม / Bearer = 401 {error: unauthorized}",
+      "sync": true
+    },
+    {
+      "file": "backend/test_origin_guard.py",
+      "name": "ong-probe-origin-guard",
+      "description": "คำขอเขียนจาก origin อื่นหรือไม่มี Origin = 403 · origin เดียวกันหยุดที่ 401 · ไม่มี CORS เปิด",
+      "sync": true
+    },
+    {
+      "file": "backend/test_malformed_ids.py",
+      "name": "ong-probe-malformed-ids",
+      "description": "id/query ผิดรูปก่อน login = 401 เหมือนกันทุกตัว ไม่มี 5xx ไม่ฉีด header",
+      "sync": true
+    },
+    {
+      "file": "backend/test_error_hygiene.py",
+      "name": "ong-probe-error-hygiene",
+      "description": "error body ไม่มี stack trace / path ภายใน / ข้อความ DB · ไม่มี 5xx",
+      "sync": true
+    },
+    {
+      "file": "backend/test_security_headers.py",
+      "name": "ong-probe-security-headers",
+      "description": "พิมพ์ header ที่สังเกตได้ · ไม่บอกเวอร์ชัน · cookie hardened · ไม่มี CORS wildcard",
+      "sync": true
+    },
+    {
+      "file": "backend/test_unknown_api_route.py",
+      "name": "ong-probe-unknown-api-route",
+      "description": "path ที่ไม่มีใต้ /api = 404 JSON {error: not found} ทุก method · path ย่อยใต้ route ที่ต้อง login หยุดที่ 401",
+      "sync": true
+    },
+    {
+      "file": "backend/test_security_headers_baseline.py",
+      "name": "ong-probe-security-headers-baseline",
+      "description": "nosniff · กัน framing · CSP ไม่ยอม inline script · Referrer-Policy · COOP · /api no-store · HSTS (https)",
+      "sync": true
+    }
+  ]
+}

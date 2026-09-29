@@ -1,5 +1,5 @@
-import AxeBuilder from "@axe-core/playwright";
 import { type Page, type Route, expect, test } from "@playwright/test";
+import { expectAccessible } from "./a11y";
 
 /**
  * จำลอง Siam ID บน Chromium จริง (เทียบเท่า SiamIdTabOrderTest ของ Django · spec §7) — API ปลอมทั้งหมด ไม่ต้องมี DB
@@ -175,13 +175,6 @@ async function siamIdTypes(page: Page) {
     await page.keyboard.press("Tab");
   }
   await expect(slot(page, 9)).toBeFocused();
-}
-
-async function expectAccessible(page: Page) {
-  const { violations } = await new AxeBuilder({ page })
-    .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
-    .analyze();
-  expect(violations.map((v) => ({ rule: v.id, nodes: v.nodes.map((n) => n.target.join(" ")) }))).toEqual([]);
 }
 
 const pngBytes = [...Buffer.from(PNG_B64, "base64")];
