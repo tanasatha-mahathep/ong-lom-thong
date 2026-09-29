@@ -25,14 +25,23 @@ const QuoteBody = z.object({
 const SetBody = z.object({
   bar_sell: z.string(),
   confirm_typo: z.boolean().optional(),
-  /** ผู้จัดการกด "ใช้ราคาสมาคมเป็นค่าเริ่มต้น" ก่อนบันทึก — ลง audit คู่กับราคาสมาคมที่เซิร์ฟเวอร์เห็น */
-  from_reference: z.boolean().optional(),
+  /**
+   * ผู้จัดการกด "ใช้ราคาสมาคมเป็นค่าเริ่มต้น" ก่อนบันทึก — ประกาศที่ browser เติมมา (เป็นคำอ้าง ไม่ใช่ข้อเท็จจริง)
+   * ลง audit แยกจากราคาสมาคมที่เซิร์ฟเวอร์เห็นเอง
+   */
+  from_reference: z
+    .object({
+      announced_at: z.iso.datetime({ offset: true }).max(40),
+      round: z.number().int().min(1).max(999).nullable(),
+    })
+    .strict()
+    .optional(),
 });
 
 const BAR_SELL_ERROR = apiError("ต้องส่ง bar_sell เป็นข้อความตัวเลข", "bar_sell");
 const BRANCH_ID_ERROR = apiError("branch_id ไม่ถูกต้อง", "branch_id");
 const CONFIRM_TYPO_ERROR = apiError("confirm_typo ต้องเป็นจริงหรือเท็จ", "confirm_typo");
-const FROM_REFERENCE_ERROR = apiError("from_reference ต้องเป็นจริงหรือเท็จ", "from_reference");
+const FROM_REFERENCE_ERROR = apiError("from_reference ต้องมี announced_at และ round ของประกาศ", "from_reference");
 
 /**
  * ช่องที่ผิดจริงของ SetBody (F5) — zod คืน issue ของ bar_sell ก่อนเสมอถ้าทั้งคู่ผิด (ลำดับตาม schema)
@@ -146,7 +155,7 @@ export const goldPriceRoutes = new Hono<AppEnv>()
       if (q.warning && !body.data.confirm_typo) {
         return c.json({ ...apiError(q.warning, "confirm_typo"), warning: q.warning }, 409);
       }
-      const reference = referenceAudit(c.var.goldReference.peek(), !!body.data.from_reference, q.barSell);
+      const reference = referenceAudit(c.var.goldReference.peek(), body.data.from_reference ?? null, q.barSell);
       await setCentralPrice(c.var.db, date, q, c.var.viewer.userId, !!q.warning, reference);
       const price = await priceForBranch(c.var.db, date, null);
       const setting = await loadGoldSetting(c.var.db);
@@ -169,7 +178,7 @@ export const goldPriceRoutes = new Hono<AppEnv>()
       if (q.warning && !body.data.confirm_typo) {
         return c.json({ ...apiError(q.warning, "confirm_typo"), warning: q.warning }, 409);
       }
-      const reference = referenceAudit(c.var.goldReference.peek(), !!body.data.from_reference, q.barSell);
+      const reference = referenceAudit(c.var.goldReference.peek(), body.data.from_reference ?? null, q.barSell);
       await setBranchPrice(c.var.db, date, target, q, c.var.viewer.userId, !!q.warning, reference);
       return c.json(toBranchJson(target, await priceForBranch(c.var.db, date, target.id)));
     } catch (e) {

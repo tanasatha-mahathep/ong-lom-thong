@@ -154,73 +154,117 @@ describe.skipIf(!available)(
         return row?.diff as Record<string, unknown> | undefined;
       };
 
-      it("from_reference ผิดชนิด = 400 ชี้ field", async () => {
+      const PREFILL = { announced_at: "2026-09-29T09:31:00+07:00", round: 2 };
+      const SERVER_SEEN = {
+        source: "classic.goldtraders.or.th",
+        announced_at: "2026-09-29T09:31:00+07:00",
+        round: 2,
+        bar_sell: "67850.00",
+        fetched_at: "2026-09-29T03:00:00.000Z",
+      };
+
+      it.each([
+        ["boolean (รูปเก่า)", true],
+        ["ข้อความ", "yes"],
+        ["ไม่มี round", { announced_at: PREFILL.announced_at }],
+        ["เวลาไม่ใช่ ISO", { announced_at: "29/09/2569 09:31", round: 2 }],
+        ["round เป็น 0", { ...PREFILL, round: 0 }],
+        ["มีช่องเกิน", { ...PREFILL, bar_sell: "1" }],
+      ])("from_reference ผิดรูป (%s) = 400 ชี้ field ไม่บันทึก", async (_, from_reference) => {
         const body = await expectApiError(
-          await put("/api/gold-price/today", { bar_sell: "67850", from_reference: "yes" }),
+          await put("/api/gold-price/today", { bar_sell: "67850", from_reference }),
           400,
         );
         expect(body.field).toBe("from_reference");
+        expect(await t.db.select().from(goldPrice)).toEqual([]);
       });
 
       it("CSRF: PUT จาก origin อื่น = 403 ไม่บันทึก", async () => {
         const res = await put(
           "/api/gold-price/today",
-          { bar_sell: "67850", from_reference: true },
+          { bar_sell: "67850", from_reference: PREFILL },
           "https://evil.test",
         );
         await expectApiError(res, 403);
         expect(await t.db.select().from(goldPrice)).toEqual([]);
       });
 
-      it("ราคากลาง: กดเติมจากราคาสมาคม → audit มีที่มา + เวลาประกาศ + ตรงกับที่บันทึก", async () => {
+      it("ราคากลาง: เติมจากราคาสมาคม → audit แยกคำอ้างของ client กับที่เซิร์ฟเวอร์เห็น", async () => {
         await get("manager");
-        const res = await put("/api/gold-price/today", { bar_sell: "67850", from_reference: true });
+        const res = await put("/api/gold-price/today", { bar_sell: "67850", from_reference: PREFILL });
         expect(res.status).toBe(200);
         const diff = await lastAudit("gold_price.create");
         expect(diff?.reference).toEqual({
-          prefilled: true,
-          source: "classic.goldtraders.or.th",
-          announced_at: "2026-09-29T09:31:00+07:00",
-          round: 2,
-          bar_sell: "67850.00",
-          matches_bar_sell: true,
+          client_prefilled: true,
+          client_announced_at: "2026-09-29T09:31:00+07:00",
+          client_round: 2,
+          server_seen: SERVER_SEEN,
+          saved_matches_server_bar_sell: true,
+          client_matches_server_announcement: true,
         });
         expect(moneyShapeViolations(diff)).toEqual([]);
       });
 
-      it("ราคากลาง: ไม่ได้กดเติม แต่เซิร์ฟเวอร์เห็นราคาสมาคม → audit บอกว่าไม่ตรง", async () => {
+      it("ราคากลาง: client อ้างประกาศที่เซิร์ฟเวอร์ไม่เห็น → บันทึกตามจริงว่าไม่ตรง", async () => {
+        await get("manager");
+        const claim = { announced_at: "2026-09-29T15:00:00+07:00", round: 7 };
+        const res = await put("/api/gold-price/today", { bar_sell: "67900", from_reference: claim });
+        expect(res.status).toBe(200);
+        expect((await lastAudit("gold_price.update"))?.reference).toMatchObject({
+          client_prefilled: true,
+          client_round: 7,
+          server_seen: SERVER_SEEN,
+          saved_matches_server_bar_sell: false,
+          client_matches_server_announcement: false,
+        });
+      });
+
+      it("ราคากลาง: ไม่ได้เติม แต่เซิร์ฟเวอร์เห็นราคาสมาคม → บันทึกสิ่งที่เซิร์ฟเวอร์เห็น", async () => {
         await get("manager");
         const res = await put("/api/gold-price/today", { bar_sell: "67900" });
         expect(res.status).toBe(200);
         expect((await lastAudit("gold_price.update"))?.reference).toMatchObject({
-          prefilled: false,
-          bar_sell: "67850.00",
-          matches_bar_sell: false,
+          client_prefilled: false,
+          client_announced_at: null,
+          server_seen: SERVER_SEEN,
+          saved_matches_server_bar_sell: false,
+          client_matches_server_announcement: null,
         });
       });
 
       it("ราคาเฉพาะสาขา: audit มี reference เหมือนกัน", async () => {
         await get("manager");
         const b1 = t.branches["00000"] as string;
-        const res = await put(`/api/gold-price/today/branches/${b1}`, { bar_sell: "67,850.00", from_reference: true });
+        const res = await put(`/api/gold-price/today/branches/${b1}`, {
+          bar_sell: "67,850.00",
+          from_reference: PREFILL,
+        });
         expect(res.status).toBe(200);
         expect((await lastAudit("gold_price.set_branch"))?.reference).toMatchObject({
-          prefilled: true,
-          matches_bar_sell: true,
+          client_prefilled: true,
+          saved_matches_server_bar_sell: true,
+          client_matches_server_announcement: true,
         });
       });
 
-      it("แหล่งปิด + กดเติม (ค่าที่ client อ้าง) → บันทึกว่าไม่รู้ที่มา · ไม่กด = ไม่มีคีย์ reference", async () => {
+      it("แหล่งปิด + เติมมา → บันทึกแค่คำอ้าง (server_seen null) · ไม่ได้เติม = ไม่มีคีย์ reference", async () => {
         await disabled.createUser({ email: "m@ong.test", password: PW, role: "manager", branch: "00000" });
         const cookie = await disabled.login("m@ong.test", PW);
         const res = await disabled.request("/api/gold-price/today", {
           method: "PUT",
           cookie,
-          body: { bar_sell: "67850", from_reference: true },
+          body: { bar_sell: "67850", from_reference: PREFILL },
         });
         expect(res.status).toBe(200);
         const [row] = await disabled.db.select().from(auditLog).where(eq(auditLog.action, "gold_price.create"));
-        expect((row?.diff as { reference?: unknown }).reference).toEqual({ prefilled: true, source: null });
+        expect((row?.diff as { reference?: unknown }).reference).toEqual({
+          client_prefilled: true,
+          client_announced_at: "2026-09-29T09:31:00+07:00",
+          client_round: 2,
+          server_seen: null,
+          saved_matches_server_bar_sell: null,
+          client_matches_server_announcement: null,
+        });
         const again = await disabled.request("/api/gold-price/today", {
           method: "PUT",
           cookie,

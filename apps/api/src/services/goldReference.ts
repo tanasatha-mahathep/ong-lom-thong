@@ -14,7 +14,10 @@ import type { Env } from "../env";
  * ระบบไม่ตั้งราคาของร้านเองเด็ดขาด (ผู้จัดการต้องกดบันทึก) · quoteBuy() ใช้ราคาที่ร้านบันทึกเท่านั้น (กฎ 2)
  */
 
-type FetchLike = (input: string, init: { signal: AbortSignal; headers: Record<string, string> }) => Promise<Response>;
+type FetchLike = (
+  input: string,
+  init: { signal: AbortSignal; headers: Record<string, string>; redirect: "error" },
+) => Promise<Response>;
 
 /** แหล่งราคา — สลับได้ด้วย GOLD_REFERENCE_PROVIDER (env) */
 export interface GoldReferenceProvider {
@@ -24,17 +27,48 @@ export interface GoldReferenceProvider {
   fetch(signal: AbortSignal): Promise<GoldReference>;
 }
 
-/** หน้าเกินขนาดนี้ไม่ใช่หน้าราคาที่คาดไว้ — ไม่อ่านทั้งก้อนเข้าหน่วยความจำ */
-const MAX_BODY_BYTES = 2 * 1024 * 1024;
+/** หน้าเกินขนาดนี้ไม่ใช่หน้าราคาที่คาดไว้ — นับเป็น byte ระหว่างอ่าน เกินแล้วหยุดอ่านทันที */
+export const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
-async function fetchText(fetchImpl: FetchLike, url: string, signal: AbortSignal, accept: string): Promise<string> {
-  const res = await fetchImpl(url, { signal, headers: { accept } });
+/**
+ * GET แหล่งราคา → ข้อความ (UTF-8)
+ * - `redirect: "error"`: ไม่ตาม redirect — กัน https → http / host ภายใน (blind SSRF ที่ข้ามการตรวจ https ของ env)
+ * - content-type ต้องตรงชนิดที่ provider คาด (text/html · application/json)
+ * - อ่าน body แบบ stream นับ byte · เกิน MAX_BODY_BYTES = ยกเลิกการอ่าน (ไม่เก็บทั้งก้อนก่อนตรวจ)
+ */
+async function fetchText(
+  fetchImpl: FetchLike,
+  url: string,
+  signal: AbortSignal,
+  expectedType: "text/html" | "application/json",
+): Promise<string> {
+  const res = await fetchImpl(url, { signal, headers: { accept: expectedType }, redirect: "error" });
   if (!res.ok) throw new Error(`reference source answered ${res.status}`);
-  const length = Number(res.headers.get("content-length") ?? "0");
-  if (length > MAX_BODY_BYTES) throw new GoldReferenceError("คำตอบใหญ่ผิดปกติ");
-  const text = await res.text();
-  if (text.length > MAX_BODY_BYTES) throw new GoldReferenceError("คำตอบใหญ่ผิดปกติ");
-  return text;
+  const type = (res.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
+  if (type !== expectedType) {
+    await res.body?.cancel();
+    throw new GoldReferenceError("ชนิดคำตอบไม่ตรงกับที่รองรับ");
+  }
+  const declared = Number(res.headers.get("content-length") ?? "0");
+  if (declared > MAX_BODY_BYTES) {
+    await res.body?.cancel();
+    throw new GoldReferenceError("คำตอบใหญ่ผิดปกติ");
+  }
+  if (!res.body) return "";
+  const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_BODY_BYTES) {
+      await reader.cancel();
+      throw new GoldReferenceError("คำตอบใหญ่ผิดปกติ");
+    }
+    chunks.push(value);
+  }
+  return new TextDecoder("utf-8").decode(Buffer.concat(chunks));
 }
 
 const ENTITIES: Record<string, string> = { nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'" };
@@ -297,15 +331,36 @@ export function createGoldReferenceService(options: {
   };
 }
 
-/** ค่าที่ลง audit ตอนบันทึกราคา — ราคาสมาคมที่เซิร์ฟเวอร์เห็นล่าสุด + ผู้จัดการกดเติมจากราคาสมาคมหรือไม่ */
-export function referenceAudit(cached: CachedGoldReference | null, prefilled: boolean, savedBarSell: string) {
-  if (!cached) return prefilled ? { prefilled: true, source: null } : null;
+/** ประกาศที่ client บอกว่าเติมค่ามาจาก — เป็นแค่คำอ้างของ browser ห้ามถือเป็นข้อเท็จจริง */
+export interface ClientPrefill {
+  announced_at: string;
+  round: number | null;
+}
+
+/**
+ * ค่าที่ลง audit ตอนบันทึกราคา — แยกชัดระหว่างสิ่งที่ client อ้าง (`client_*`) กับที่เซิร์ฟเวอร์เห็นเอง (`server_seen`)
+ * server_seen = ราคาสมาคมล่าสุดที่เซิร์ฟเวอร์ดึงได้ (peek · ไม่ดึงใหม่ตอนบันทึก) · null = ไม่มี/เก่าเกินไป
+ * ไม่ได้เติมจากราคาสมาคม และเซิร์ฟเวอร์ไม่เห็นราคาสมาคม = null (ไม่ใส่คีย์ reference)
+ */
+export function referenceAudit(cached: CachedGoldReference | null, client: ClientPrefill | null, savedBarSell: string) {
+  if (!cached && !client) return null;
   return {
-    prefilled,
-    source: cached.source,
-    announced_at: cached.announcedAt,
-    round: cached.round,
-    bar_sell: cached.barSell,
-    matches_bar_sell: D(cached.barSell).eq(savedBarSell),
+    client_prefilled: client !== null,
+    client_announced_at: client?.announced_at ?? null,
+    client_round: client?.round ?? null,
+    server_seen: cached
+      ? {
+          source: cached.source,
+          announced_at: cached.announcedAt,
+          round: cached.round,
+          bar_sell: cached.barSell,
+          fetched_at: cached.fetchedAt,
+        }
+      : null,
+    /** ราคาที่บันทึกเท่ากับทองคำแท่งขายออกที่เซิร์ฟเวอร์เห็น (decimal) */
+    saved_matches_server_bar_sell: cached ? D(cached.barSell).eq(savedBarSell) : null,
+    /** ประกาศที่ client อ้างตรงกับที่เซิร์ฟเวอร์เห็น (เวลาเดียวกัน) */
+    client_matches_server_announcement:
+      cached && client ? Date.parse(client.announced_at) === Date.parse(cached.announcedAt) : null,
   };
 }

@@ -1,13 +1,16 @@
 import { type GoldReference, GoldReferenceError } from "@ong/core";
-import { describe, expect, it, vi } from "vitest";
+import { type Server, createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { GOLDTRADERS_EXPECTED, GOLDTRADERS_HTML, THAI_GOLD_API_JSON } from "../test/fixtures/goldReference";
 import {
   type GoldReferenceProvider,
   createGoldReferenceService,
   goldtradersHtmlProvider,
   parseGoldtradersHtml,
-  parseThaiGoldApiJson,
+  MAX_BODY_BYTES,
   MAX_LABEL_HTML_LENGTH,
+  parseThaiGoldApiJson,
   providerFromEnv,
   referenceAudit,
   textById,
@@ -17,7 +20,12 @@ import {
 const HTML_URL = "https://classic.goldtraders.or.th/default.aspx";
 const JSON_URL = "https://api.example.test/thai-gold-api/latest";
 
-const respond = (body: string, init: ResponseInit = {}) => vi.fn(() => Promise.resolve(new Response(body, init)));
+const HTML = "text/html; charset=utf-8";
+const JSON_TYPE = "application/json";
+const respond = (body: string, type: string, init: ResponseInit = {}) =>
+  vi.fn(() =>
+    Promise.resolve(new Response(body, { ...init, headers: { "content-type": type, ...(init.headers as object) } })),
+  );
 
 describe("textById", () => {
   it("ตัดแท็กลูก · entity · ช่องว่างซ้อน", () => {
@@ -85,6 +93,16 @@ describe("parseGoldtradersHtml (fixture สังเคราะห์)", () => 
     expect(() => parseGoldtradersHtml(swapped)).toThrow("ทองคำแท่งขายออกต่ำกว่ารับซื้อ");
     expect(() => parseGoldtradersHtml("<html>maintenance</html>")).toThrow(GoldReferenceError);
   });
+
+  it("แถวทองคำแท่ง/ทองรูปพรรณสลับกัน (id ของแถวถูกสลับ) = GoldReferenceError", () => {
+    const rowsSwapped = GOLDTRADERS_HTML.replace("lblBLBuy", "TMP_BUY")
+      .replace("lblBLSell", "TMP_SELL")
+      .replace("lblOMBuy", "lblBLBuy")
+      .replace("lblOMSell", "lblBLSell")
+      .replace("TMP_BUY", "lblOMBuy")
+      .replace("TMP_SELL", "lblOMSell");
+    expect(() => parseGoldtradersHtml(rowsSwapped)).toThrow(GoldReferenceError);
+  });
 });
 
 describe("parseThaiGoldApiJson (fixture ตาม README)", () => {
@@ -105,53 +123,141 @@ describe("parseThaiGoldApiJson (fixture ตาม README)", () => {
       },
     ],
     ["ไม่ใช่ object", null],
+    [
+      "gold / gold_bar สลับกัน",
+      {
+        ...THAI_GOLD_API_JSON,
+        response: {
+          ...THAI_GOLD_API_JSON.response,
+          price: { gold: THAI_GOLD_API_JSON.response.price.gold_bar, gold_bar: THAI_GOLD_API_JSON.response.price.gold },
+        },
+      },
+    ],
   ])("ปฏิเสธ: %s", (_, body) => {
     expect(() => parseThaiGoldApiJson(body)).toThrow(GoldReferenceError);
   });
 });
 
 describe("providers (fetch ปลอม)", () => {
-  it("HTML: ส่ง signal + accept · source = host", async () => {
-    const fetchImpl = respond(GOLDTRADERS_HTML, { status: 200 });
+  it("HTML: ส่ง signal + accept + redirect error · source = host", async () => {
+    const fetchImpl = respond(GOLDTRADERS_HTML, HTML, { status: 200 });
     const p = goldtradersHtmlProvider(HTML_URL, fetchImpl);
     expect(p.source).toBe("classic.goldtraders.or.th");
     const signal = new AbortController().signal;
     await expect(p.fetch(signal)).resolves.toEqual(GOLDTRADERS_EXPECTED);
-    expect(fetchImpl).toHaveBeenCalledWith(HTML_URL, { signal, headers: { accept: "text/html" } });
+    expect(fetchImpl).toHaveBeenCalledWith(HTML_URL, { signal, headers: { accept: "text/html" }, redirect: "error" });
   });
 
   it("HTTP ไม่ใช่ 2xx = error เครือข่าย (ไม่ใช่ GoldReferenceError)", async () => {
-    const p = goldtradersHtmlProvider(HTML_URL, respond("down", { status: 502 }));
+    const p = goldtradersHtmlProvider(HTML_URL, respond("down", HTML, { status: 502 }));
     const e = await p.fetch(new AbortController().signal).catch((x: unknown) => x);
     expect(e).toBeInstanceOf(Error);
     expect(e).not.toBeInstanceOf(GoldReferenceError);
   });
 
-  it("คำตอบใหญ่ผิดปกติ = GoldReferenceError (ทั้ง content-length และขนาดจริง)", async () => {
-    const big = goldtradersHtmlProvider(HTML_URL, respond("x", { headers: { "content-length": "3000000" } }));
+  it("content-type ไม่ตรงชนิดของ provider = GoldReferenceError", async () => {
+    const html = goldtradersHtmlProvider(HTML_URL, respond(GOLDTRADERS_HTML, JSON_TYPE));
+    await expect(html.fetch(new AbortController().signal)).rejects.toThrow("ชนิดคำตอบไม่ตรงกับที่รองรับ");
+    const json = thaiGoldApiProvider(JSON_URL, respond(JSON.stringify(THAI_GOLD_API_JSON), "text/plain"));
+    await expect(json.fetch(new AbortController().signal)).rejects.toThrow("ชนิดคำตอบไม่ตรงกับที่รองรับ");
+    const none = goldtradersHtmlProvider(
+      HTML_URL,
+      vi.fn(() => Promise.resolve(new Response(null, { status: 200 }))),
+    );
+    await expect(none.fetch(new AbortController().signal)).rejects.toThrow("ชนิดคำตอบไม่ตรงกับที่รองรับ");
+  });
+
+  it("คำตอบใหญ่ผิดปกติ = GoldReferenceError (content-length · นับ byte จริง ไม่ใช่ตัวอักษร)", async () => {
+    const big = goldtradersHtmlProvider(HTML_URL, respond("x", HTML, { headers: { "content-length": "3000000" } }));
     await expect(big.fetch(new AbortController().signal)).rejects.toThrow("คำตอบใหญ่ผิดปกติ");
-    const real = goldtradersHtmlProvider(HTML_URL, respond("x".repeat(2 * 1024 * 1024 + 1)));
+    const real = goldtradersHtmlProvider(HTML_URL, respond("x".repeat(MAX_BODY_BYTES + 1), HTML));
     await expect(real.fetch(new AbortController().signal)).rejects.toThrow("คำตอบใหญ่ผิดปกติ");
+    // อักษรไทย 3 byte ต่อตัว: 0.7M ตัวอักษร (< 2M ตัว) แต่ ~2.1 MB
+    const thai = goldtradersHtmlProvider(HTML_URL, respond("ก".repeat(700_000), HTML));
+    await expect(thai.fetch(new AbortController().signal)).rejects.toThrow("คำตอบใหญ่ผิดปกติ");
+  });
+
+  it("body ว่าง = ไม่ใช่หน้าราคา", async () => {
+    const empty = goldtradersHtmlProvider(
+      HTML_URL,
+      vi.fn(() => Promise.resolve(new Response(null, { status: 200, headers: { "content-type": HTML } }))),
+    );
+    await expect(empty.fetch(new AbortController().signal)).rejects.toThrow(GoldReferenceError);
   });
 
   it("JSON: parse + ตรวจ · ไม่ใช่ JSON = GoldReferenceError", async () => {
-    const ok = thaiGoldApiProvider(JSON_URL, respond(JSON.stringify(THAI_GOLD_API_JSON)));
+    const ok = thaiGoldApiProvider(JSON_URL, respond(JSON.stringify(THAI_GOLD_API_JSON), JSON_TYPE));
     await expect(ok.fetch(new AbortController().signal)).resolves.toEqual(GOLDTRADERS_EXPECTED);
-    const bad = thaiGoldApiProvider(JSON_URL, respond("<html>"));
+    const bad = thaiGoldApiProvider(JSON_URL, respond("<html>", JSON_TYPE));
     await expect(bad.fetch(new AbortController().signal)).rejects.toThrow(new GoldReferenceError("คำตอบไม่ใช่ JSON"));
   });
 
   it("providerFromEnv: none/ไม่มี URL = null · เลือกตามชนิด", () => {
     expect(providerFromEnv({ GOLD_REFERENCE_PROVIDER: "none", GOLD_REFERENCE_URL: HTML_URL })).toBeNull();
     expect(providerFromEnv({ GOLD_REFERENCE_PROVIDER: "goldtraders-html", GOLD_REFERENCE_URL: undefined })).toBeNull();
-    const fetchImpl = respond(GOLDTRADERS_HTML);
     const html = providerFromEnv(
       { GOLD_REFERENCE_PROVIDER: "goldtraders-html", GOLD_REFERENCE_URL: HTML_URL },
-      fetchImpl,
+      respond(GOLDTRADERS_HTML, HTML),
     );
     expect(html?.source).toBe("classic.goldtraders.or.th");
     const json = providerFromEnv({ GOLD_REFERENCE_PROVIDER: "thai-gold-api", GOLD_REFERENCE_URL: JSON_URL });
     expect(json?.source).toBe("api.example.test");
+  });
+});
+
+describe("providers กับ fetch จริง (เซิร์ฟเวอร์ local)", () => {
+  let server: Server;
+  let base = "";
+  let streamClosed: Promise<void> = Promise.resolve();
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      if (req.url === "/redirect") {
+        // redirect ไป host อื่น (localhost ≠ 127.0.0.1) ที่ตอบหน้าราคาถูกต้อง — ถ้าตาม redirect เทสต์จะได้ราคา (fail)
+        const port = (server.address() as AddressInfo).port;
+        res.writeHead(302, { location: `http://localhost:${port}/` }).end();
+        return;
+      }
+      if (req.url === "/endless") {
+        // ไม่มี content-length · ส่งไม่หยุด — client ต้องตัดเองเมื่อเกินเพดาน
+        res.writeHead(200, { "content-type": HTML });
+        streamClosed = new Promise((resolve) => res.on("close", () => resolve()));
+        const chunk = "x".repeat(64 * 1024);
+        const pump = () => {
+          while (!res.destroyed && res.write(chunk));
+          if (!res.destroyed) res.once("drain", pump);
+        };
+        pump();
+        return;
+      }
+      res.writeHead(200, { "content-type": HTML }).end(GOLDTRADERS_HTML);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+  afterAll(async () => {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  });
+
+  it("ไม่ตาม redirect (กัน SSRF ไป host ภายใน) = error เครือข่าย → unavailable", async () => {
+    const e = await goldtradersHtmlProvider(`${base}/redirect`)
+      .fetch(AbortSignal.timeout(2_000))
+      .catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(Error);
+    expect(e).not.toBeInstanceOf(GoldReferenceError);
+  });
+
+  it("stream ไม่มีที่สิ้นสุด → หยุดอ่านเมื่อเกินเพดาน และปิดการเชื่อมต่อ", async () => {
+    await expect(goldtradersHtmlProvider(`${base}/endless`).fetch(AbortSignal.timeout(5_000))).rejects.toThrow(
+      "คำตอบใหญ่ผิดปกติ",
+    );
+    await streamClosed;
+  });
+
+  it("หน้าปกติผ่าน fetch จริงได้ค่าเดียวกับ fixture", async () => {
+    await expect(goldtradersHtmlProvider(`${base}/`).fetch(AbortSignal.timeout(2_000))).resolves.toEqual(
+      GOLDTRADERS_EXPECTED,
+    );
   });
 });
 
@@ -290,21 +396,57 @@ describe("createGoldReferenceService", () => {
   });
 });
 
-describe("referenceAudit", () => {
+describe("referenceAudit — แยกคำอ้างของ client กับสิ่งที่เซิร์ฟเวอร์เห็น", () => {
   const cached = { ...REF, source: "fake.test", fetchedAt: "2026-09-29T03:00:00.000Z" };
-  it("มีราคาสมาคม: บันทึกที่มา เวลาประกาศ ครั้งที่ และตรงกับที่บันทึกหรือไม่ (เทียบแบบ decimal)", () => {
-    expect(referenceAudit(cached, true, "67850.00")).toEqual({
-      prefilled: true,
-      source: "fake.test",
-      announced_at: "2026-09-29T09:31:00+07:00",
-      round: 2,
-      bar_sell: "67850.00",
-      matches_bar_sell: true,
+  const SERVER_SEEN = {
+    source: "fake.test",
+    announced_at: "2026-09-29T09:31:00+07:00",
+    round: 2,
+    bar_sell: "67850.00",
+    fetched_at: "2026-09-29T03:00:00.000Z",
+  };
+
+  it("client เติมจากประกาศเดียวกับที่เซิร์ฟเวอร์เห็น + ราคาตรง (เทียบแบบ decimal · เวลาเทียบเป็นจุดเวลา)", () => {
+    const client = { announced_at: "2026-09-29T02:31:00Z", round: 2 };
+    expect(referenceAudit(cached, client, "67850")).toEqual({
+      client_prefilled: true,
+      client_announced_at: "2026-09-29T02:31:00Z",
+      client_round: 2,
+      server_seen: SERVER_SEEN,
+      saved_matches_server_bar_sell: true,
+      client_matches_server_announcement: true,
     });
-    expect(referenceAudit(cached, false, "67900.00")).toMatchObject({ prefilled: false, matches_bar_sell: false });
   });
-  it("ไม่มีราคาสมาคม: กดเติม = บันทึกว่ากดแต่ไม่รู้ที่มา · ไม่ได้กด = null", () => {
-    expect(referenceAudit(null, true, "67850.00")).toEqual({ prefilled: true, source: null });
-    expect(referenceAudit(null, false, "67850.00")).toBeNull();
+
+  it("client อ้างประกาศอื่น → client_matches_server_announcement false (ไม่เชื่อค่าของ client)", () => {
+    const client = { announced_at: "2026-09-29T16:00:00+07:00", round: 9 };
+    expect(referenceAudit(cached, client, "67900.00")).toMatchObject({
+      client_round: 9,
+      saved_matches_server_bar_sell: false,
+      client_matches_server_announcement: false,
+    });
+  });
+
+  it("ไม่ได้เติม แต่เซิร์ฟเวอร์เห็นราคาสมาคม → บันทึกสิ่งที่เซิร์ฟเวอร์เห็น", () => {
+    expect(referenceAudit(cached, null, "67850.00")).toEqual({
+      client_prefilled: false,
+      client_announced_at: null,
+      client_round: null,
+      server_seen: SERVER_SEEN,
+      saved_matches_server_bar_sell: true,
+      client_matches_server_announcement: null,
+    });
+  });
+
+  it("เซิร์ฟเวอร์ไม่เห็นราคาสมาคม: เติมมา = บันทึกแค่คำอ้าง · ไม่ได้เติม = null", () => {
+    expect(referenceAudit(null, { announced_at: "2026-09-29T09:31:00+07:00", round: null }, "67850.00")).toEqual({
+      client_prefilled: true,
+      client_announced_at: "2026-09-29T09:31:00+07:00",
+      client_round: null,
+      server_seen: null,
+      saved_matches_server_bar_sell: null,
+      client_matches_server_announcement: null,
+    });
+    expect(referenceAudit(null, null, "67850.00")).toBeNull();
   });
 });
