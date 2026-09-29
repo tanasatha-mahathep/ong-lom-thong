@@ -1,0 +1,12 @@
+# Python ในเครื่อง (scripts/probe.sh สร้างให้) — ห้าม commit
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# ผลรัน — CI อัปโหลดเป็น artifact (เก็บ 7 วัน) · ในเครื่องลบทิ้งได้
+reports/
+
+# ไฟล์ชั่วคราวของ TestSprite CLI / MCP (อาจมีผลตอบกลับจาก environment เป้าหมาย)
+.testsprite/
+testsprite_tests/

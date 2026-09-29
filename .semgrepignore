@@ -1,0 +1,37 @@
+# .semgrepignore — paths Semgrep never scans (scripts/ci/sast.sh · make sast). Syntax = .gitignore.
+# This file replaces Semgrep's built-in default list, so the defaults that still apply are repeated here.
+# An exclusion is a suppression: every entry has its reason directly above it and is reviewed like code.
+# To silence one finding instead, see "Suppress" in scripts/ci/sast.sh (nosemgrep with reason + expiry).
+
+# Third-party code and build output — not our source and already gitignored. Repeated so that a scan
+# which cannot use git (Semgrep then walks the file system) still skips them.
+node_modules/
+.pnpm-store/
+dist/
+coverage/
+
+# Generated on every build — a finding belongs to the generator, and a manual edit would be overwritten.
+# TanStack Router plugin output (route tree) and its temp dir
+apps/web/src/routeTree.gen.ts
+apps/web/.tanstack/
+# drizzle-kit output (SQL + JSON snapshots): no JS/TS inside, and the SQL is checked by the db-verify job
+packages/db/migrations/
+
+# Tests do not ship: tsup bundles apps/api/src/index.ts and Vite bundles apps/web from main.tsx, and CI
+# runs them against throw-away databases with throw-away credentials. Shipped code keeps full coverage.
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+# API test harness: creates and drops one database per test file (DDL via sql.unsafe, random name)
+apps/api/src/test/
+# Web test helpers (Vitest setup, fake fetch keyed by "METHOD /path"): imported only by *.test.tsx,
+# never by main.tsx, so never bundled
+apps/web/src/test/
+# Playwright end-to-end suites (ring 1): drive the built app from outside, never bundled
+e2e/
+
+# Rule fixtures for `semgrep --test .semgrep/rules`: vulnerable on purpose, never imported
+.semgrep/
+# This file: configuration, not code (sast.sh scans a snapshot whose root holds it)
+/.semgrepignore

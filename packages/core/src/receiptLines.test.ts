@@ -98,3 +98,56 @@ describe("ราคา/กรัม สูตรเดียว (CLAUDE.md ก�
     expect(() => groupLinesByMetal([{ metalName: "ทอง", weightG: "0", amount: "100" }])).toThrow(ReceiptDataError);
   });
 });
+
+// ── ด่าน coverage: ค่าขอบราคาต่อหน่วย · น้ำหนักรวมรอบศูนย์ · โลหะเดียวเสียทั้งใบ · ข้อความ error ตรงตัว ───────────────
+const expectReceiptDataError = (run: () => unknown, message: string) => {
+  expect(run).toThrow(ReceiptDataError);
+  expect(run).toThrow(new ReceiptDataError(message));
+};
+
+describe("groupLinesByMetal — ราคาต่อหน่วย HALF_UP 2 ที่หลักที่ถูกตัด …4/…5/…6 (BVA)", () => {
+  it.each([
+    ["12.44", "1.24"], // 12.44 ÷ 10 = 1.244 → ลง
+    ["12.45", "1.25"], // 1.245 เสมอ → ขึ้น (HALF_EVEN ได้ 1.24)
+    ["12.46", "1.25"], // 1.246 → ขึ้น
+  ])("ทอง 10.000 ก. %s บาท → ราคาต่อหน่วย %s", (amount, unitPrice) => {
+    expect(groupLinesByMetal([{ metalName: "ทอง", weightG: "10.000", amount }])).toStrictEqual([
+      { metalName: "ทอง", weightG: "10.000", unitPrice, amount },
+    ]);
+  });
+});
+
+describe("groupLinesByMetal — น้ำหนักรวมต่อโลหะต้องมากกว่า 0 (BVA −0.001 | 0 | 0.001) · fail-closed ทั้งใบ", () => {
+  it("น้ำหนักรวมเล็กสุดที่รับ 0.001 ก. → พิมพ์ได้: 1 บาท ÷ 0.001 = 1,000.00 ต่อกรัม", () => {
+    expect(groupLinesByMetal([{ metalName: "ทอง", weightG: "0.001", amount: "1" }])).toStrictEqual([
+      { metalName: "ทอง", weightG: "0.001", unitPrice: "1000.00", amount: "1.00" },
+    ]);
+  });
+
+  it.each([
+    ["0", "บนขอบพอดี"],
+    ["0.000", "ศูนย์แบบที่ DB ส่ง"],
+    ["-0.001", "ต่ำกว่าศูนย์ 1 ขั้น"],
+  ])("น้ำหนักรวม %s (%s) → ReceiptDataError ข้อความตรงตัว", (weightG) => {
+    expectReceiptDataError(
+      () => groupLinesByMetal([{ metalName: "ทอง", weightG, amount: "100" }]),
+      "น้ำหนักรวมของทองต้องมากกว่า 0",
+    );
+  });
+
+  it("โลหะหนึ่งเสีย ทั้งใบพิมพ์ไม่ได้ — ไม่ออกใบที่ขาดบรรทัด", () => {
+    const lines = [
+      { metalName: "ทอง", weightG: "5.860", amount: "20030" },
+      { metalName: "เงิน", weightG: "0", amount: "10" },
+    ];
+    expectReceiptDataError(() => groupLinesByMetal(lines), "น้ำหนักรวมของเงินต้องมากกว่า 0");
+  });
+
+  it.each([
+    [{ weightG: "abc", amount: "100" }, 'น้ำหนักไม่ใช่ตัวเลข: "abc"'],
+    [{ weightG: "1", amount: "" }, 'ราคาไม่ใช่ตัวเลข: ""'],
+    [{ weightG: "1", amount: "Infinity" }, 'ราคาไม่ใช่ตัวเลข: "Infinity"'],
+  ])("%j → ReceiptDataError บอกช่องที่เสีย", (row, message) => {
+    expectReceiptDataError(() => groupLinesByMetal([{ metalName: "ทอง", ...row }]), message);
+  });
+});

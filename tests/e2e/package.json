@@ -1,0 +1,29 @@
+{
+  "name": "@ong/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Playwright end-to-end suite on the real stack — smoke · api · pdf · ui",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tanasatha-mahathep/ong-lom-thong.git",
+    "directory": "tests/e2e"
+  },
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "e2e": "playwright test",
+    "report": "playwright show-report playwright-report",
+    "stack:down": "bash stack/stack.sh down",
+    "stack:up": "bash stack/stack.sh up",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "catalog:",
+    "@ong/core": "workspace:*",
+    "@playwright/test": "catalog:",
+    "@types/node": "^22",
+    "pdf-lib": "1.17.1",
+    "typescript": "^5.9",
+    "unpdf": "1.8.1"
+  }
+}

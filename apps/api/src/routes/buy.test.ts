@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { BUY_MSG, ZERO, fmtMoney, fmtWeight } from "@ong/core";
 import {
   auditLog,
@@ -11,11 +12,16 @@ import {
   payment,
   session,
   stockMovement,
+  user,
 } from "@ong/db";
 import { type SQL, and, asc, eq, ne, sql } from "drizzle-orm";
 import { format } from "node:util";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { BUY_API_MSG } from "../services/buy";
+import { expectApiError, expectMoneyAsStrings } from "../test/assertions";
 import { type TestApp, databaseAvailable, startTestApp } from "../test/harness";
+import { expectNoNationalId } from "../test/pii";
+import { cardFormat, syntheticNationalId, testName } from "../test/synthetic";
 
 const available = await databaseAvailable();
 const PW = "correct-horse-battery";
@@ -1406,5 +1412,288 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
     const plain = await save(bill(), "staff1");
     expect(((await plain.json()) as SavedRes).doc_no).toBe("RC6910-0003");
     expect(await docNos("00001", "6910")).toEqual(["RC6910-0001", "RC6910-0003"]);
+  });
+});
+
+// ─── สัญญาที่ยังขาดของ /api/buy (รายการบังคับของสกิล api-endpoint) ───────────────────────────────────────
+// สาขาปัจจุบันถูกปิด/ถูกถอนสิทธิ์ระหว่าง session (ด่านที่ /gold-price/today พลาด — F3) · mass assignment ของบิลเงิน ·
+// PII + เงินเป็น string ของ quote · 201 · 409 · ค้นด้วยเลขบัตรเต็ม · audit บิลย้อนหลังระบุผู้ทำและไม่มีเลขบัตรเต็ม
+// database แยกจากชุดบน · ข้อมูลสมมติ: ชื่อขึ้นต้น "ทดสอบ" · เลขบัตรจาก syntheticNationalId() เท่านั้น
+// OWASP ASVS 4.0.3 V4.1.5 · V4.2.1 · V5.1.2 · V7.1.4 · API1/API3/API5:2023 · CLAUDE.md กฎ 1 · 4 · 7
+
+describe.skipIf(!available)("ซื้อเข้า — สัญญาที่ยังขาด: สาขาปิด/ถอนสิทธิ์ · mass assignment · PII · audit", () => {
+  const TODAY_BE = "2026-10-05"; // 10:00 น. เวลาไทย → งวด RC6910
+  const BACKDATE = "2026-10-01";
+  const NO_BRANCH = { error: BUY_API_MSG.noBranch, field: "branch" };
+  // สาขาปัจจุบันถูกปิด ≠ ยังไม่ได้เลือก (dev 59779b4) — ยังเป็น 403 ชี้ field branch และไม่เขียนอะไร
+  const BRANCH_CLOSED = { error: BUY_API_MSG.branchClosed, field: "branch" };
+  let t: TestApp;
+  const cookies: Record<string, string> = {};
+  const ids: Record<string, string> = {};
+  let gold = "";
+  let buyer = { id: "", nid: "", name: "" };
+  let expired = "";
+  const knownIds: string[] = [];
+
+  /** มาสก์ที่คาดตาม R13 — เขียนจากนิยาม ไม่เรียก maskNationalId ของ core (oracle อิสระ) */
+  const masked = (id: string) => `${id.slice(0, 1)} XXXX XXXXX ${id.slice(10, 12)} ${id.slice(12)}`;
+  const bill = (over: Record<string, unknown> = {}) => ({
+    customer_id: buyer.id,
+    lines: [{ metal_id: gold, weight_g: "5.860", amount: "20030" }],
+    payments: [{ method: "cash", amount: "20030" }],
+    ...over,
+  });
+  const quote = (body: unknown, cookie?: string) => t.request("/api/buy/quote", { cookie, body });
+  const save = (body: Record<string, unknown>, cookie?: string) =>
+    t.request("/api/buy", { cookie, body: { idempotency_key: `buy-gap-${randomUUID()}`, ...body } });
+  const switchTo = async (cookie: string, code: string) => {
+    const res = await t.request("/api/me/branch", { cookie, body: { branch_id: t.branches[code] } });
+    expect(res.status, `สลับไป ${code}`).toBe(200);
+  };
+  /** ทุกอย่างที่บันทึกบิลเขียน — request ที่ถูกปฏิเสธต้องไม่แตะเลย (รวมตัวนับเลขที่ R9) */
+  const writes = async () => ({
+    receipts: await t.db.select().from(buyReceipt).orderBy(buyReceipt.id),
+    lines: await t.db.select().from(buyLine).orderBy(buyLine.id),
+    payments: await t.db.select().from(payment).orderBy(payment.id),
+    stock: await t.db.select().from(stockMovement).orderBy(stockMovement.id),
+    sequences: await t.db.select().from(docSequence),
+    audits: await t.db.select().from(auditLog).orderBy(auditLog.id),
+  });
+
+  beforeAll(async () => {
+    t = await startTestApp({ now: () => new Date(`${TODAY_BE}T03:00:00Z`) });
+    const accounts = [
+      { who: "multi", branch: "00000", allow: ["00001"] }, // สาขาหลัก 00000 + มีสิทธิ์ 00001
+      { who: "staff", branch: "00000" },
+      { who: "staff2", branch: "00002" },
+      { who: "manager2", role: "manager" as const, branch: "00002" }, // บิลย้อนหลังได้เฉพาะผู้จัดการขึ้นไป
+    ];
+    for (const { who, ...a } of accounts) {
+      ids[who] = (await t.createUser({ email: `gap-${who}@ong.test`, password: PW, ...a })).id;
+      cookies[who] = await t.login(`gap-${who}@ong.test`, PW);
+    }
+    // ใบรับซื้อต้องมีรหัสสาขาของกรมสรรพากร (ไม่งั้นบันทึกไม่ได้ — BUY_API_MSG.noTaxBranchCode) · รหัสสมมติตาม code
+    for (const code of ["00001", "00002"]) {
+      await t.db.update(branch).set({ taxBranchCode: code }).where(eq(branch.code, code));
+    }
+    const [g] = await t.db.select({ id: metal.id }).from(metal).where(eq(metal.code, "gold"));
+    gold = g?.id ?? "";
+    await t.db.insert(goldPrice).values([
+      { date: TODAY_BE, barSell: "67850", barBuy: "67650", jewelryBuy: "64268" },
+      { date: BACKDATE, barSell: "67000", barBuy: "66800", jewelryBuy: "63460" },
+      { branchId: t.branches["00001"], date: TODAY_BE, barSell: "68000", barBuy: "67800", jewelryBuy: "64410" },
+    ]);
+    const nid = syntheticNationalId();
+    const expiredNid = syntheticNationalId();
+    knownIds.push(nid, expiredNid);
+    const [a, b] = await t.db
+      .insert(customer)
+      .values([
+        { nationalId: nid, nameTh: testName("ผู้ขายทอง"), cardExpireText: "31/12/2574" },
+        { nationalId: expiredNid, nameTh: testName("บัตรหมดอายุ"), cardExpireText: "01/01/2560" }, // R2 บล็อก
+      ])
+      .returning({ id: customer.id, nameTh: customer.nameTh });
+    buyer = { id: a?.id ?? "", nid, name: a?.nameTh ?? "" };
+    expired = b?.id ?? "";
+  });
+  afterAll(async () => {
+    await t?.close();
+  });
+
+  it("สาขาปัจจุบันถูกปิดระหว่าง session: quote และบันทึก = 403 ชี้ branch · ไม่มีอะไรถูกเขียน (เลขที่ไม่ถูกกิน) · เปิดคืนแล้วบันทึกได้ที่สาขานั้น", async () => {
+    const cookie = await t.login("gap-multi@ong.test", PW);
+    await switchTo(cookie, "00001");
+    const before = await writes();
+    await t.db.update(branch).set({ isActive: false }).where(eq(branch.code, "00001"));
+    try {
+      for (const [what, res] of [
+        ["quote", await quote(bill(), cookie)],
+        ["บันทึก", await save(bill(), cookie)],
+      ] as const) {
+        expect(await expectApiError(res, 403, `${what} ตอนสาขาปิด`)).toEqual(BRANCH_CLOSED);
+      }
+    } finally {
+      await t.db.update(branch).set({ isActive: true }).where(eq(branch.code, "00001"));
+    }
+    expect(await writes()).toEqual(before);
+
+    // positive control: เปิดคืนแล้วบันทึกได้ — ลงสาขา 00001 ด้วยราคาเฉพาะสาขา และได้เลขแรกของงวด (ไม่มีเลขหาย)
+    const res = await save(bill(), cookie);
+    expect(res.status).toBe(201);
+    const { id, doc_no } = (await res.json()) as { id: string; doc_no: string };
+    expect(doc_no).toBe("RC6910-0001");
+    const [row] = await t.db.select().from(buyReceipt).where(eq(buyReceipt.id, id));
+    expect(row).toMatchObject({ branchId: t.branches["00001"], goldPriceSnapshot: "68000.00", createdBy: ids.multi });
+  });
+
+  it("ถูกถอนสิทธิ์สาขาปัจจุบันระหว่าง session: quote และบันทึก = 403 ชี้ branch ทันที · ไม่มีอะไรถูกเขียน", async () => {
+    const cookie = await t.login("gap-multi@ong.test", PW);
+    await switchTo(cookie, "00001");
+    const before = await writes();
+    await t.db
+      .update(user)
+      .set({ allowedBranchIds: [] })
+      .where(eq(user.id, ids.multi ?? ""));
+    try {
+      expect(await expectApiError(await quote(bill(), cookie), 403, "quote หลังถอนสิทธิ์")).toEqual(NO_BRANCH);
+      expect(await expectApiError(await save(bill(), cookie), 403, "บันทึกหลังถอนสิทธิ์")).toEqual(NO_BRANCH);
+    } finally {
+      await t.db
+        .update(user)
+        .set({ allowedBranchIds: [t.branches["00001"] ?? ""] })
+        .where(eq(user.id, ids.multi ?? ""));
+    }
+    expect(await writes()).toEqual(before);
+  });
+
+  it("mass assignment (API3:2023 · ASVS V5.1.2): ช่องที่เซิร์ฟเวอร์กำหนดเอง (สาขา · เลขที่ · ยอด · สถานะ · ผู้บันทึก · PDF · snapshot · ราคา/กรัม) ส่งมาก็ถูกเมิน", async () => {
+    const res = await save(
+      bill({
+        branch_id: t.branches["00002"],
+        doc_no: "RC0000-9999",
+        total_weight: "0.001",
+        total_amount: "1.00",
+        status: "void",
+        created_by: ids.staff2,
+        pdf_status: "ready",
+        pdf_key: "receipts/forged.pdf",
+        gold_price_snapshot: "1.00",
+        customer_snapshot: { national_id: syntheticNationalId(), name_th: testName("ปลอม") },
+        lines: [{ metal_id: gold, weight_g: "5.860", amount: "20030", price_per_g: "1.00", line_no: 99 }],
+      }),
+      cookies.staff,
+    );
+    expect(res.status).toBe(201);
+    const { id, doc_no } = (await res.json()) as { id: string; doc_no: string };
+    expect(doc_no).toMatch(/^RC6910-\d{4}$/);
+    const [row] = await t.db.select().from(buyReceipt).where(eq(buyReceipt.id, id));
+    expect(row).toMatchObject({
+      branchId: t.branches["00000"],
+      docNo: doc_no,
+      totalWeight: "5.860",
+      totalAmount: "20030.00",
+      status: "active",
+      createdBy: ids.staff,
+      pdfStatus: "pending",
+      pdfKey: null,
+      goldPriceSnapshot: "67850.00",
+    });
+    expect(row?.customerSnapshot).toMatchObject({ national_id: buyer.nid, name_th: buyer.name });
+    expect(await t.db.select().from(buyLine).where(eq(buyLine.receiptId, id))).toMatchObject([
+      { lineNo: 1, weightG: "5.860", amount: "20030.00", pricePerG: "3418.09" },
+    ]);
+  });
+
+  it("PII (R13) + เงินเป็น string (กฎ 1): quote · 201 · 409 · ค้นด้วยเลขบัตรเต็ม (ติดกัน · เว้นวรรค · ขีด) · บิลเดี่ยว — ไม่มีเลขบัตรเต็มเลย", async () => {
+    const cookie = cookies.staff;
+    const preview = await quote(bill(), cookie);
+    expect(preview.status).toBe(200);
+    const previewText = await preview.text();
+    expectNoNationalId(previewText, "POST /api/buy/quote", knownIds);
+    expectMoneyAsStrings(JSON.parse(previewText), "POST /api/buy/quote");
+
+    const created = await save(bill(), cookie);
+    expect(created.status).toBe(201);
+    const createdText = await created.text();
+    expectNoNationalId(createdText, "POST /api/buy 201", knownIds);
+    const { id } = JSON.parse(createdText) as { id: string };
+
+    const blocked = await expectApiError(await save(bill({ customer_id: expired }), cookie), 409, "บัตรหมดอายุ");
+    expectNoNationalId(JSON.stringify(blocked), "POST /api/buy 409", knownIds);
+    expectMoneyAsStrings(blocked, "POST /api/buy 409");
+
+    for (const form of [buyer.nid, cardFormat(buyer.nid, " "), cardFormat(buyer.nid, "-")]) {
+      const res = await t.request(`/api/buy?q=${encodeURIComponent(form)}`, { cookie });
+      expect(res.status, form).toBe(200);
+      const text = await res.text();
+      expectNoNationalId(text, `GET /api/buy?q=${form}`, knownIds);
+      const { items } = JSON.parse(text) as { items: { id: string; customer: { national_id_masked: string } }[] };
+      expect(
+        items.map((i) => i.id),
+        form,
+      ).toContain(id);
+      for (const item of items) expect(item.customer.national_id_masked, form).toBe(masked(buyer.nid));
+    }
+
+    const detail = await t.request(`/api/buy/${id}`, { cookie });
+    expect(detail.status).toBe(200);
+    const detailText = await detail.text();
+    // เลขผู้เสียภาษีของร้าน (นิติบุคคล) มากับบิลใน snapshot ของกิจการ — ไม่ใช่เลขบัตรของบุคคล (PR #68)
+    expectNoNationalId(detailText, "GET /api/buy/:id", knownIds, [t.env.COMPANY_TAX_ID]);
+    expectMoneyAsStrings(JSON.parse(detailText), "GET /api/buy/:id");
+  });
+
+  it("audit (R12): บิลย้อนหลังโดยผู้จัดการพร้อมเหตุผล → buy.backdate แถวเดียว · user_id คือคนเปิดบิล · เหตุผลอยู่ใน diff · audit_log ทั้งตารางไม่มีเลขบัตรเต็ม", async () => {
+    const reason = "ทดสอบ ระบบล่ม คีย์ใบเขียนมือ";
+    const res = await save(bill({ date: BACKDATE, time: "16:30", backdate_reason: reason }), cookies.manager2);
+    expect(res.status).toBe(201);
+    const { id, doc_no } = (await res.json()) as { id: string; doc_no: string };
+    const rows = await t.db.select().from(auditLog).where(eq(auditLog.rowId, id));
+    expect(rows).toEqual([
+      expect.objectContaining({ action: "buy.backdate", tableName: "buy_receipt", userId: ids.manager2 }),
+    ]);
+    expect(rows[0]?.diff).toMatchObject({ doc_no, date: BACKDATE, time: "16:30", entered_on: TODAY_BE, reason });
+    const all = await t.db.select().from(auditLog);
+    expectNoNationalId(JSON.stringify(all), "audit_log ทั้งตาราง", knownIds);
+  });
+
+  // F14 — แก้แล้วใน dev (PR #53 · fix(core): reject thousands separators in weights): quoteBuy ใช้ parser เข้มตัวเดียวกับ F6
+  // น้ำหนักรับเฉพาะตัวเลขล้วน ("5,860" ที่ตั้งใจพิมพ์ 5.860 เคยถูกอ่านเป็น 5,860 กรัม) · ราคารับตัวเลขล้วนหรือคั่นหลักพันถูกต้อง
+  // เดิมเป็น it.fails ("0x5" กรัม = 5 กรัม · "2.003e4" บาท = 20,030 บาท) · ตอนนี้ตรึงพฤติกรรมที่ถูกไว้
+  it("F14 (แก้แล้ว) — /api/buy/quote: น้ำหนักรับเฉพาะตัวเลขล้วน · ราคารับตัวเลขล้วนหรือคั่นหลักพันถูกต้อง · รูปแบบอื่นถูกปฏิเสธที่ช่องนั้น", async () => {
+    const quoteLine = async (weight_g: string, amount: string) => {
+      const res = await quote(
+        bill({ lines: [{ metal_id: gold, weight_g, amount }], payments: [{ method: "cash", amount: "20030" }] }),
+        cookies.staff,
+      );
+      expect(res.status, `${weight_g} / ${amount}`).toBe(200);
+      return (await res.json()) as {
+        ok: boolean;
+        errors: { field: string }[];
+        total_weight: string;
+        total_amount: string;
+      };
+    };
+    const rejected: [string, string, string][] = [
+      ...["0x5", "0b101", "5.86e0", "5_860", "5,860", ".5", "5."].map((w): [string, string, string] => [
+        "lines.0.weight_g",
+        w,
+        "20030",
+      ]),
+      ...["0x4e3e", "0o47076", "2.003e4", "2,00,30", "20,03"].map((a): [string, string, string] => [
+        "lines.0.amount",
+        "5.860",
+        a,
+      ]),
+    ];
+    for (const [field, weight, amount] of rejected) {
+      const q = await quoteLine(weight, amount);
+      expect(q.ok, `${weight} / ${amount}`).toBe(false);
+      expect(
+        q.errors.map((e) => e.field),
+        `${weight} / ${amount}`,
+      ).toContain(field);
+    }
+    for (const amount of ["20030", "20,030", "20,030.00"]) {
+      const q = await quoteLine("5.860", amount);
+      expect(q, amount).toMatchObject({ ok: true, errors: [], total_weight: "5.860", total_amount: "20030.00" });
+    }
+  });
+
+  // F15 — routes/buy.ts readJson (c.req.json()) ไม่ดู Content-Type → body JSON ที่ส่งเป็น text/plain (ชนิดที่ฟอร์ม HTML ข้ามเว็บ
+  // ส่งได้โดยไม่มี preflight) ถูกรับเหมือน application/json และบันทึกบิลได้จริง · ด่าน Origin (lib/origin.ts) ยังกันข้ามเว็บอยู่
+  // จึงเป็นชั้นป้องกันซ้อน (ASVS 4.0.3 V13.2.5 · RFC 9110 §15.5.16) — แบบเดียวกับ F12 ของ /gold-price
+  // แก้: ตอบ 415 เมื่อ content-type ไม่ใช่ application/json (แบบ routes/customers.ts ที่ตอบ 415 เมื่อไม่ใช่ multipart)
+  // เดิมเป็น it.fails — แก้ใน PR #89 (dev 7d8436e) · ตอนนี้ตรึงพฤติกรรมที่ถูกไว้
+  it("F15 — /api/buy/quote และ POST /api/buy ที่ Content-Type ไม่ใช่ application/json (text/plain) → 415", async () => {
+    const send = (path: string, body: unknown) =>
+      t.app.request(path, {
+        method: "POST",
+        headers: { cookie: cookies.staff ?? "", origin: "http://localhost:8787", "content-type": "text/plain" },
+        body: JSON.stringify(body),
+      });
+    await expectApiError(await send("/api/buy/quote", bill()), 415, "POST /api/buy/quote text/plain");
+    const key = `buy-gap-${randomUUID()}`;
+    await expectApiError(await send("/api/buy", { ...bill(), idempotency_key: key }), 415, "POST /api/buy text/plain");
   });
 });
