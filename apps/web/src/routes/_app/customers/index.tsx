@@ -17,6 +17,7 @@ import { customerListQuery } from "@/features/customers/queries";
 import { useCustomerSync } from "@/features/customers/sync";
 import { EMPTY } from "@/lib/format";
 import { looksLikeNationalId } from "@/lib/sensitive-query";
+import { useHeldQuery } from "@/lib/use-held-query";
 
 const SearchSchema = z.object({
   // router แปลงค่าที่เป็นตัวเลขล้วนใน URL เป็น number (?q=0812345678 จากที่พิมพ์เอง) — แปลงกลับเป็นข้อความ
@@ -34,15 +35,6 @@ export const Route = createFileRoute("/_app/customers/")({
 const DEBOUNCE_MS = 300;
 const column = createColumnHelper<CustomerListItem>();
 
-/**
- * เลขบัตรเต็มที่กำลังค้นอยู่ — อยู่ใน state ของหน้านี้เท่านั้น ไม่ลง URL (ประวัติเบราว์เซอร์/ลิงก์ที่แชร์)
- * URL ของการค้นแบบนี้จึงมี q ว่างเสมอ · `page` ตามหน้าที่ URL แสดง
- */
-interface HeldQuery {
-  q: string;
-  page: number;
-}
-
 /** /customers — ค้นและเลือกลูกค้า (ชื่อไทย/อังกฤษ · เลขบัตร · เบอร์) หน้าละ 20 ล่าสุดก่อน */
 function CustomersPage() {
   const { t } = useTranslation("customers");
@@ -50,20 +42,9 @@ function CustomersPage() {
   const navigate = Route.useNavigate();
   useCustomerSync();
 
-  // ลิงก์เก่า/บุ๊กมาร์กที่มีเลขบัตรอยู่ใน ?q= — ค้นตามนั้นต่อ (เก็บเป็น held) แล้ว effect ด้านล่างแทนที่ URL ด้วยฉบับที่ไม่มีเลขบัตร
-  const [held, setHeld] = useState<HeldQuery | undefined>(() =>
-    looksLikeNationalId(search.q) ? { q: search.q, page: search.page } : undefined,
-  );
-  // URL เปลี่ยนจากภายนอก (ปุ่มย้อนกลับ/ไปข้างหน้าของ browser · ลิงก์) → คำค้นที่มากับ URL ชนะเลขบัตรที่ค้างอยู่
-  // ไม่งั้นช่องกับผลยังเป็นเลขบัตรทั้งที่ URL บอกอย่างอื่น · ที่หน้านี้ทำเอง (ค้นด้วยเลขบัตร · เปลี่ยนหน้า)
-  // URL จะมาด้วย q ว่างเสมอ จึงแค่ตามเลขหน้า · เทียบตอน URL "เปลี่ยน" เท่านั้น ไม่เทียบทุก render:
-  // ช่วงที่ router ยังไม่ทันใช้ URL ใหม่ URL ยังเป็นค่าเก่า ซึ่งไม่ใช่การเปลี่ยนจากภายนอก
-  const [seen, setSeen] = useState({ q: search.q, page: search.page });
-  if (seen.q !== search.q || seen.page !== search.page) {
-    setSeen({ q: search.q, page: search.page });
-    if (looksLikeNationalId(search.q)) setHeld({ q: search.q, page: search.page });
-    else if (held) setHeld(search.q === "" ? { ...held, page: search.page } : undefined);
-  }
+  // เลขบัตรที่พิมพ์ค้นอยู่ในหน้านี้เท่านั้น ไม่ลง URL · ลิงก์เก่า/บุ๊กมาร์กที่มีเลขบัตรใน ?q= ก็ถูกเก็บไว้แบบนี้
+  // แล้ว effect ด้านล่างแทนที่ URL ด้วยฉบับที่ไม่มีเลขบัตร
+  const { held, hold, release, setPage } = useHeldQuery(search);
   const scrubLegacyLink = useEffectEvent(() => {
     void navigate({ search: { q: "", page: search.page }, replace: true });
   });
@@ -131,7 +112,8 @@ function CustomersPage() {
         onSearch={(value) => {
           // เลขบัตรเต็ม: ค้นได้แต่ไม่ลง URL — เก็บไว้ที่หน้านี้ แล้ว URL เหลือแค่หน้า 1 ไม่มี ?q=
           const sensitive = looksLikeNationalId(value);
-          setHeld(sensitive ? { q: value, page: 1 } : undefined);
+          if (sensitive) hold(value);
+          else release();
           void navigate({ search: { q: sensitive ? "" : value, page: 1 }, replace: true });
         }}
       />
@@ -154,7 +136,7 @@ function CustomersPage() {
         page={page}
         hasMore={list.data?.has_more ?? false}
         onPageChange={(next) => {
-          if (held) setHeld({ ...held, page: next });
+          setPage(next);
           void navigate({ search: (prev) => ({ ...prev, page: next }) });
         }}
         onRowClick={(customer) => void navigate({ to: "/customers/$id", params: { id: customer.id } })}
