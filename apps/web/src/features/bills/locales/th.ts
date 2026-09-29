@@ -6,12 +6,10 @@ export default {
   filters: {
     region: "ตัวกรองบิล",
     search: "ค้นหา",
-    searchPlaceholder: "เลขที่ / ชื่อลูกค้า / เลขบัตรประชาชน",
+    searchPlaceholder: "เช่น RC6909-0001 · สมชาย · เลขบัตรประชาชน",
     searchTooShort: "ค้นอย่างน้อย 2 ตัวอักษร",
     from: "ตั้งแต่วันที่",
     to: "ถึงวันที่",
-    datePlaceholder: "วว/ดด/ปปปป",
-    dateInvalid: "วันที่ไม่ถูกต้อง — พิมพ์ วว/ดด/ปปปป เช่น 28/09/2569",
     presets: "ช่วงวันที่สำเร็จรูป",
     metal: "โลหะ",
     allMetals: "ทุกโลหะ",
@@ -40,7 +38,6 @@ export default {
     status: "สถานะ",
     pdf: "PDF",
   },
-  cells: { dateTime: "{{date}} {{time}}" },
   status: { void: "ยกเลิก" },
   pdf: { ready: "พร้อม", pending: "กำลังสร้าง", failed: "ล้มเหลว", invalid: "ข้อมูลไม่ครบ" },
 

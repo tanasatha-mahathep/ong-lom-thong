@@ -4,7 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { Me } from "@/lib/queries";
 import { BRANCH_2, BRANCH_HQ, fakeApi, json, makeMe, renderApp } from "@/test/app";
 import { METALS } from "@/test/buy-api";
+import i18next, { LANGUAGE } from "@/i18n";
 import { t } from "./i18n";
+
+const tc = i18next.getFixedT(LANGUAGE, "common");
 import { BILL, VOID_BILL, buyList, listRequests } from "./test-data";
 
 type ListHandler = Parameters<typeof fakeApi>[0][string];
@@ -56,7 +59,8 @@ describe("หน้าค้นบิล — ตาราง", { timeout: FLOW_T
       "href",
       `/buy/${VOID_BILL.id}`,
     );
-    expect(within(voidRow).getByText(t("status.void"))).toBeInTheDocument();
+    // ป้ายยกเลิกสีเดียวกับหน้าใบรับซื้อ (destructive) — ไม่ใช่ outline
+    expect(within(voidRow).getByText(t("status.void"))).toHaveAttribute("data-variant", "destructive");
     expect(within(voidRow).getByText(t("pdf.failed"))).toBeInTheDocument();
     expect(within(voidRow).getByText("5,000.00")).toBeInTheDocument();
 
@@ -381,9 +385,9 @@ describe("หน้าค้นบิล — วันที่", { timeout: FLO
 
     await user.type(fromBox(), "31/02/2569{Enter}");
 
-    expect(await screen.findByText(t("filters.dateInvalid"))).toBeInTheDocument();
+    expect(await screen.findByText(tc("dateField.invalid"))).toBeInTheDocument();
     expect(fromBox()).toHaveAttribute("aria-invalid", "true");
-    expect(fromBox()).toHaveAccessibleDescription(t("filters.dateInvalid"));
+    expect(fromBox()).toHaveAccessibleDescription(`${tc("dateField.invalid")} ${tc("dateField.hint")}`);
     await user.tab();
     await pastDebounce();
     expect(listRequests(api)).toEqual([{}]);
@@ -391,7 +395,50 @@ describe("หน้าค้นบิล — วันที่", { timeout: FLO
 
     // แก้แล้ว error หายตอนพิมพ์
     await user.type(fromBox(), "{Backspace}");
-    expect(screen.queryByText(t("filters.dateInvalid"))).not.toBeInTheDocument();
+    expect(screen.queryByText(tc("dateField.invalid"))).not.toBeInTheDocument();
+  });
+
+  it("ช่องวันที่: placeholder วว/ดด/ปปปป + คำแนะนำชุดเดียวกับรายงาน · เป็น input text (ไม่ใช่ date picker)", async () => {
+    openBills();
+    await waitForRows();
+
+    for (const name of [t("filters.from"), t("filters.to")]) {
+      const box = screen.getByRole("textbox", { name });
+      expect(box).toHaveAttribute("type", "text");
+      expect(box).toHaveAttribute("placeholder", tc("dateField.placeholder"));
+      expect(box).toHaveAccessibleDescription(tc("dateField.hint"));
+    }
+  });
+
+  it("ตั้งแต่ > ถึง → error ที่ช่อง “ถึงวันที่” ไม่ยิงคำขอ · แก้แล้วยิงตามปกติ", async () => {
+    const { api, user, router } = openBills();
+    await waitForRows();
+    const toBox = screen.getByRole("textbox", { name: t("filters.to") });
+
+    await user.type(toBox, "10/09/2569{Enter}");
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ date_to: "2026-09-10" }));
+    await user.type(fromBox(), "20/09/2569{Enter}");
+
+    expect(await screen.findByText(tc("dateField.range"))).toBeInTheDocument();
+    expect(toBox).toHaveAttribute("aria-invalid", "true");
+    expect(router.state.location.search).toEqual({ to: "2026-09-10" });
+    const requests = listRequests(api).length;
+
+    await user.clear(fromBox());
+    await user.type(fromBox(), "01/09/2569{Enter}");
+    await waitFor(() => expect(listRequests(api).at(-1)).toEqual({ date_from: "2026-09-01", date_to: "2026-09-10" }));
+    expect(listRequests(api).length).toBe(requests + 1);
+    expect(screen.queryByText(tc("dateField.range"))).not.toBeInTheDocument();
+  });
+
+  it("ปีก่อน พ.ศ. 2543 → error “ต้องตั้งแต่ 1 ม.ค. 2543” ไม่ใช่ข้อความ “ไม่ถูกต้อง” รวม", async () => {
+    const { api, user } = openBills();
+    await waitForRows();
+
+    await user.type(fromBox(), "01/01/2542{Enter}");
+
+    expect(await screen.findByText(tc("dateField.tooEarly"))).toBeInTheDocument();
+    expect(listRequests(api)).toEqual([{}]);
   });
 
   it("ปุ่ม “วันนี้” ใช้วันตามเวลาไทย (01:30 น. วันที่ 28 = 27 ใน UTC)", async () => {
