@@ -55,17 +55,18 @@ description: สร้างหรือแก้หน้าใน apps/web (Vi
 - แสดงผลด้วย `src/lib/format.ts` เท่านั้น: `formatMoney` (2) · `formatWeight` (3) · `formatInteger` (ราคาทองรูปพรรณ 0) · `formatThaiDate` / `formatThaiDateTime` (พ.ศ.) — รับข้อความทศนิยมตรง ๆ ไม่ผ่าน `Number` · คู่กับ class `tabular-nums`
 - เลขบัตรแสดงเต็มเฉพาะหน้าลูกค้าเดี่ยว · ที่อื่นใช้ `national_id_masked` จาก API
 
-## Form rules (U0–U6) — ทุกฟอร์มใช้ชุดนี้
+## Form rules (U0–U7) — ทุกฟอร์มใช้ชุดนี้
 
 หน้าอ้างอิง: `src/components/login-form.tsx` (+ เทสต์ `login-form.test.tsx`) · ห้ามสร้างกลไกเดียวกันซ้ำในหน้า
 
-| กฎ                                           | ใช้                                                                                                               | ไฟล์                               |
-| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| U0 floating label · U1 placeholder ตัวอย่าง  | `FloatingInput` `FloatingTextarea` `FloatingSelect` (+ `NativeSelectOption`) · `size="compact"` หน้าซื้อเข้า      | `components/ui/floating-field.tsx` |
-| U2 ตรวจก่อนส่ง · U3 error ของ API · U5 toast | `useAppForm({ defaultValues, schema, submit, onSuccess?, successMessage? })`                                      | `hooks/use-app-form.ts`            |
-| U4 ระหว่างส่ง                                | `<AppForm form={f}>` (`<fieldset disabled>` + `aria-busy`) · `<SubmitButton form={f}>` (หมุน + "กำลังบันทึก…")    | `components/app-form.tsx`          |
-| U5 toast นอกฟอร์ม                            | `notifySuccess(msg)` (หายเอง 4 วิ) · `notifyError(msg)` (ค้างจนปิด) — ห้าม `toast.*` ตรง ๆ                        | `lib/notify.ts`                    |
-| U6 ชั้นบังหน้าจอ                             | `useBlockingNavigate()` หลังบันทึก/login · `reloadBlocking()` · `runBlocking(fn)` — **ไม่ใช้กับเมนู/ลิงก์ธรรมดา** | `lib/blocking.ts`                  |
+| กฎ                                           | ใช้                                                                                                                                                               | ไฟล์                           |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| U0 ป้ายเหนือช่อง · U1 placeholder ตัวอย่าง   | `TextField` `TextareaField` `SelectField` (+ `NativeSelectOption`) · `size="compact"` หน้าซื้อเข้า — **ไม่มี floating label**                                     | `components/ui/form-field.tsx` |
+| U2 ตรวจก่อนส่ง · U3 error ของ API · U5 toast | `useAppForm({ defaultValues, schema, submit, onSuccess?, successMessage? })`                                                                                      | `hooks/use-app-form.ts`        |
+| U4 ระหว่างส่ง                                | `<AppForm form={f}>` (`<fieldset disabled>` + `aria-busy`) · `<SubmitButton form={f}>` (หมุน + "กำลังบันทึก…")                                                    | `components/app-form.tsx`      |
+| U5 toast นอกฟอร์ม                            | `notifySuccess(msg)` (หายเอง 4 วิ) · `notifyError(msg)` (ค้างจนปิด) — ห้าม `toast.*` ตรง ๆ                                                                        | `lib/notify.ts`                |
+| U6 ชั้นบังหน้าจอ                             | `useBlockingNavigate()` หลังบันทึก/login · `reloadBlocking()` · `runBlocking(fn)` — **ไม่ใช้กับเมนู/ลิงก์ธรรมดา**                                                 | `lib/blocking.ts`              |
+| U7 รหัสผ่านแสดง/ซ่อน                         | `PasswordField` ทุกช่องรหัสผ่าน — **ห้าม `type="password"` ตรง ๆ** · ปุ่มตา (toggle `aria-pressed`) · Alt+F8 · ส่ง `autoComplete` current-password / new-password | `components/ui/form-field.tsx` |
 
 ```tsx
 const { t } = useTranslation("customers");
@@ -90,7 +91,7 @@ return (
   <AppForm form={f} className="flex flex-col gap-5">
     <f.form.Field name="mobile">
       {(field) => (
-        <FloatingInput
+        <TextField
           {...f.bind(field)}
           label={t("fields.mobile")}
           placeholder={t("placeholders.mobile")}
@@ -104,7 +105,9 @@ return (
 ```
 
 - `f.bind(field)` คืน `id name value onChange onBlur error` (ช่องค่าเป็น string) — ช่องอื่น (checkbox/radio) ใช้ `field.handleChange` + `f.errorOf(field)` เอง · `name` ต้องอยู่บนช่องจริง (ใช้หาช่องแรกที่ผิดตามลำดับ DOM)
-- ทุกช่องมี `placeholder` = ตัวอย่าง/รูปแบบจาก locale (`วว/ดด/ปปปป` · `081-234-5678` · `0.000`) — โปร่งใสจนโฟกัส ไม่ใช่ป้าย · `FloatingInput`/`FloatingTextarea` บังคับ prop นี้ใน type (ไม่มีตัวอย่างที่มีความหมายจริง ๆ ส่ง `""`)
+- ทุกช่องมี `placeholder` = ตัวอย่าง/รูปแบบจาก locale (`วว/ดด/ปปปป` · `081-234-5678` · `0.000`) — แสดงตลอด ไม่ใช่ป้าย · `TextField`/`TextareaField`/`PasswordField` บังคับ prop นี้ใน type (ไม่มีตัวอย่างที่มีความหมายจริง ๆ ส่ง `""`)
+- ป้ายอยู่เหนือช่องขนาดปกติเสมอ (compact แค่ช่องเตี้ยลง) · `required` = ดอกจันแดง (aria-hidden) + ช่อง `required` · error/คำอธิบายใต้ช่อง
+- U7 `PasswordField`: ปุ่มตาไม่อยู่ในลำดับ Tab (Tab ไล่ช่องต่อได้ตามเดิม) — คีย์บอร์ดใช้ **Alt+F8** ในช่อง (`aria-keyshortcuts`) · ชื่อปุ่มคงที่ "แสดงรหัสผ่าน" + `aria-pressed` (APG) · tooltip บอก ซ่อน/แสดง · สลับแล้วโฟกัส/เคอร์เซอร์อยู่ที่เดิม · ซ่อนกลับเมื่อ `useAppForm` เริ่มส่งและเมื่อช่องถูกล้าง
 - `submit` / `onSuccess` / `successMessage` ได้ค่า **output ของ `schema.parse`** (trim · pipe · transform แล้ว) ไม่ใช่ข้อความดิบในช่อง — ไม่ต้อง trim ซ้ำ · refine ที่ไม่มี `path` = error ของทั้งฟอร์ม → `f.formError` + toast + โฟกัสปุ่มบันทึก
 - จังหวะ error: ไม่แสดงระหว่างพิมพ์ครั้งแรก → แสดงเมื่อออกจากช่อง → หลังจากนั้นอัปเดตทุกครั้งที่พิมพ์ · กดบันทึกทั้งที่ผิด = แสดงทุกช่อง + โฟกัสช่องแรกที่ผิด · ไม่ต้องเขียน `onBlur`/`onSubmitInvalid` เอง
 - error ของ API: ค่าเริ่มต้น `ApiError.field` — path แบบ API แปลงเป็นชื่อช่อง TanStack ให้เอง (`lines.1.weight_g` → `lines[1].weight_g`) · ไม่มีช่องนั้นในฟอร์ม → ลองช่องแม่ (`allowed_branch_ids.1` → `allowed_branch_ids`) · เจอ → ใต้ช่องนั้น + โฟกัส · ไม่เจอ = error ของทั้งฟอร์ม · ชื่อไม่ตรง/ต้องแปลข้อความเอง → `fieldOfError` / `errorMessage` (เช่น `mapServerError` ของ customers) · ไม่ชี้ช่อง → toast + `f.formError` (แสดง Alert ในฟอร์มด้วยได้) + โฟกัสปุ่มบันทึก หรือ `focusOnFormError`
@@ -117,7 +120,7 @@ return (
 ## ฟอร์มลูกค้า — Siam ID (CLAUDE.md กฎ 6)
 
 - 11 ช่องเรียงตาม `../Work_2026-09-27/03-customer-member.md` **ห้ามสลับ** · ลำดับ DOM = ลำดับ Tab
-- ใน 11 ช่องใช้แค่ shadcn `Input` / `Textarea` หรือ `FloatingInput` / `FloatingTextarea` (สร้างบนตัวเดียวกัน · ค่าเริ่มต้น `type="text"`) — **ห้าม `Select` / `FloatingSelect` · `Calendar` · `DatePicker` · Combobox** (ป๊อปอัปแย่งโฟกัสจาก Siam ID) · `useAppForm({ submitOnEnter: false })`
+- ใน 11 ช่องใช้แค่ shadcn `Input` / `Textarea` หรือ `TextField` / `TextareaField` (สร้างบนตัวเดียวกัน · ค่าเริ่มต้น `type="text"`) — **ห้าม `Select` / `SelectField` · `Calendar` · `DatePicker` · Combobox** (ป๊อปอัปแย่งโฟกัสจาก Siam ID) · `useAppForm({ submitOnEnter: false })`
 - element อื่นที่รับ focus ได้ระหว่างช่อง (ปุ่ม ลิงก์ โซนวางรูป) → `tabIndex={-1}` · ช่องวันที่ `<input type="text">` ห้าม date picker / input mask
 - `autoComplete="off"` · Enter ไม่ submit (submit ด้วยปุ่มหรือ `Ctrl+Enter`) · format หลัง blur เท่านั้น
 - รูป: โซน `onPaste` (`clipboardData.files[0]`) + `<input type="file" accept="image/*">` + preview · ส่ง multipart (`apiFetch(path, { form })`)
