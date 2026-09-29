@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDaysIso, isoToThaiInput, thaiInputToIso } from "./thai-date";
+import { addDaysIso, formatDocDateTime, isoToThaiInput, parseDateField, thaiInputToIso } from "./thai-date";
 
 describe("thai-date", () => {
   it("shows ISO dates as the BE text staff type", () => {
@@ -18,5 +18,16 @@ describe("thai-date", () => {
     expect(addDaysIso("2026-09-29", -7)).toBe("2026-09-22");
     expect(addDaysIso("2026-03-01", -1)).toBe("2026-02-28");
     expect(addDaysIso("2026-12-31", 1)).toBe("2027-01-01");
+  });
+
+  it("parseDateField: ว่าง · ไม่ใช่วันจริง · ก่อน ค.ศ. 2000 แยก error ชัด", () => {
+    expect(parseDateField("1/9/2569")).toEqual({ iso: "2026-09-01" });
+    expect(parseDateField("  ")).toEqual({ error: "required" });
+    expect(parseDateField("31/02/2569")).toEqual({ error: "invalid" });
+    expect(parseDateField("31/12/2542")).toEqual({ error: "tooEarly" });
+  });
+
+  it("formatDocDateTime: รูปเดียวกับตารางค้นบิล วว/ดด/ปปปป ชม:นน", () => {
+    expect(formatDocDateTime("2026-09-29", "17:56")).toBe("29/09/2569 17:56");
   });
 });
