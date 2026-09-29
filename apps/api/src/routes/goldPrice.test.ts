@@ -84,6 +84,27 @@ describe.skipIf(!available)("ราคาทองวันนี้ (R7 · R8 �
     expect(await res.json()).toEqual({ error, field: "bar_sell" });
   });
 
+  it("F12: content-type text/plain ถูกปฏิเสธ (415) ไม่ใช่ 400 ของ validation — JSON ปกติ (มี charset) ยังทำงาน", async () => {
+    const raw = await t.app.request("/api/gold-price/quote", {
+      method: "POST",
+      headers: { cookie: cookies.staff ?? "", origin: "http://localhost:8787", "content-type": "text/plain" },
+      body: JSON.stringify({ bar_sell: "67850" }),
+    });
+    expect(raw.status).toBe(415);
+    expect(await raw.json()).toEqual({ error: "ต้องส่งเป็น application/json" });
+
+    const ok = await t.app.request("/api/gold-price/quote", {
+      method: "POST",
+      headers: {
+        cookie: cookies.staff ?? "",
+        origin: "http://localhost:8787",
+        "content-type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify({ bar_sell: "67850" }),
+    });
+    expect(ok.status).toBe(200);
+  });
+
   it("ราคาสูงผิดปกติ = 400 แม้ยืนยันแล้ว — วันแรกที่ไม่มีราคาก่อนหน้าให้ด่านพิมพ์ผิดเทียบก็กัน (ไม่ล้น numeric เป็น 500)", async () => {
     // เลขบัตร 13 หลัก (สมมติ) ที่ Siam ID พิมพ์หลุดเข้าช่องราคา · ล้านล้านบาท
     for (const bar_sell of ["1103700123458", "1,000,000,000,000", "1000000.00"]) {
