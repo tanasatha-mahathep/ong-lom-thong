@@ -27,7 +27,12 @@ export function SaveBar({ c }: { c: BuyController }) {
   const ready = saveBlock === null;
 
   return (
-    <div className="sticky bottom-0 z-20 -mx-4 border-t-2 bg-background px-4 py-3 md:-mx-6 md:px-6">
+    // เต็มความกว้างของพื้นที่เนื้อหา (ชิดขอบ sidebar ถึงขอบขวา) แม้หน้าจะอยู่ในกล่อง max-w-5xl: 100cqw = ความกว้าง
+    // เนื้อหาของ <main> (@container/main ใน _app.tsx) + padding ของ main (--main-px) · เนื้อในยังตรงแนวกับหน้า
+    <div
+      data-slot="save-bar"
+      className="sticky bottom-0 z-20 mx-[calc((100%_-_100cqw)/2_-_var(--main-px,1rem))] w-[calc(100cqw_+_2*var(--main-px,1rem))] border-t-2 bg-background px-(--main-px,1rem) pt-3 pb-[calc(0.75rem_+_env(safe-area-inset-bottom))]"
+    >
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-2">
         <dl className={cn("flex flex-wrap gap-x-6 gap-y-1", !fresh && "text-muted-foreground")} aria-busy={!fresh}>
           <Total label={t("save.total")} value={quote?.total_amount} strong />
