@@ -140,6 +140,12 @@ test.describe("error bodies — no stack traces or internals (ASVS V7.4 · V14.3
     ]);
     for (const res of responses) {
       const body = await res.text();
+      // Railway's edge refuses a path with broken percent-encoding itself (502 "upstream error",
+      // server railway-hikari, none of the app's headers) — the app never sees it; locally it answers 4xx
+      if (res.url().includes("%E0%A4%A") && res.status() === 502 && res.headers()["server"] === "railway-hikari") {
+        expect(res.headers()["content-security-policy"], "an edge answer, not the app's").toBeUndefined();
+        continue;
+      }
       expect(res.status(), res.url()).toBeGreaterThanOrEqual(400);
       expect(res.status(), `${res.url()} must not crash the server`).toBeLessThan(500);
       expectNoLeak(body);
