@@ -8,6 +8,8 @@ export default {
     shopName: "โอเอ็นจี หลอมทอง",
     retry: "ลองใหม่",
     saving: "กำลังบันทึก…",
+    /** ชั้นบังหน้าจอระหว่างพาไปหน้าอื่น/โหลดใหม่หลังการกระทำ (components/blocking-overlay.tsx) */
+    blocking: "กำลังทำงาน…",
     baht: "บาท",
     noBranch: "ยังไม่ได้เลือกสาขา",
     branchCode: "รหัสสาขา {{code}}",

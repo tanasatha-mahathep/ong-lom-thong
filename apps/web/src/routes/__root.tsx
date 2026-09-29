@@ -2,10 +2,12 @@ import type { QueryClient } from "@tanstack/react-query";
 import { Outlet, createRootRouteWithContext } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { BlockingOverlay } from "@/components/blocking-overlay";
 import { ThemeProvider } from "@/components/theme-provider";
 import { RootNotFoundPage } from "@/components/status-page";
 import { Toaster } from "@/components/ui/sonner";
 import { usePageMeta } from "@/hooks/use-page-meta";
+import { TOAST_POSITION, TOAST_SUCCESS_MS } from "@/lib/notify";
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   component: RootLayout,
@@ -25,7 +27,10 @@ function RootLayout() {
   return (
     <ThemeProvider>
       <Outlet />
-      <Toaster />
+      {/* U5: บนกลางจอ · ค่าเริ่มต้นหายเองใน 4 วินาที (error ค้างจนปิด — lib/notify.ts) */}
+      <Toaster position={TOAST_POSITION} duration={TOAST_SUCCESS_MS} />
+      {/* U6: ชั้นบังหน้าจอระหว่างพาไปหน้าอื่นหลังการกระทำ (lib/blocking.ts) */}
+      <BlockingOverlay />
     </ThemeProvider>
   );
 }
