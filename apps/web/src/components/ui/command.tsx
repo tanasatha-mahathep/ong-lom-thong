@@ -130,8 +130,9 @@ function CommandInput({ className, ...props }: Omit<React.ComponentProps<typeof 
         ref={input}
         data-slot="command-input"
         className={cn(
-          // วงโฟกัส 2px ของแอป (styles.css) วาดด้านใน — ด้านนอกถูกขอบบนของ dialog (overflow-hidden) ตัด
-          "flex h-10 w-full rounded-md bg-transparent px-2 py-3 text-base outline-hidden placeholder:text-muted-foreground focus-visible:-outline-offset-2! disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
+          // เจ้าของร้านขอเอาเส้นโฟกัสของช่องค้นออก (30 ก.ย.) — dialog โฟกัสช่องนี้ให้เองตอนเปิดอยู่แล้ว จึงไม่ต้องมีเส้น
+          // ล้อมซ้ำ · คง outline-hidden (ไม่ใช่ outline-none) ไว้แม้ตอนโฟกัส เพื่อให้ยังเห็นเส้นในโหมด forced-colors
+          "flex h-10 w-full rounded-md bg-transparent px-2 py-3 text-base outline-hidden placeholder:text-muted-foreground focus-visible:outline-hidden! disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
           className,
         )}
         {...props}

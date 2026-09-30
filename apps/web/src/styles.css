@@ -105,8 +105,11 @@
 
 /*
  * สว่าง (ค่าเริ่มต้น · ตอนพิมพ์ · กล่อง .theme-light) — ธีม neutral (shadcn) ค่าตามเจ้าของร้านทุกตัว
- * ยกเว้น --warning* / --success* ที่เป็นของแอป · ค่าของเจ้าของบางคู่ต่ำกว่า WCAG AA (--input / --ring / --muted-foreground
- * บน muted) — ดูรายงานใน PR ที่ feat/web-gold-theme ก่อนปรับ
+ * ยกเว้น --warning* / --success* ที่เป็นของแอป และ --muted-foreground ที่ขยับจาก 0.556 ของ shadcn เป็น 0.52:
+ *   ค่าเดิมได้ 4.34:1 บนพื้น bg-muted (ต่ำกว่า 4.5 ของ WCAG 1.4.3 — axe ใน e2e ui จับได้) · 0.52 ได้ 5.05 บน muted ·
+ *   5.28 บน sidebar · 5.51 บนพื้นหลัง (#696969 แทน #737373 — ตาแทบไม่เห็นต่าง)
+ * --input / --ring ยังต่ำกว่า 3:1 ของ WCAG 1.4.11 (ขอบช่องกรอก 1.26 · วงโฟกัส 2.59) — ดูรายงานใน PR ที่
+ *   feat/web-gold-theme ก่อนปรับ (axe ไม่ตรวจสองตัวนี้)
  * --warning* / --success* สำหรับป้าย/กล่องเตือน (ยังไม่ได้ตั้งราคาทอง) และสำเร็จ (ชำระเงินครบ) — หน้าใช้ bg-warning / bg-success
  *   ไม่ใช้สี amber/emerald ตรง ๆ · ทั้งสองธีม: ตัวอักษรบนพื้นของมัน ≥ 9:1 · ขอบ ≥ 3:1 ทั้งกับพื้นหน้าและพื้นของมัน
  */
@@ -125,7 +128,7 @@
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  --muted-foreground: oklch(0.52 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
