@@ -80,6 +80,12 @@ export default {
     close: "Close",
     notifications: "Notifications",
     closeNotification: "Close notification",
+    bell: {
+      label: "Notifications",
+      labelUnread: "Notifications ({{count}} new)",
+      title: "Notifications",
+      empty: "No notifications yet",
+    },
     currentBranch: "Current branch",
     back: {
       customers: "Back to customers",
