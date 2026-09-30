@@ -11,7 +11,14 @@ import {
   type GoldReferenceService,
   createGoldReferenceService,
 } from "./goldReference";
-import { recordGoldAnnouncement, withAnnouncementHistory } from "./goldReferenceHistory";
+import {
+  GOLD_HISTORY_DEFAULT_DAYS,
+  GOLD_HISTORY_MAX_DAYS,
+  bangkokIso,
+  historyStart,
+  recordGoldAnnouncement,
+  withAnnouncementHistory,
+} from "./goldReferenceHistory";
 
 // 10:00 น. 29 ก.ย. 2569 เวลาไทย — ประกาศ 09:31 ครั้งที่ 2 (fixture)
 const T0 = new Date("2026-09-29T03:00:00Z");
@@ -126,6 +133,30 @@ describe("withAnnouncementHistory — บันทึกประกาศที
     expect(withAnnouncementHistory(service, { record }).peek()).toBe(CACHED);
     expect(peek).toHaveBeenCalledTimes(1);
     expect(record).not.toHaveBeenCalled();
+  });
+});
+
+describe("historyStart — 00:00 น. เวลาไทยของวันแรกในช่วง (นับวันนี้ด้วย)", () => {
+  it.each([
+    ["2026-09-29", 1, "2026-09-29T00:00:00+07:00"],
+    ["2026-09-29", 7, "2026-09-23T00:00:00+07:00"],
+    ["2026-09-29", GOLD_HISTORY_DEFAULT_DAYS, "2026-07-02T00:00:00+07:00"],
+    ["2026-10-01", 2, "2026-09-30T00:00:00+07:00"],
+    ["2027-01-01", GOLD_HISTORY_MAX_DAYS, "2026-01-01T00:00:00+07:00"],
+    ["2028-03-01", 2, "2028-02-29T00:00:00+07:00"],
+  ])("วันนี้ %s ย้อน %i วัน → %s", (today, days, expected) => {
+    expect(historyStart(today, days)).toBe(expected);
+  });
+});
+
+describe("bangkokIso — รูปเดียวกับ announced_at ของ GET /reference", () => {
+  it.each([
+    ["2026-09-29T02:31:00.000Z", "2026-09-29T09:31:00+07:00"],
+    ["2026-09-29T17:30:00.000Z", "2026-09-30T00:30:00+07:00"],
+    ["2026-12-31T16:59:59.999Z", "2026-12-31T23:59:59+07:00"],
+  ])("%s → %s", (utc, expected) => {
+    expect(bangkokIso(new Date(utc))).toBe(expected);
+    expect(Date.parse(expected)).toBe(Math.floor(Date.parse(utc) / 1000) * 1000);
   });
 });
 

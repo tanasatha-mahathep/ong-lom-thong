@@ -15,6 +15,14 @@ import {
   setCentralPrice,
 } from "../services/goldPrice";
 import { type CachedGoldReference, referenceAudit } from "../services/goldReference";
+import {
+  GOLD_HISTORY_DEFAULT_DAYS,
+  GOLD_HISTORY_MAX_DAYS,
+  type GoldAnnouncementRow,
+  bangkokIso,
+  historyStart,
+  listGoldAnnouncements,
+} from "../services/goldReferenceHistory";
 
 // เงินรับเป็น string เท่านั้น — ตัวเลข JSON (float) ถูกปฏิเสธ (CLAUDE.md กฎ 1)
 const QuoteBody = z.object({
@@ -38,7 +46,18 @@ const SetBody = z.object({
     .optional(),
 });
 
+/** ?days= จำนวนวันย้อนหลัง (นับวันนี้ด้วย) — ตัวเลขล้วน 1–366 · ไม่ส่ง = 90 · รูปอื่นทั้งหมด (0 · ติดลบ · ทศนิยม · ว่าง) = 400 */
+const HistoryQuery = z.object({
+  days: z
+    .string()
+    .regex(/^[0-9]{1,3}$/)
+    .transform(Number)
+    .pipe(z.number().int().min(1).max(GOLD_HISTORY_MAX_DAYS))
+    .default(GOLD_HISTORY_DEFAULT_DAYS),
+});
+
 const BAR_SELL_ERROR = apiError("ต้องส่ง bar_sell เป็นข้อความตัวเลข", "bar_sell");
+const DAYS_ERROR = apiError(`days ต้องเป็นจำนวนเต็ม 1–${GOLD_HISTORY_MAX_DAYS}`, "days");
 const BRANCH_ID_ERROR = apiError("branch_id ไม่ถูกต้อง", "branch_id");
 const CONFIRM_TYPO_ERROR = apiError("confirm_typo ต้องเป็นจริงหรือเท็จ", "confirm_typo");
 const FROM_REFERENCE_ERROR = apiError("from_reference ต้องมี announced_at และ round ของประกาศ", "from_reference");
@@ -65,6 +84,17 @@ const referenceJson = (r: CachedGoldReference, stale: boolean) => ({
   ornament_sell: r.ornamentSell,
   fetched_at: r.fetchedAt,
   stale,
+});
+
+/** ประกาศหนึ่งครั้งในประวัติ — ชื่อ/รูปเดียวกับ GET /reference (announced_at เวลาไทย · เงิน string 2 ตำแหน่ง) */
+const historyItemJson = (r: GoldAnnouncementRow) => ({
+  announced_at: bangkokIso(r.announcedAt),
+  round: r.round,
+  source: r.source,
+  bar_buy: r.barBuy,
+  bar_sell: r.barSell,
+  ornament_buy: r.ornamentBuy,
+  ornament_sell: r.ornamentSell,
 });
 
 const toJson = (p: TodayPrice, diff: string) => ({
@@ -118,6 +148,16 @@ export const goldPriceRoutes = new Hono<AppEnv>()
     const result = await c.var.goldReference.get();
     if (!result.ok) return c.json({ ...apiError("ดึงราคาอ้างอิงไม่ได้"), reason: result.reason }, 503);
     return c.json(referenceJson(result.value, result.stale));
+  })
+  // ประวัติราคาสมาคม (กราฟ) — ประกาศที่ /reference เคยดึงได้ ตั้งแต่ 00:00 น. เวลาไทยของ (วันนี้ − days + 1) เรียงเก่า → ใหม่
+  // อ่าน DB อย่างเดียว ไม่ดึงแหล่งภายนอก · แหล่งปิดอยู่ก็ยังได้ที่เก็บไว้ · ยังไม่มี = items ว่าง (เริ่มเก็บตั้งแต่ติดตั้ง ไม่มีย้อนหลัง)
+  .get("/reference/history", async (c) => {
+    const query = HistoryQuery.safeParse(c.req.query());
+    if (!query.success) return c.json(DAYS_ERROR, 400);
+    const { days } = query.data;
+    const from = historyStart(businessDate(c.var.now()), days);
+    const rows = await listGoldAnnouncements(c.var.db, new Date(from));
+    return c.json({ days, from, items: rows.map(historyItemJson) });
   })
   .post("/quote", async (c) => {
     const body = QuoteBody.safeParse(await c.req.json().catch(() => null));
