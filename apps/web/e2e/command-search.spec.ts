@@ -153,7 +153,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       await page.keyboard.press("Control+KeyK");
       await expect(searchBox(page)).toBeFocused();
       const dialog = page.getByRole("dialog", { name: "ค้นหา" });
-      await expect(dialog.getByRole("group", { name: "ทางลัด" })).toBeVisible();
+      await expect(dialog.getByRole("group", { name: "ไปที่หน้า" })).toBeVisible();
       await expectAccessible(page, { include: PALETTE });
 
       // ลูกค้า: ชื่อ + เลขบัตรมาสก์ · บิลของลูกค้าคนนี้เฉพาะสาขาปัจจุบัน
