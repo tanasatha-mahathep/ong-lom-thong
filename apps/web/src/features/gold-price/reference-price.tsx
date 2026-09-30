@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Landmark, TriangleAlert } from "lucide-react";
 import { type ReactNode, useId } from "react";
+import { PriceCard } from "@/components/price-card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError } from "@/lib/api";
@@ -18,6 +19,15 @@ const isDisabled = (error: unknown) =>
   (error.body as { reason?: unknown }).reason === "disabled";
 
 /**
+ * การ์ด 4 ใบ 1 → 2 → 4 คอลัมน์ตามความกว้างของกรอบเอง (@container/reference) ไม่ใช่ความกว้างจอ — กรอบนี้เต็มความกว้าง
+ * เนื้อหาในหน้าหลัก แต่อยู่ในการ์ดครึ่งจอของหน้าตั้งราคา (lg:grid-cols-2) · จุดเปลี่ยนวัดจากค่าที่กว้างที่สุดของประกาศจริง
+ * "66,683.52 บาท" (ทองรูปพรรณรับซื้อมีสตางค์): 2 ใบเมื่อกรอบ ≥ 26rem · 4 ใบเมื่อ ≥ 56rem — การ์ดจึงไม่แคบกว่าราว 10rem
+ * และตัวเลขกับ "บาท" อยู่บรรทัดเดียวในการ์ด (PriceCard compact) · โครงรอโหลดใช้ grid เดียวกัน ข้อมูลมาแล้วไม่กระโดด
+ */
+const CARD_GRID = "grid gap-4 @[26rem]/reference:grid-cols-2 @4xl/reference:grid-cols-4";
+const CARD_KEYS = ["bar-buy", "bar-sell", "ornament-buy", "ornament-sell"] as const;
+
+/**
  * ราคาสมาคมค้าทองคำ (อ้างอิง) แบบเต็ม — หน้าแรก และหน้าตั้งราคา
  * กรอบเส้นประ + พื้น muted + ป้าย "อ้างอิง": แยกจากราคาที่ร้านบันทึก (การ์ดทึบ) ให้เห็นทันที · ไม่มีสูตรเงินใน browser
  * `action` = ปุ่มของหน้าตั้งราคา (เติมค่าเริ่มต้น) — แสดงเฉพาะตอนมีราคา
@@ -33,11 +43,17 @@ export function ReferencePricePanel({
   const titleId = useId();
   const { data, error, isPending } = useQuery(goldReferenceQueryOptions);
 
+  // การ์ดข้างในหน้าตาเดียวกับกระดานราคาของร้าน — กรอบจึงเป็นตัวแยก: เส้นประ muted-foreground/50 (border ปกติจางเกือบ
+  // มองไม่เห็นบนพื้นขาว) ให้เห็นชัดทั้งสองธีมว่าเป็นราคาอ้างอิง ไม่ใช่แถวที่สองของกระดานร้าน
+  // grid-cols-1 = track minmax(0,1fr): เนื้อหาใน action (ปุ่ม nowrap) ดันกรอบ/การ์ดให้กว้างเกินที่ไม่ได้
   return (
     <section
       aria-labelledby={titleId}
       aria-busy={isPending}
-      className={cn("grid gap-3 rounded-xl border border-dashed bg-muted p-4", className)}
+      className={cn(
+        "@container/reference grid grid-cols-1 gap-3 rounded-xl border border-dashed border-muted-foreground/50 bg-muted p-4",
+        className,
+      )}
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <Landmark className="size-4 text-muted-foreground" aria-hidden="true" />
@@ -50,23 +66,31 @@ export function ReferencePricePanel({
       {data ? (
         <>
           <ReferenceMeta reference={data} />
-          {/*
-            formatBoardPrice ทั้ง 4 ค่าแบบกระดานของร้าน: บาทเต็มไม่มี ".00" · มีสตางค์แสดงครบ ไม่ปัดทิ้ง
-            (ทองรูปพรรณรับซื้อของสมาคมปกติมีสตางค์ "66,683.52" — วันที่เป็นบาทเต็มก็แสดงแบบเดียวกับอีก 3 ค่า)
-          */}
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
-            <ReferenceValue label={t("reference.barBuy")} value={formatBoardPrice(data.bar_buy)} />
-            <ReferenceValue label={t("reference.barSell")} value={formatBoardPrice(data.bar_sell)} />
-            <ReferenceValue label={t("reference.ornamentBuy")} value={formatBoardPrice(data.ornament_buy)} />
-            <ReferenceValue label={t("reference.ornamentSell")} value={formatBoardPrice(data.ornament_sell)} />
-          </dl>
+          {/* ก่อนตัวเลข: เห็นคำเตือนก่อนอ่านราคา — จอแคบการ์ดเรียงลงมา 4 ใบ คำเตือนท้ายกรอบจะเลื่อนไม่ถึง */}
           {data.stale && <StaleNote />}
+          {/*
+            ลำดับตามเจ้าของร้าน: ทองคำแท่ง รับซื้อ · ขายออก · ทองรูปพรรณ รับซื้อ · ขายออก
+            formatBoardPrice ทั้ง 4 ค่าแบบกระดานของร้านข้างบน: บาทเต็มไม่มี ".00" · มีสตางค์แสดงครบ ไม่ปัดทิ้ง
+            (ทองรูปพรรณรับซื้อของสมาคมปกติมีสตางค์ "66,683.52" — วันที่เป็นบาทเต็มก็แสดงแบบเดียวกับอีก 3 ใบ)
+          */}
+          <dl className={CARD_GRID}>
+            <PriceCard compact label={t("reference.barBuy")} value={formatBoardPrice(data.bar_buy)} />
+            <PriceCard compact label={t("reference.barSell")} value={formatBoardPrice(data.bar_sell)} />
+            <PriceCard compact label={t("reference.ornamentBuy")} value={formatBoardPrice(data.ornament_buy)} />
+            <PriceCard compact label={t("reference.ornamentSell")} value={formatBoardPrice(data.ornament_sell)} />
+          </dl>
           {action?.(data)}
         </>
       ) : isPending ? (
         <>
           <span className="sr-only">{t("reference.loading")}</span>
-          <Skeleton className="h-12 w-full" />
+          {/* รูปเดียวกับตอนมีข้อมูล (บรรทัดประกาศ + การ์ด 4 ใบ) · bg-card: bg-accent กลืนกับพื้น muted ของกรอบ */}
+          <Skeleton className="h-5 w-72 max-w-full bg-card" />
+          <div className={CARD_GRID}>
+            {CARD_KEYS.map((key) => (
+              <Skeleton key={key} className="h-28 rounded-xl bg-card" />
+            ))}
+          </div>
         </>
       ) : (
         <ReferenceFailed disabled={isDisabled(error)} />
@@ -123,19 +147,6 @@ function ReferenceMeta({ reference }: { reference: GoldReference }) {
       {reference.round !== null && <span>{t("reference.round", { round: reference.round })}</span>}
       <span className="text-muted-foreground">{t("reference.source", { source: reference.source })}</span>
     </p>
-  );
-}
-
-function ReferenceValue({ label, value }: { label: string; value: string }) {
-  const { t } = useTranslation("goldPrice");
-  return (
-    <div className="grid gap-0.5">
-      <dt className="text-sm text-muted-foreground">{label}</dt>
-      <dd className="flex items-baseline gap-1">
-        <span className="text-lg font-semibold tabular-nums">{value}</span>
-        <span className="text-sm text-muted-foreground">{t("baht", { ns: "common" })}</span>
-      </dd>
-    </div>
   );
 }
 
