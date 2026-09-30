@@ -62,6 +62,8 @@ function open(path: string) {
   fakeApi({
     "GET /api/me": () => json(makeMe("manager", [BRANCH_HQ])),
     "GET /api/gold-price/today": () => json(GOLD_PRICE),
+    "GET /api/gold-price/today/branches": () =>
+      json([{ branch: BRANCH_HQ, bar_sell: "67850.00", bar_buy: "67650.00", jewelry_buy: "64268", source: "central" }]),
     "GET /api/metals": () => json(METALS),
     "GET /api/buy": () => buyList([BILL, VOID_BILL]),
     "GET /api/reports/purchase": () => json(PURCHASE),
@@ -86,6 +88,13 @@ describe("หน้ารายการไม่ล้นแนวนอนร�
   it("/reports/stock", async () => {
     open("/reports/stock");
     await screen.findByRole("table", { name: /สต็อกคงเหลือ/ }, { timeout: 10_000 });
+    assertNoPageLevelOverflowContract();
+  });
+
+  // ตารางราคาเฉพาะสาขา (ผู้จัดการ) อยู่ใน grid เดียวกับการ์ดตั้งราคาและราคาสมาคม — track auto ทำทุกการ์ดกว้างตามตาราง
+  it("/settings/gold-price", async () => {
+    open("/settings/gold-price");
+    await screen.findByRole("table", { name: "ราคาทองวันนี้ของแต่ละสาขา" }, { timeout: 10_000 });
     assertNoPageLevelOverflowContract();
   });
 });

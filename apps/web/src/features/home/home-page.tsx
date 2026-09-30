@@ -4,6 +4,7 @@ import { HandCoins, TriangleAlert, UserPlus } from "lucide-react";
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { PageHeader } from "@/components/page-header";
+import { PriceCard } from "@/components/price-card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -65,9 +66,9 @@ function PriceBoard({ role }: { role: Role }) {
         )
       ) : price ? (
         <dl className="grid gap-4 sm:grid-cols-3">
-          <BoardCard label={t("goldPrice.barSell", { ns: "common" })} value={formatBoardPrice(price.bar_sell)} />
-          <BoardCard label={t("goldPrice.barBuy", { ns: "common" })} value={formatBoardPrice(price.bar_buy)} />
-          <BoardCard label={t("goldPrice.jewelryBuy", { ns: "common" })} value={formatInteger(price.jewelry_buy)} />
+          <PriceCard label={t("goldPrice.barSell", { ns: "common" })} value={formatBoardPrice(price.bar_sell)} />
+          <PriceCard label={t("goldPrice.barBuy", { ns: "common" })} value={formatBoardPrice(price.bar_buy)} />
+          <PriceCard label={t("goldPrice.jewelryBuy", { ns: "common" })} value={formatInteger(price.jewelry_buy)} />
         </dl>
       ) : (
         <NoPriceAlert role={role} />
@@ -75,20 +76,6 @@ function PriceBoard({ role }: { role: Role }) {
       {/* ราคาสมาคม (อ้างอิง) — แยกจากกระดานราคาของร้านข้างบน · ไม่ใช่ราคาที่ใช้เปิดบิล */}
       <ReferencePricePanel />
     </section>
-  );
-}
-
-/** SectionCards ของ dashboard-01 — ตัวเลขใหญ่ tabular-nums จากข้อความของ API ตรง ๆ */
-function BoardCard({ label, value }: { label: string; value: string }) {
-  const { t } = useTranslation();
-  return (
-    <Card className="@container/card gap-2 px-6 py-5">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="flex flex-wrap items-baseline gap-x-2">
-        <span className="text-3xl font-bold tabular-nums @[16rem]/card:text-4xl">{value}</span>
-        <span className="text-muted-foreground">{t("baht")}</span>
-      </dd>
-    </Card>
   );
 }
 
