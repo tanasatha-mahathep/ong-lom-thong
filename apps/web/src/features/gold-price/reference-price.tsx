@@ -35,13 +35,18 @@ const CARD_KEYS = ["bar-buy", "bar-sell", "ornament-buy", "ornament-sell"] as co
 export function ReferencePricePanel({
   className,
   action,
+  headingLevel = 3,
 }: {
   className?: string;
   action?: (reference: GoldReference) => ReactNode;
+  /** ระดับหัวข้อของกรอบนี้ในหน้าที่ใช้ — เริ่มต้น h3 (เป็นหัวข้อย่อยของกระดานราคาที่หน้าหลัก) ตั้ง 2 เมื่อ
+   * กรอบนี้ไม่ได้อยู่ใต้หัวข้อ h2 อื่นแล้ว (เช่นหน้าตั้งราคา ที่กรอบเป็น section เต็มแถว เทียบเท่าการ์ดฟอร์ม ไม่ใช่ subsection) */
+  headingLevel?: 2 | 3;
 }) {
   const { t } = useTranslation("goldPrice");
   const titleId = useId();
   const { data, error, isPending } = useQuery(goldReferenceQueryOptions);
+  const Heading = headingLevel === 2 ? "h2" : "h3";
 
   // การ์ดข้างในหน้าตาเดียวกับกระดานราคาของร้าน — กรอบจึงเป็นตัวแยก: เส้นประ muted-foreground/70 (border ปกติจางเกือบ
   // มองไม่เห็นบนพื้นขาว) ให้เห็นชัดทั้งสองธีมว่าเป็นราคาอ้างอิง ไม่ใช่แถวที่สองของกระดานร้าน — /70 ผ่าน WCAG 1.4.11
@@ -58,9 +63,9 @@ export function ReferencePricePanel({
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <Landmark className="size-4 text-muted-foreground" aria-hidden="true" />
-        <h3 id={titleId} className="font-semibold">
+        <Heading id={titleId} className="font-semibold">
           {t("reference.title")}
-        </h3>
+        </Heading>
         <Badge variant="outline">{t("reference.badge")}</Badge>
       </div>
       <p className="text-sm text-muted-foreground">{t("reference.description")}</p>

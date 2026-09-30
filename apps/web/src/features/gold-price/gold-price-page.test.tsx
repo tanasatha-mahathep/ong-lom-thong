@@ -230,3 +230,16 @@ describe("ตั้งราคาทองวันนี้ — role และ
     ).toBeInTheDocument();
   });
 });
+
+describe("ตั้งราคาทองวันนี้ — กรอบราคาสมาคมเต็มแถวบน ไม่ซ้อนในการ์ดฟอร์ม", () => {
+  it("กรอบมาก่อนฟอร์มใน DOM · เต็มแถว (lg:col-span-2) · หัวข้อเป็น h2 (ไม่ข้ามระดับจาก h1 ของหน้า)", async () => {
+    await openAs("manager");
+
+    const region = screen.getByRole("region", { name: "ราคาสมาคม (อ้างอิง)" });
+    expect(region).toHaveClass("lg:col-span-2");
+    expect(screen.getByRole("heading", { level: 2, name: "ราคาสมาคม (อ้างอิง)" })).toBeInTheDocument();
+    // เดิมกรอบนี้ซ้อนอยู่ในการ์ดฟอร์ม (หลังช่องกรอกราคาใน DOM) — ย้ายออกมาเต็มแถวบนสุดแล้วต้องมาก่อนช่องกรอกราคา
+    const input = screen.getByLabelText(LABEL);
+    expect(region.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
