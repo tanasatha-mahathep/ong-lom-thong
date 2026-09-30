@@ -144,9 +144,7 @@ export default {
     },
     search: {
       trigger: "Search…",
-      shortcutApple: "⌘K",
-      shortcutOther: "Ctrl K",
-      tooltip: "Search ({{shortcut}})",
+      tooltip: "Search",
       title: "Search",
       description: "Search pages, customers of the whole shop, and bills of {{name}}",
       descriptionNoBranch:

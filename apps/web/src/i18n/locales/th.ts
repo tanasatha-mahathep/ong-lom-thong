@@ -156,10 +156,7 @@ export default {
      */
     search: {
       trigger: "ค้นหา…",
-      /** ป้ายปุ่มลัดบนปุ่มค้นหา — เครื่อง Apple ใช้ ⌘ */
-      shortcutApple: "⌘K",
-      shortcutOther: "Ctrl K",
-      tooltip: "ค้นหา ({{shortcut}})",
+      tooltip: "ค้นหา",
       title: "ค้นหา",
       /** คำอธิบายของ dialog สำหรับ screen reader — บอกขอบเขตการค้น */
       description: "ค้นหน้า ลูกค้าของทั้งร้าน และบิลของ{{name}}",
