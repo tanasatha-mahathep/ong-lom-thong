@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { AppForm, SubmitButton } from "@/components/app-form";
 import { ThemeProvider } from "@/components/theme-provider";
-import { FloatingInput } from "@/components/ui/floating-field";
+import { TextField } from "@/components/ui/form-field";
 import { Toaster } from "@/components/ui/sonner";
 import { ApiError } from "@/lib/api";
 import { toFieldName, useAppForm } from "./use-app-form";
@@ -46,10 +46,10 @@ function DemoForm({
     <ThemeProvider>
       <AppForm form={f} aria-label="ลูกค้า">
         <f.form.Field name="name">
-          {(field) => <FloatingInput label="ชื่อ" placeholder="สมชาย ใจดี" {...f.bind(field)} />}
+          {(field) => <TextField label="ชื่อ" placeholder="สมชาย ใจดี" {...f.bind(field)} />}
         </f.form.Field>
         <f.form.Field name="mobile">
-          {(field) => <FloatingInput label="มือถือ" placeholder="081-234-5678" {...f.bind(field)} />}
+          {(field) => <TextField label="มือถือ" placeholder="081-234-5678" {...f.bind(field)} />}
         </f.form.Field>
         {f.formError && <p data-testid="form-error">{f.formError}</p>}
         <SubmitButton form={f}>บันทึก</SubmitButton>
@@ -221,7 +221,7 @@ function LinesForm({ submit }: { submit: () => Promise<void> }) {
       <AppForm form={f}>
         {[0, 1].map((i) => (
           <f.form.Field key={i} name={`lines[${i}].weight`}>
-            {(field) => <FloatingInput label={`น้ำหนักแถว ${i + 1}`} placeholder="0.000" {...f.bind(field)} />}
+            {(field) => <TextField label={`น้ำหนักแถว ${i + 1}`} placeholder="0.000" {...f.bind(field)} />}
           </f.form.Field>
         ))}
         {f.formError && <p data-testid="form-error">{f.formError}</p>}

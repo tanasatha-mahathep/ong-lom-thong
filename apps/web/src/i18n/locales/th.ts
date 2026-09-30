@@ -10,6 +10,12 @@ export default {
     saving: "กำลังบันทึก…",
     /** ชั้นบังหน้าจอระหว่างพาไปหน้าอื่น/โหลดใหม่หลังการกระทำ (components/blocking-overlay.tsx) */
     blocking: "กำลังทำงาน…",
+    /** ปุ่มแสดง/ซ่อนรหัสผ่าน (U7 — components/ui/form-field.tsx) */
+    password: {
+      show: "แสดงรหัสผ่าน",
+      hide: "ซ่อนรหัสผ่าน",
+      hint: "{{action}} ({{shortcut}})",
+    },
     /** ชั้นบังหน้าจอค้างเกินเวลา (lib/blocking.ts) — ปลดให้ทำงานต่อได้ */
     blockingTimeout: "ใช้เวลานานผิดปกติ — ตรวจการเชื่อมต่อ แล้วลองใหม่หรือรีเฟรชหน้า",
     /** บันทึกสำเร็จแล้วแต่ขั้นถัดไป (นำทาง/พิมพ์) ล้ม — ห้ามให้บันทึกซ้ำ (hooks/use-app-form.ts) */
@@ -77,6 +83,13 @@ export default {
     close: "ปิด",
     notifications: "การแจ้งเตือน",
     closeNotification: "ปิดการแจ้งเตือน",
+    /** กระดิ่งขวาสุดของหัวหน้า (components/notification-bell.tsx) */
+    bell: {
+      label: "การแจ้งเตือน",
+      labelUnread: "การแจ้งเตือน ({{count}} รายการใหม่)",
+      title: "การแจ้งเตือน",
+      empty: "ยังไม่มีการแจ้งเตือน",
+    },
     currentBranch: "สาขาปัจจุบัน",
     /** ปุ่มย้อนกลับ [←] หน้าชื่อหน้าเอกสาร (PageHeader `back`) */
     back: {

@@ -15,12 +15,35 @@
 }
 
 /*
- * floated: ป้ายของช่องแบบ floating label (components/ui/floating-field.tsx) ลอยขึ้นเมื่อช่องที่อยู่ก่อนหน้า
- * (class "peer") ได้โฟกัส · มีค่า (placeholder ไม่แสดงแล้ว) · หรือ browser เติมค่าให้ (autofill)
+ * ฟอนต์ของหน้าจอ = Noto Sans (ละติน · ตัวเลข) + Noto Sans Thai (ไทย) แบบ variable (น้ำหนัก 100–900 ในไฟล์เดียว)
+ * ฝังเองจาก @fontsource-variable (CSP font-src 'self' · ไม่พึ่ง CDN) · โหลดเฉพาะ subset ที่ใช้: latin + thai
+ * (unicode-range แยกกันขาด — ตัวเลข/ละตินมาจาก Noto Sans เสมอ ไม่ว่าเรียงลำดับใน stack อย่างไร tabular-nums จึงคงที่)
  */
-@custom-variant floated (&:is(:where(.peer):focus ~ *, :where(.peer):not(:placeholder-shown) ~ *, :where(.peer):autofill ~ *));
+@font-face {
+  font-family: "Noto Sans Thai";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("../node_modules/@fontsource-variable/noto-sans-thai/files/noto-sans-thai-thai-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range: U+02D7, U+0303, U+0331, U+0E01-0E5B, U+200C-200D, U+25CC;
+}
+@font-face {
+  font-family: "Noto Sans";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("../node_modules/@fontsource-variable/noto-sans/files/noto-sans-latin-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
+    U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 
-/* Sarabun — ตระกูลเดียวกับ TH Sarabun ของใบเสร็จระบบเดิม · ฝังไว้เอง ไม่พึ่ง CDN */
+/*
+ * Sarabun — ใช้กับใบรับซื้อที่แสดงบนจอเท่านั้น (RECEIPT_CSS ของ @ong/core ให้ตรงกับ PDF ของ Gotenberg)
+ * browser โหลดไฟล์เมื่อมีข้อความที่ใช้ฟอนต์นี้จริง — หน้าอื่นไม่โหลด
+ */
 @font-face {
   font-family: "Sarabun";
   src: url("/fonts/Sarabun-Regular.ttf") format("truetype");
@@ -35,7 +58,7 @@
 }
 
 @theme {
-  --font-sans: "Sarabun", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Noto Sans Thai", "Noto Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 @theme inline {

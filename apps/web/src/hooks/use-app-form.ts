@@ -12,6 +12,7 @@ import {
 import { toast } from "sonner";
 import type { z } from "zod";
 import i18next from "@/i18n";
+import { APP_FORM_SUBMIT_EVENT } from "@/lib/form-events";
 import { ApiError, errorMessage as defaultErrorMessage } from "@/lib/api";
 import { notifyError, notifySuccess } from "@/lib/notify";
 
@@ -78,7 +79,7 @@ export interface AppFormControls {
   submitButton: (element: HTMLButtonElement | null) => void;
 }
 
-/** props ที่ `bind(field)` คืน — ส่งต่อให้ FloatingInput / FloatingTextarea / FloatingSelect ได้ตรง ๆ */
+/** props ที่ `bind(field)` คืน — ส่งต่อให้ TextField / TextareaField / SelectField / PasswordField ได้ตรง ๆ */
 export interface BoundFieldProps {
   id: string;
   name: string;
@@ -289,6 +290,7 @@ export function useAppForm<TValues extends object, TParsed = TValues, TResult = 
   const submit = useCallback(() => {
     if (busy.current || savedRef.current) return;
     busy.current = true;
+    formRef.current?.dispatchEvent(new Event(APP_FORM_SUBMIT_EVENT));
     // จบเมื่อ submit + onSuccess เสร็จ (รวมรอนำทาง) — ระหว่างนั้น Enter / Ctrl+Enter / คลิกซ้ำไม่มีผล
     void form.handleSubmit().finally(() => {
       busy.current = false;
@@ -330,7 +332,7 @@ export function useAppForm<TValues extends object, TParsed = TValues, TResult = 
     if (serverErrors[name]) setServerErrors(({ [name]: _removed, ...rest }) => rest);
   };
 
-  /** props ของช่องข้อความ — `<FloatingInput label=… placeholder=… {...bind(field)} />` */
+  /** props ของช่องข้อความ — `<TextField label=… placeholder=… {...bind(field)} />` */
   const bind = (field: TextFieldApi): BoundFieldProps => ({
     id: fieldId(field.name),
     name: field.name,

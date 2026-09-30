@@ -9,12 +9,13 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { NotificationBell } from "@/components/notification-bell";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { usePageMeta } from "@/hooks/use-page-meta";
 
 /**
- * หัวหน้าของ dashboard-01 — ปุ่มย่อ/ขยาย sidebar + breadcrumb เท่านั้น
+ * หัวหน้าของ dashboard-01 — ปุ่มย่อ/ขยาย sidebar + breadcrumb ซ้าย · กระดิ่งแจ้งเตือนขวาสุด
  * สาขาอยู่ที่หัว sidebar (tooltip ตอนย่อ) · ธีมอยู่เมนูผู้ใช้ · ราคาทองวันนี้อยู่หน้าแรก (เจ้าของจะกำหนดที่แสดงเอง)
  */
 export function SiteHeader() {
@@ -46,6 +47,9 @@ export function SiteHeader() {
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
+      <div className="ml-auto flex shrink-0 items-center">
+        <NotificationBell />
+      </div>
     </header>
   );
 }
