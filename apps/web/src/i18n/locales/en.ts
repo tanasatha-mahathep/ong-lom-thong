@@ -148,9 +148,9 @@ export default {
       shortcutOther: "Ctrl K",
       tooltip: "Search ({{shortcut}})",
       title: "Search",
-      description: "Search pages and shortcuts, customers of the whole shop, and bills of {{name}}",
+      description: "Search pages, customers of the whole shop, and bills of {{name}}",
       descriptionNoBranch:
-        "Search pages and shortcuts, and customers of the whole shop — no branch selected yet, so bills cannot be searched",
+        "Search pages, and customers of the whole shop — no branch selected yet, so bills cannot be searched",
       inputLabel: "Search terms",
       placeholder: "Customer name, ID number, bill number or page name…",
       results: "Search results",
@@ -158,15 +158,10 @@ export default {
       hintEmptyNoBranch: "Type at least 2 characters to search customers",
       hintOneMore: "Type 1 more character to search customers and bills",
       groups: {
-        actions: "Shortcuts",
         pages: "Go to page",
         customers: "Customers · all branches",
         bills: "Bills · {{name}}",
         billsNoBranch: "Bills",
-      },
-      actions: {
-        newBill: "Open a new bill",
-        newCustomer: "Add customer",
       },
       loading: "Searching…",
       failedCustomers: "Could not search customers — select to try again",
@@ -181,7 +176,7 @@ export default {
       status: {
         oneMore: "{{n}} results found — type 1 more character to search customers and bills",
         found: "Found {{summary}}",
-        pages: "{{n}} pages and shortcuts",
+        pages: "{{n}} pages",
         customers: "{{n}} customers",
         bills: "{{n}} bills",
         failedCustomers: "Could not search customers",

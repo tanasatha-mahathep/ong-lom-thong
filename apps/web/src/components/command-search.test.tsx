@@ -221,11 +221,10 @@ describe("ปุ่มลัด Ctrl/⌘+K", { timeout: FLOW_TIMEOUT }, () => {
 });
 
 describe("เนื้อหาหน้าค้นหา", { timeout: FLOW_TIMEOUT }, () => {
-  it("คำค้นว่าง: ทางลัด + หน้าตาม role · คำแนะนำ 2 ตัวอักษร · ขอบเขตสาขาในคำอธิบายและท้ายหน้า", async () => {
+  it("คำค้นว่าง: หน้าตาม role · คำแนะนำ 2 ตัวอักษร · ขอบเขตสาขาในคำอธิบายและท้ายหน้า", async () => {
     setup({ role: "staff" });
     const dialog = await openPalette();
 
-    expect(optionNames(within(dialog).getByRole("group", { name: "ทางลัด" }))).toEqual(["เปิดบิลใหม่", "เพิ่มลูกค้า"]);
     expect(optionNames(within(dialog).getByRole("group", { name: "ไปที่หน้า" }))).toEqual([
       "หน้าแรก",
       "ซื้อเข้า",
@@ -235,16 +234,15 @@ describe("เนื้อหาหน้าค้นหา", { timeout: FLOW_TIM
     expect(searchBox(dialog)).toHaveAccessibleDescription(
       "พิมพ์อย่างน้อย 2 ตัวอักษรเพื่อค้นลูกค้าและเลขที่บิลของสาขานี้",
     );
-    expect(dialog).toHaveAccessibleDescription(`ค้นหน้าและทางลัด ลูกค้าของทั้งร้าน และบิลของ${BRANCH_HQ.name}`);
+    expect(dialog).toHaveAccessibleDescription(`ค้นหน้า ลูกค้าของทั้งร้าน และบิลของ${BRANCH_HQ.name}`);
     expect(within(dialog).getByText(`บิลเฉพาะ ${BRANCH_HQ.name}`)).toBeInTheDocument();
     expect(within(dialog).getByRole("listbox", { name: "ผลการค้นหา" })).toBeInTheDocument();
   });
 
-  it("ฝ่ายบัญชี: ไม่มี 'เปิดบิลใหม่' และหน้าซื้อเข้า · มีรายงานและส่งบัญชีรายเดือน", async () => {
+  it("ฝ่ายบัญชี: ไม่มีหน้าซื้อเข้า · มีรายงานและส่งบัญชีรายเดือน", async () => {
     setup({ role: "accounting" });
     const dialog = await openPalette();
 
-    expect(optionNames(within(dialog).getByRole("group", { name: "ทางลัด" }))).toEqual(["เพิ่มลูกค้า"]);
     const pages = optionNames(within(dialog).getByRole("group", { name: "ไปที่หน้า" }));
     expect(pages).toEqual(["หน้าแรก", "ค้นบิล", "ลูกค้า", "ยอดซื้อ รายงาน", "สต็อก รายงาน", "ส่งบัญชีรายเดือน รายงาน"]);
   });
@@ -254,11 +252,10 @@ describe("เนื้อหาหน้าค้นหา", { timeout: FLOW_TIM
     const dialog = await openPalette();
 
     await user.keyboard("ล");
-    expect(optionNames(within(dialog).getByRole("group", { name: "ทางลัด" }))).toEqual(["เปิดบิลใหม่", "เพิ่มลูกค้า"]);
     expect(optionNames(within(dialog).getByRole("group", { name: "ไปที่หน้า" }))).toEqual(["ค้นบิล", "ลูกค้า"]);
     expect(searchBox(dialog)).toHaveAccessibleDescription("พิมพ์อีก 1 ตัวอักษรเพื่อค้นลูกค้าและบิล");
     expect(within(dialog).getByRole("status")).toHaveTextContent(
-      "พบ 4 รายการ — พิมพ์อีก 1 ตัวอักษรเพื่อค้นลูกค้าและบิล",
+      "พบ 2 รายการ — พิมพ์อีก 1 ตัวอักษรเพื่อค้นลูกค้าและบิล",
     );
     await pastDebounce();
     expect(searchRequests(api, "/api/customers")).toEqual([]);
@@ -327,9 +324,7 @@ describe("ขอบเขตสาขา (fail-closed)", { timeout: FLOW_TIMEOUT
   it("ยังไม่มีสาขาปัจจุบัน → ไม่ถามบิลเลย · กลุ่มบิลบอกให้เลือกสาขา · ลูกค้ายังค้นได้", async () => {
     const { api, user } = setup({ me: { ...makeMe("staff", [BRANCH_HQ, BRANCH_2]), branch: null } });
     const dialog = await openPalette();
-    expect(dialog).toHaveAccessibleDescription(
-      "ค้นหน้าและทางลัด และลูกค้าของทั้งร้าน — ยังไม่ได้เลือกสาขา จึงค้นบิลไม่ได้",
-    );
+    expect(dialog).toHaveAccessibleDescription("ค้นหน้า และลูกค้าของทั้งร้าน — ยังไม่ได้เลือกสาขา จึงค้นบิลไม่ได้");
     await user.keyboard("นาย");
 
     expect(await within(dialog).findByRole("option", { name: /นายทดสอบ ระบบ/ })).toBeInTheDocument();
@@ -374,7 +369,7 @@ describe("เลือกผลค้น", { timeout: FLOW_TIMEOUT }, () => {
     const selectedOption = () => within(dialog).getAllByRole("option", { selected: true })[0];
 
     await waitFor(() => expect(box).toHaveAttribute("aria-activedescendant", selectedOption()?.id));
-    expect(selectedOption()).toHaveTextContent("เปิดบิลใหม่");
+    expect(selectedOption()).toHaveTextContent("หน้าแรก");
 
     await user.keyboard("นาย");
     const customer = await within(dialog).findByRole("option", { name: /นายทดสอบ ระบบ/ });
@@ -382,7 +377,7 @@ describe("เลือกผลค้น", { timeout: FLOW_TIMEOUT }, () => {
     await waitFor(() => expect(box).toHaveAttribute("aria-activedescendant", customer.id));
 
     await user.keyboard("{Backspace}{Backspace}{Backspace}");
-    await waitFor(() => expect(selectedOption()).toHaveTextContent("เปิดบิลใหม่"));
+    await waitFor(() => expect(selectedOption()).toHaveTextContent("หน้าแรก"));
     await waitFor(() => expect(box).toHaveAttribute("aria-activedescendant", selectedOption()?.id));
   });
 
@@ -476,7 +471,7 @@ describe("เลือกผลค้น", { timeout: FLOW_TIMEOUT }, () => {
       expect(within(dialog).getByRole("option", { name: "ลูกค้า" })).toHaveAttribute("aria-selected", "true"),
     );
     await user.keyboard("{Home}");
-    const first = within(dialog).getByRole("option", { name: "เปิดบิลใหม่" });
+    const first = within(dialog).getByRole("option", { name: "หน้าแรก" });
     await waitFor(() => expect(first).toHaveAttribute("aria-selected", "true"));
 
     await user.click(within(dialog).getByRole("option", { name: "หน้าแรก" }));
@@ -541,7 +536,7 @@ describe("เลือกผลค้น", { timeout: FLOW_TIMEOUT }, () => {
     await openPalette();
     await user.keyboard("{Control>}{Enter}{/Control}");
 
-    // Enter เลือก "เปิดบิลใหม่" → ฟอร์มยังไม่บันทึก → ถามยืนยัน · ฟอร์มลูกค้าไม่ถูกส่ง
+    // Enter เลือก "หน้าแรก" → ฟอร์มยังไม่บันทึก → ถามยืนยัน · ฟอร์มลูกค้าไม่ถูกส่ง
     expect(await screen.findByRole("alertdialog", { name: "ข้อมูลในหน้านี้ยังไม่ได้บันทึก" })).toBeInTheDocument();
     await user.keyboard("{Control>}{Enter}{/Control}");
     await pastDebounce();

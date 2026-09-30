@@ -3,7 +3,8 @@ import { cn } from "@/lib/utils";
 
 /**
  * เวอร์ชันของแอปใต้เมนูผู้ใช้ (เช่น "v0.4.2 · a1b2c3d") — บอกได้ว่าเครื่องนี้เปิด build ไหนอยู่เวลาแจ้งปัญหา
- * ตัวเล็ก จาง กึ่งกลาง — muted-foreground 80% เป็นค่าต่ำสุดที่ยังผ่าน 3:1 บนพื้น sidebar (สว่าง 3.13 · มืด 4.87)
+ * ตัวเล็ก กึ่งกลาง — 11px คือข้อความปกติ (ไม่ใช่ตัวใหญ่) ต้องผ่าน 4.5:1 ตาม WCAG 1.4.3 ไม่ใช่ 3:1
+ * muted-foreground เต็มความทึบบนพื้น sidebar: สว่าง 5.28 · มืด 6.91 (ใส่ /80 = 3.49 ตกเกณฑ์ axe จับได้)
  * ซ่อนตอน sidebar ย่อเป็นแถบไอคอน (ไม่มีที่ให้ข้อความ) · หน้า login ใช้บรรทัดเดียวกันท้ายหน้า
  */
 export function AppVersion({ className }: { className?: string } = {}) {
@@ -15,7 +16,7 @@ export function AppVersion({ className }: { className?: string } = {}) {
     <p
       data-slot="app-version"
       className={cn(
-        "truncate px-2 text-center text-[11px] tracking-wide text-muted-foreground/80 tabular-nums group-data-[collapsible=icon]:hidden",
+        "truncate px-2 text-center text-[11px] tracking-wide text-muted-foreground tabular-nums group-data-[collapsible=icon]:hidden",
         className,
       )}
     >
