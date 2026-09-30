@@ -336,4 +336,14 @@ describe("หน้า login — กฎฟอร์ม U0–U6", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     await waitFor(() => expect(privacy).toHaveFocus());
   });
+
+  it("บัญชีหลายสาขา → ขั้นเลือกสาขาไม่แสดงประโยคยอมรับซ้ำ (เหมือนก่อนย้าย) แต่เวอร์ชันยังอยู่เหมือนเดิม", async () => {
+    signInServer(makeMe("manager", [BRANCH_HQ, BRANCH_2]));
+    renderApp("/login");
+    await submitCredentials();
+
+    expect(await screen.findByRole("heading", { level: 1, name: "เลือกสาขาที่ทำงาน" })).toBeInTheDocument();
+    expect(screen.queryByText(/การคลิกเข้าใช้งานถือว่าคุณยอมรับ/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-slot="app-version"]')).not.toBeNull();
+  });
 });

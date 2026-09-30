@@ -27,8 +27,15 @@ import { signIn, signInErrorMessage, switchBranch } from "@/lib/session";
  * 1) อีเมล + รหัสผ่าน  2) เลือกสาขาที่ทำงาน (เฉพาะบัญชีที่มีสิทธิ์มากกว่า 1 สาขา)
  * ไม่มี social login / สมัครเอง (ปิดที่เซิร์ฟเวอร์) · คีย์บอร์ดล้วน: โฟกัสอีเมลเอง · Enter = ส่ง
  * หน้าอ้างอิงของกฎฟอร์ม U0–U6: useAppForm · TextField/PasswordField · toast · ชั้นบังหน้าจอตอนพาเข้าแอป (`onDone`)
+ * `onStepChange` แจ้งเมื่อเข้าขั้นเลือกสาขา — routes/login.tsx ใช้ซ่อนประโยคยอมรับข้อกำหนดตอนนั้น (ไม่ใช่ขั้นเข้าสู่ระบบแล้ว)
  */
-export function LoginForm({ onDone }: { onDone: () => Promise<void> | void }) {
+export function LoginForm({
+  onDone,
+  onStepChange,
+}: {
+  onDone: () => Promise<void> | void;
+  onStepChange?: (step: "signIn" | "branch") => void;
+}) {
   const [me, setMe] = useState<Me | null>(null);
 
   return (
@@ -37,7 +44,13 @@ export function LoginForm({ onDone }: { onDone: () => Promise<void> | void }) {
         {me ? (
           <BranchStep me={me} onDone={onDone} />
         ) : (
-          <SignInStep onSignedIn={(signedIn) => (canSwitchBranch(signedIn) ? setMe(signedIn) : onDone())} />
+          <SignInStep
+            onSignedIn={(signedIn) => {
+              if (!canSwitchBranch(signedIn)) return onDone();
+              setMe(signedIn);
+              onStepChange?.("branch");
+            }}
+          />
         )}
         <BrandPanel />
       </CardContent>
