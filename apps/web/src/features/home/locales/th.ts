@@ -1,4 +1,4 @@
-/** namespace `home` — หน้าแรก (ไม่มี `as const` · ภาษาอังกฤษภายหลัง: en.ts ข้างไฟล์นี้) */
+/** namespace `home` — หน้าหลัก (ไม่มี `as const` · ภาษาอังกฤษภายหลัง: en.ts ข้างไฟล์นี้) */
 export default {
   boardHint: "ทองคำ 96.5% · ราคาต่อน้ำหนักทอง 1 บาท",
   noPrice: {

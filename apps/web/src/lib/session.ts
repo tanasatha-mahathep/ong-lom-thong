@@ -60,7 +60,7 @@ function decode(value: string): string | undefined {
 
 /**
  * ปลายทางหลัง login (?redirect=) ต้องเป็นหน้าในแอปเท่านั้น — กัน open redirect ไปเว็บอื่น
- * แปลงด้วย URL จริงเทียบกับ origin ของแอป แล้วคืนแค่ path + search + hash · ไม่ผ่าน = undefined (ไปหน้าแรก)
+ * แปลงด้วย URL จริงเทียบกับ origin ของแอป แล้วคืนแค่ path + search + hash · ไม่ผ่าน = undefined (ไปหน้าหลัก)
  */
 export function safeRedirect(value: unknown, origin: string = window.location.origin): string | undefined {
   if (typeof value !== "string" || !value.startsWith("/")) return undefined;

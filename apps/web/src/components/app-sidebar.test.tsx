@@ -83,7 +83,7 @@ describe("sidebar ของแอป", () => {
       fakeApi({ "GET /api/me": () => json(makeMe("manager")) });
       renderApp("/");
       const banner = await screen.findByRole("banner");
-      // หน้าแรกยังแสดงป้ายเตือนราคา (ไม่ได้ลบ query) — แต่ไม่อยู่ในหัวหน้า
+      // หน้าหลักยังแสดงป้ายเตือนราคา (ไม่ได้ลบ query) — แต่ไม่อยู่ในหัวหน้า
       expect(await screen.findByText("ยังไม่ได้ตั้งราคาทองวันนี้", {}, { timeout: 10_000 })).toBeInTheDocument();
       expect(within(banner).getByRole("button", { name: "แสดง/ซ่อนเมนู" })).toBeInTheDocument();
       expect(within(banner).getByRole("navigation", { name: "ตำแหน่งของหน้า" })).toBeInTheDocument();
@@ -141,7 +141,7 @@ describe("เมนูบนมือถือ (sheet)", () => {
     await user.click(trigger);
 
     const sheet = await screen.findByRole("dialog", { name: "เมนู" });
-    await waitFor(() => expect(within(sheet).getByRole("link", { name: "หน้าแรก" })).toHaveFocus());
+    await waitFor(() => expect(within(sheet).getByRole("link", { name: "หน้าหลัก" })).toHaveFocus());
 
     within(sheet).getByRole("link", { name: "ลูกค้า" }).focus();
     await user.keyboard("{Enter}");

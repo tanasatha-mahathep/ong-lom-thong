@@ -37,7 +37,7 @@ function setup(role: Role, routes: Parameters<typeof fakeApi>[0] = {}) {
 
 const referenceRegion = () => screen.findByRole("region", { name: "ราคาสมาคม (อ้างอิง)" });
 
-describe("ราคาสมาคม (อ้างอิง) — หน้าแรก", () => {
+describe("ราคาสมาคม (อ้างอิง) — หน้าหลัก", () => {
   it("แสดงราคา 4 ค่า + ครั้งที่ + เวลาประกาศ + ที่มา แยกจากกระดานราคาของร้าน", async () => {
     setup("staff");
     renderApp("/");
@@ -54,7 +54,7 @@ describe("ราคาสมาคม (อ้างอิง) — หน้า�
     const board = screen.getByRole("region", { name: "ราคาทองวันนี้" });
     expect(board).toHaveTextContent("67,850");
     expect(within(region).queryByText("67,850")).not.toBeInTheDocument();
-    // หน้าแรกไม่มีปุ่มเติมค่า
+    // หน้าหลักไม่มีปุ่มเติมค่า
     expect(within(region).queryByRole("button")).not.toBeInTheDocument();
   });
 

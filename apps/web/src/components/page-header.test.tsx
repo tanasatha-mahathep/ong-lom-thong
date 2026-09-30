@@ -38,7 +38,7 @@ async function pageHeader() {
 
 describe("แถบหัวเรื่องของทุกหน้า (PageHeader)", () => {
   it.each([
-    ["/", "หน้าแรก"],
+    ["/", "หน้าหลัก"],
     ["/buy", "ซื้อเข้า"],
     [`/buy/${BILL.id}`, "ดูบิล"],
     ["/bills", "ค้นบิล"],

@@ -67,7 +67,7 @@ export default {
     status: {
       notFoundTitle: "ไม่พบหน้านี้",
       notFoundBody: "ลิงก์อาจพิมพ์ผิด หรือหน้านี้ถูกย้ายไปแล้ว",
-      backHome: "กลับหน้าแรก",
+      backHome: "กลับหน้าหลัก",
       errorTitle: "เกิดข้อผิดพลาด",
     },
   },
@@ -101,7 +101,7 @@ export default {
       settings: "ตั้งค่า",
     },
     nav: {
-      home: "หน้าแรก",
+      home: "หน้าหลัก",
       buy: "ซื้อเข้า",
       bills: "ค้นบิล",
       customers: "ลูกค้า",
@@ -115,7 +115,7 @@ export default {
     /** ชื่อหน้า — route ใส่ key ใน `staticData.title` (หัวหน้า · breadcrumb · document.title) */
     routes: {
       login: "เข้าสู่ระบบ",
-      home: "หน้าแรก",
+      home: "หน้าหลัก",
       buy: "ซื้อเข้า",
       bill: "ดูบิล",
       bills: "ค้นบิล",

@@ -64,7 +64,7 @@ export default {
     status: {
       notFoundTitle: "Page not found",
       notFoundBody: "The link may be mistyped, or this page has moved",
-      backHome: "Back to home",
+      backHome: "Back to dashboard",
       errorTitle: "Something went wrong",
     },
   },
@@ -96,7 +96,7 @@ export default {
       settings: "Settings",
     },
     nav: {
-      home: "Home",
+      home: "Dashboard",
       buy: "Buy in",
       bills: "Find bills",
       customers: "Customers",
@@ -109,7 +109,7 @@ export default {
     },
     routes: {
       login: "Sign in",
-      home: "Home",
+      home: "Dashboard",
       buy: "Buy in",
       bill: "View bill",
       bills: "Find bills",
