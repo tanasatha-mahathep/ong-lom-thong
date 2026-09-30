@@ -58,6 +58,17 @@ describe("ราคาสมาคม (อ้างอิง) — หน้า�
     expect(within(region).queryByRole("button")).not.toBeInTheDocument();
   });
 
+  it("ทั้ง 4 ค่าจัดรูปแบบกระดานเดียวกัน — บาทเต็มไม่มี .00 (รวมทองรูปพรรณรับซื้อ) · มีสตางค์แสดงครบ ไม่ปัดทิ้ง", async () => {
+    setup("staff", {
+      "GET /api/gold-price/reference": () =>
+        json({ ...REFERENCE, ornament_buy: "66683.00", ornament_sell: "69050.50" }),
+    });
+    renderApp("/");
+    const region = await referenceRegion();
+    const values = (await within(region).findAllByRole("definition")).map((value) => value.textContent);
+    expect(values).toEqual(["68,050บาท", "68,250บาท", "66,683บาท", "69,050.50บาท"]);
+  });
+
   it("stale → คำเตือนว่าอาจไม่ใช่ประกาศล่าสุด", async () => {
     setup("staff", { "GET /api/gold-price/reference": () => json({ ...REFERENCE, stale: true }) });
     renderApp("/");

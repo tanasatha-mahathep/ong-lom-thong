@@ -4,7 +4,7 @@ import { type ReactNode, useId } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError } from "@/lib/api";
-import { formatBoardPrice, formatMoney, formatThaiDateTime } from "@/lib/format";
+import { formatBoardPrice, formatThaiDateTime } from "@/lib/format";
 import { type GoldReference, goldReferenceQueryOptions } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "./i18n";
@@ -50,10 +50,14 @@ export function ReferencePricePanel({
       {data ? (
         <>
           <ReferenceMeta reference={data} />
+          {/*
+            formatBoardPrice ทั้ง 4 ค่าแบบกระดานของร้าน: บาทเต็มไม่มี ".00" · มีสตางค์แสดงครบ ไม่ปัดทิ้ง
+            (ทองรูปพรรณรับซื้อของสมาคมปกติมีสตางค์ "66,683.52" — วันที่เป็นบาทเต็มก็แสดงแบบเดียวกับอีก 3 ค่า)
+          */}
           <dl className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
             <ReferenceValue label={t("reference.barBuy")} value={formatBoardPrice(data.bar_buy)} />
             <ReferenceValue label={t("reference.barSell")} value={formatBoardPrice(data.bar_sell)} />
-            <ReferenceValue label={t("reference.ornamentBuy")} value={formatMoney(data.ornament_buy)} />
+            <ReferenceValue label={t("reference.ornamentBuy")} value={formatBoardPrice(data.ornament_buy)} />
             <ReferenceValue label={t("reference.ornamentSell")} value={formatBoardPrice(data.ornament_sell)} />
           </dl>
           {data.stale && <StaleNote />}
