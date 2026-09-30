@@ -53,25 +53,58 @@ void i18next.use(initReactI18next).init({
   initAsync: false,
 });
 
-/** โหลดข้อความของภาษานั้นเข้า i18next (ภาษาอังกฤษ = chunk แยก โหลดครั้งเดียว) */
+/** รอ chunk ภาษานานสุดเท่านี้ — เกินแล้วถือว่าโหลดไม่ได้ (ใช้ภาษาไทยต่อ · หน้าไม่ค้างรอ) */
+export const LANGUAGE_LOAD_TIMEOUT_MS = 3_000;
+
+/** ที่มาของข้อความแต่ละภาษานอกจากไทย — แยกเป็น object ให้เทสต์แทนตัวโหลดได้ (chunk ค้าง/หาย) */
+export const languageLoaders: Record<Exclude<Language, "th">, () => Promise<Record<string, object>>> = {
+  en: () => import("./resources.en").then((module) => module.resourcesEn),
+};
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`language chunk timed out after ${ms} ms`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+}
+
+/** โหลดข้อความของภาษานั้นเข้า i18next (ภาษาอังกฤษ = chunk แยก โหลดครั้งเดียว · ค้างเกิน 3 วินาที = reject) */
 export async function loadLanguage(language: Language): Promise<void> {
-  if (language === DEFAULT_LANGUAGE || i18next.hasResourceBundle(language, "common")) return;
-  const { resourcesEn } = await import("./resources.en");
-  for (const [ns, bundle] of Object.entries(resourcesEn)) {
+  // ไทยอยู่ใน bundle หลักเสมอ
+  if (language === "th" || i18next.hasResourceBundle(language, "common")) return;
+  const bundles = await withTimeout(languageLoaders[language](), LANGUAGE_LOAD_TIMEOUT_MS);
+  for (const [ns, bundle] of Object.entries(bundles)) {
     i18next.addResourceBundle(language, ns, bundle, true, true);
   }
 }
 
-/** เปลี่ยนภาษาของ UI และจำไว้ในเครื่องนี้ (localStorage `ong.lang`) */
+/** ลำดับคำขอเปลี่ยนภาษา — คำขอเก่าที่โหลดเสร็จช้ากว่าต้องไม่ทับตัวเลือกล่าสุด */
+let languageRequest = 0;
+
+/**
+ * เปลี่ยนภาษาของ UI และจำไว้ในเครื่องนี้ (localStorage `ong.lang`)
+ * โหลดไม่ได้/เกินเวลา = reject และภาษาเดิมยังอยู่ · เลือกซ้อนกัน = ตัวเลือกล่าสุดชนะเสมอ
+ */
 export async function setLanguage(language: Language): Promise<void> {
+  const request = ++languageRequest;
   await loadLanguage(language);
+  if (request !== languageRequest) return;
   await i18next.changeLanguage(language);
   storeLanguage(language);
 }
 
 /**
  * ภาษาที่จำไว้ในเครื่อง — main.tsx รอ promise นี้ก่อน render ครั้งแรก (ไม่กะพริบไทย→อังกฤษ)
- * โหลดภาษาอังกฤษไม่ได้ (chunk หาย/เน็ตหลุด) = ใช้ภาษาไทยไปก่อน
+ * โหลดภาษาอังกฤษไม่ได้หรือเกิน 3 วินาที (chunk หาย/เน็ตหลุด) = เริ่มด้วยภาษาไทย — หน้าไม่ค้าง
  */
 export const i18nReady: Promise<void> =
   readStoredLanguage() === DEFAULT_LANGUAGE

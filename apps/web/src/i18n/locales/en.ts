@@ -159,6 +159,7 @@ export default {
     },
     language: {
       label: "Language / ภาษา",
+      loadFailed: "Could not switch language — check the connection and try again",
     },
     update: {
       message: "A new version is available. Please refresh",

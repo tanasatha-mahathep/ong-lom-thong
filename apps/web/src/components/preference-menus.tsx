@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useLanguage } from "@/hooks/use-language";
 import { LANGUAGES, LANGUAGE_NAMES, isLanguage, setLanguage } from "@/i18n";
+import { notifyError } from "@/lib/notify";
 import { THEMES, type Theme, isTheme, useTheme } from "@/lib/theme";
 
 /**
@@ -68,12 +69,14 @@ export function ThemeRadioItems() {
 
 /** รายการภาษา — ชื่อภาษาเป็นภาษานั้นเอง (ไทย · English) · เก็บใน localStorage `ong.lang` */
 export function LanguageRadioItems() {
+  const { t } = useTranslation("shell");
   const language = useLanguage();
   return (
     <DropdownMenuRadioGroup
       value={language}
       onValueChange={(value) => {
-        if (isLanguage(value)) void setLanguage(value);
+        // โหลดภาษาไม่ได้ (chunk หาย/ค้าง) — ภาษาเดิมยังอยู่ · แจ้งให้ลองใหม่
+        if (isLanguage(value)) setLanguage(value).catch(() => notifyError(t("language.loadFailed")));
       }}
     >
       {LANGUAGES.map((option) => (

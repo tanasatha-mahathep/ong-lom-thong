@@ -168,6 +168,7 @@ export default {
     },
     language: {
       label: "ภาษา / Language",
+      loadFailed: "เปลี่ยนภาษาไม่สำเร็จ — ตรวจการเชื่อมต่อแล้วลองใหม่",
     },
     update: {
       message: "มีเวอร์ชันใหม่ กรุณารีเฟรช",

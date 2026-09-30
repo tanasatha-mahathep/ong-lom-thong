@@ -1,7 +1,7 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
-import i18next, { readStoredLanguage } from "@/i18n";
+import { describe, expect, it, vi } from "vitest";
+import i18next, { languageLoaders, readStoredLanguage } from "@/i18n";
 import { fakeApi, json, renderApp } from "@/test/app";
 
 /** หน้า login ของคนที่ยังไม่ได้เข้าระบบ */
@@ -41,6 +41,18 @@ describe("หน้า login — ภาษา · ธีม · เวอร์ช
     await user.click(screen.getByRole("menuitemradio", { name: "ไทย" }));
     expect(await screen.findByRole("heading", { level: 1, name: "เข้าสู่ระบบ" })).toBeInTheDocument();
     expect(localStorage.getItem("ong.lang")).toBe("th");
+  });
+
+  it("โหลดภาษาอังกฤษไม่ได้ → toast แจ้ง · หน้ายังเป็นภาษาไทย", async () => {
+    const user = await renderLogin();
+    for (const ns of Object.keys(i18next.options.resources?.th ?? {})) i18next.removeResourceBundle("en", ns);
+    vi.spyOn(languageLoaders, "en").mockRejectedValue(new Error("Failed to fetch dynamically imported module"));
+    await user.click(screen.getByRole("button", { name: "ภาษา / Language" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "English" }));
+
+    expect(await screen.findByText("เปลี่ยนภาษาไม่สำเร็จ — ตรวจการเชื่อมต่อแล้วลองใหม่")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "เข้าสู่ระบบ" })).toBeInTheDocument();
+    expect(localStorage.getItem("ong.lang")).toBeNull();
   });
 
   it("ภาษาที่จำไว้ผิดรูป/ไม่มี = ไทย", () => {
