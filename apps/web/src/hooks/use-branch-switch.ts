@@ -7,6 +7,7 @@ import { useSidebar } from "@/components/ui/sidebar";
 import { ApiError, errorMessage } from "@/lib/api";
 import { BLOCKING_WATCHDOG_MS, reloadBlocking, runBlocking, useIsBlocking } from "@/lib/blocking";
 import { bumpContentEpoch } from "@/lib/branch-epoch";
+import { OPEN_LAYER, isTypingTarget } from "@/lib/hotkeys";
 import { notifyError, notifySuccess } from "@/lib/notify";
 import { type Branch, type Me, canSwitchBranch, meQueryOptions } from "@/lib/queries";
 import { switchBranch } from "@/lib/session";
@@ -17,16 +18,6 @@ const SWITCH_MUTATION_KEY = ["switch-branch"] as const;
 
 /** รอคำตอบการสลับได้นานสุด — ต้องน้อยกว่า watchdog ของชั้นบัง (ไม่งั้นชั้นบังหายก่อน แล้วคำตอบมาล้างหน้าทีหลัง) */
 export const SWITCH_TIMEOUT_MS = Math.min(20_000, BLOCKING_WATCHDOG_MS - 5_000);
-
-/** dialog/sheet/เมนูที่เปิดอยู่ — ปุ่มลัดไม่ทำงาน (สลับข้างหลังแล้ว remount จะทิ้งสิ่งที่แก้ใน sheet) */
-const OPEN_LAYER =
-  '[role="dialog"][aria-modal="true"], [role="alertdialog"], [role="menu"], [data-slot="blocking-overlay"]';
-
-/** ช่องที่กำลังพิมพ์ — ปุ่มลัดไม่ทำงาน (Alt+ตัวเลขอาจเป็นการพิมพ์อักขระพิเศษของบางแป้นพิมพ์) */
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  return target.isContentEditable || target.matches("input, textarea, select, [role='combobox'], [role='textbox']");
-}
 
 /** Alt+1…9 (แถวตัวเลขเท่านั้น — Alt+numpad คือ Alt code ของ Windows) → 1…9 · ปุ่มอื่น = null */
 export function branchShortcutIndex(event: KeyboardEvent): number | null {
