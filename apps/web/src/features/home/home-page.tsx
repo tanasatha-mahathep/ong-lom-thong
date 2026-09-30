@@ -17,7 +17,7 @@ import { canCreateBill, canSetGoldPrice } from "@/lib/nav";
 import { type Branch, type Role, goldPriceTodayQueryOptions, useMe } from "@/lib/queries";
 import { todayBuysQueryOptions } from "./queries";
 
-/** หน้าแรก (spec §3 · §14.2) — กระดานราคาวันนี้ · ปุ่มใหญ่ · ยอดซื้อวันนี้ของสาขาปัจจุบัน */
+/** หน้าหลัก (spec §3 · §14.2) — กระดานราคาวันนี้ · ปุ่มใหญ่ · ยอดซื้อวันนี้ของสาขาปัจจุบัน */
 export function HomePage() {
   const { t } = useTranslation();
   const me = useMe();
