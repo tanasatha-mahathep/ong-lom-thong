@@ -2,7 +2,7 @@
  * ข้อมูลจริงของผู้ควบคุมข้อมูล (ร้าน) ที่ข้อกำหนดการใช้บริการและนโยบายความเป็นส่วนตัวอ้างถึง — **ที่เดียว**
  *
  * ค่าที่ขึ้นต้นด้วย "[" คือช่องว่างที่เจ้าของระบบต้องกรอก (ห้ามเดา) — ระหว่างที่ยังเหลือแม้แต่ช่องเดียว
- * กล่องข้อความจะแสดงป้าย "ฉบับร่าง — รอตรวจสอบโดยที่ปรึกษากฎหมาย" ให้เอง (`LEGAL_IS_DRAFT`)
+ * หรือยังไม่ได้ตั้ง `LEGAL_REVIEWED = true` กล่องข้อความจะแสดงป้าย "ฉบับร่าง — รอตรวจสอบโดยที่ปรึกษากฎหมาย" ให้เอง
  * เนื้อหาทั้งหมดเป็นฉบับร่าง ต้องให้ทนายความไทยตรวจก่อนใช้งานจริง
  */
 
@@ -37,10 +37,29 @@ export const isPlaceholder = (value: string) => value.trim().startsWith("[");
 
 const valuesOf = (value: LocalizedValue) => (typeof value === "string" ? [value] : [value.th, value.en]);
 
-/** ยังมีช่องที่ต้องกรอก → แสดงป้ายฉบับร่าง */
-export const LEGAL_IS_DRAFT = Object.values(LEGAL_CONFIG as Record<string, LocalizedValue>).some((value) =>
-  valuesOf(value).some(isPlaceholder),
-);
+/**
+ * ที่ปรึกษากฎหมายตรวจและอนุมัติเนื้อหาแล้วหรือยัง — เปลี่ยนเป็น true ได้เฉพาะเมื่อมีการอนุมัติเป็นลายลักษณ์อักษร
+ * ระหว่างที่ยังเป็น false ป้าย "ฉบับร่าง" แสดงเสมอ แม้กรอกทุกช่องครบแล้ว
+ */
+export const LEGAL_REVIEWED: boolean = false;
+
+/** ช่องที่ยังเป็น "[…]" (ไม่นับ `version` — เลขฉบับเป็นข้อมูลอธิบาย ไม่ใช่สิ่งที่บอกว่าเป็นร่าง) */
+export function configPlaceholders(config: Record<string, LocalizedValue> = LEGAL_CONFIG): string[] {
+  return Object.entries(config)
+    .filter(([key, value]) => key !== "version" && valuesOf(value).some(isPlaceholder))
+    .map(([key]) => key);
+}
+
+/** ฉบับร่าง = ยังไม่ผ่านการตรวจของที่ปรึกษากฎหมาย หรือยังมีช่องที่ต้องกรอก */
+export function legalIsDraft(
+  reviewed: boolean = LEGAL_REVIEWED,
+  config: Record<string, LocalizedValue> = LEGAL_CONFIG,
+): boolean {
+  return !reviewed || configPlaceholders(config).length > 0;
+}
+
+/** ค่าที่หน้าใช้ — เนื้อหาที่ยังมี "[…]" ทำให้เป็นร่างเพิ่มอีกชั้น (legal-dialog.tsx) */
+export const LEGAL_IS_DRAFT = legalIsDraft();
 
 /** ค่าของช่องตามภาษา */
 export function legalValue(key: LegalConfigKey, language: LegalLanguage): string {

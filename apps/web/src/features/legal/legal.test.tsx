@@ -6,7 +6,15 @@ import { fakeApi, json, renderApp } from "@/test/app";
 import en from "./content/en";
 import th from "./content/th";
 import type { LegalDocument } from "./content/types";
-import { LEGAL_CONFIG, LEGAL_IS_DRAFT, fillLegal, isPlaceholder } from "./legal-config";
+import {
+  LEGAL_CONFIG,
+  LEGAL_IS_DRAFT,
+  LEGAL_REVIEWED,
+  configPlaceholders,
+  fillLegal,
+  isPlaceholder,
+  legalIsDraft,
+} from "./legal-config";
 
 async function renderLogin() {
   fakeApi({ "GET /api/me": () => json({ error: "unauthorized" }, 401) });
@@ -84,6 +92,44 @@ describe("ข้อกำหนดการใช้บริการ · นโ
 });
 
 describe("legal-config · เนื้อหา", () => {
+  const filled = {
+    companyName: { th: "บริษัท ตัวอย่าง จำกัด", en: "Example Co., Ltd." },
+    registeredAddress: "1 ถนนตัวอย่าง",
+    taxId: "0105500000000",
+    privacyEmail: "dpo@example.com",
+    privacyPhone: "02-000-0000",
+    effectiveDate: { th: "1 ตุลาคม 2569", en: "1 October 2026" },
+    version: "1.0",
+  };
+
+  it("ป้ายฉบับร่าง: ยังไม่ผ่านที่ปรึกษากฎหมาย = ร่างเสมอ แม้กรอกครบ · ผ่านแล้วแต่ยังเหลือช่อง = ร่าง · version ไม่มีผล", () => {
+    expect(LEGAL_REVIEWED).toBe(false);
+    expect(legalIsDraft(false, filled)).toBe(true);
+    expect(legalIsDraft(true, filled)).toBe(false);
+    expect(legalIsDraft(true, { ...filled, taxId: "[เลขประจำตัวผู้เสียภาษี — ต้องกรอก]" })).toBe(true);
+    expect(legalIsDraft(true, { ...filled, version: "[ฉบับ]" })).toBe(false);
+    expect(configPlaceholders(filled)).toEqual([]);
+    expect(configPlaceholders()).toEqual([
+      "companyName",
+      "registeredAddress",
+      "taxId",
+      "privacyEmail",
+      "privacyPhone",
+      "effectiveDate",
+    ]);
+  });
+
+  it("ข้อความที่ร้านยังไม่ยืนยันเป็น [… — รอยืนยัน] ทั้งสองภาษา", () => {
+    const thText = [th.terms, th.privacy].flatMap(textsOf).join("\n");
+    const enText = [en.terms, en.privacy].flatMap(textsOf).join("\n");
+    for (const claim of ["30 วัน", "ได้ประเมินแล้ว", "ไม่น้อยกว่า 5 ปี", "ฝ่ายบุคคล"])
+      expect(thText).not.toContain(claim);
+    for (const claim of ["30 days", "has assessed", "disciplinary action under Company rules and"])
+      expect(enText).not.toContain(claim);
+    expect(thText).toContain("[อย่างน้อย 5 ปี — รอยืนยัน]");
+    expect(enText).toContain("[response period — to be confirmed]");
+  });
+
   it("ยังมีช่องที่ต้องกรอก = ฉบับร่าง · ค่าที่กรอกแล้วแทนในเนื้อหา", () => {
     expect(LEGAL_IS_DRAFT).toBe(true);
     expect(isPlaceholder(LEGAL_CONFIG.companyName.th)).toBe(true);

@@ -42,8 +42,9 @@ function fillDocument(doc: LegalDocument, language: LegalLanguage): LegalDocumen
 /** ยังมีช่อง "[…]" ที่ต้องกรอก/รอยืนยัน ไม่ว่าจะอยู่ใน config หรือในเนื้อหา */
 function documentHasPlaceholder(doc: LegalDocument): boolean {
   const texts = [
+    doc.title,
     doc.subtitle,
-    ...doc.sections.flatMap((s) => s.body.flatMap((b) => (typeof b === "string" ? [b] : b.list))),
+    ...doc.sections.flatMap((s) => [s.heading, ...s.body.flatMap((b) => (typeof b === "string" ? [b] : b.list))]),
   ];
   return texts.some((text) => text.split(/(?=\[)/).some((part) => isPlaceholder(part) && part.includes("]")));
 }
@@ -60,6 +61,8 @@ export function LegalDialog({ doc, children }: { doc: LegalDocKey; children?: Re
     queryKey: ["legal", language],
     queryFn: () => loadContent(language),
     staleTime: Number.POSITIVE_INFINITY,
+    // chunk หายหลัง deploy / เน็ตสะดุด — ลองซ้ำครั้งเดียวแล้วแสดงข้อความให้ปิดแล้วเปิดใหม่
+    retry: 1,
     meta: { handlesUnauthorized: true },
   });
   const legalDoc = content.data ? fillDocument(content.data[doc], language) : null;

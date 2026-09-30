@@ -71,7 +71,7 @@ export default {
         heading: "6. Monitoring and audit logging",
         body: [
           "For security, fraud prevention and legal compliance, the System keeps audit logs of activity such as sign-ins; creating, editing or voiding bills; editing customer records; setting gold prices; opening ID card copies; and downloading files — together with the time, user account, branch and related network information.",
-          "The Company may review these logs where necessary and proportionate, as described in the Privacy Notice, and may use them as evidence in investigations and in disciplinary or legal proceedings.",
+          "The Company may review these logs where necessary and proportionate, as described in the Privacy Notice, and may use them as evidence in investigations and legal proceedings [disciplinary action under Company rules — to be confirmed].",
         ],
       },
       {
@@ -89,7 +89,7 @@ export default {
       {
         heading: "9. Suspension and termination",
         body: [
-          "The Company may suspend, restrict or revoke access immediately when employment ends, duties change, there is reasonable suspicion of a breach of these Terms, or for the security of the System. Breaches may lead to disciplinary action under Company rules and to legal action.",
+          "The Company may suspend, restrict or revoke access immediately when employment ends, duties change, there is reasonable suspicion of a breach of these Terms, or for the security of the System. Breaches may lead to legal action [disciplinary action under Company rules — to be confirmed].",
         ],
       },
       {
@@ -101,7 +101,7 @@ export default {
       {
         heading: "11. Limitation of liability",
         body: [
-          "The System is an internal tool provided as is. The Company will take reasonable care to keep it available but does not guarantee uninterrupted or error-free operation. When the System is unavailable, follow the Company's fallback procedure. Nothing in these Terms excludes any right or liability that cannot be excluded by law.",
+          "The System is an internal tool provided as is. The Company will take reasonable care to keep it available but does not guarantee uninterrupted or error-free operation. When the System is unavailable, follow the [fallback procedure — to be confirmed]. Nothing in these Terms excludes any right or liability that cannot be excluded by law.",
         ],
       },
       {
@@ -128,7 +128,7 @@ export default {
         heading: "1. Data controller",
         body: [
           "{{companyName}}, tax ID {{taxId}}, with its head office at {{registeredAddress}} (the “Company”), is the data controller for the processing described in this Notice.",
-          "This Notice explains how the Company collects, uses and discloses personal data of users of the counter buy-in and membership system — staff, managers, accounting and administrators. Personal data of customers that users record in the System is covered by a separate customer privacy notice.",
+          "This Notice explains how the Company collects, uses and discloses personal data of users of the counter buy-in and membership system — staff, managers, accounting and administrators. Personal data of customers that users record in the System is covered by the customer privacy notice [customer notice and how it is provided — to be confirmed].",
         ],
       },
       {
@@ -148,7 +148,7 @@ export default {
       {
         heading: "3. Sources",
         body: [
-          "We receive this data from the administrator or HR staff who create your account, from you directly, and automatically from your use of the System.",
+          "We receive this data from the administrator who creates your account [HR source — to be confirmed], from you directly, and automatically from your use of the System.",
         ],
       },
       {
@@ -156,13 +156,13 @@ export default {
         body: [
           {
             list: [
-              "To create and manage your account, authenticate you, grant access by role and branch, and enable you to do your work — contractual basis (employment or engagement), section 24(3).",
-              "To secure the System, prevent and detect fraud or misuse, investigate incidents and verify transactions — the Company's legitimate interests, section 24(5), which the Company has assessed as proportionate to your rights.",
+              "To create and manage your account, authenticate you, grant access by role and branch, and enable you to do your work — contractual basis, section 24(3) [employment contract or engagement relied on — to be confirmed].",
+              "To secure the System, prevent and detect fraud or misuse, investigate incidents and verify transactions — the Company's legitimate interests, section 24(5) [assessment of proportionality to your rights — to be confirmed].",
               "To prepare and retain accounting and tax records and comply with orders of competent authorities — legal obligation, section 24(6), e.g. the Revenue Code and the Accounting Act B.E. 2543 (2000).",
               "To establish, exercise or defend legal claims.",
             ],
           },
-          "The Company does not use your data for marketing and does not make automated decisions that produce legal effects concerning you.",
+          "[The Company does not use your data for marketing and does not make automated decisions that produce legal effects concerning you — to be confirmed.]",
         ],
       },
       {
@@ -177,7 +177,7 @@ export default {
           {
             list: [
               "Your supervisors, administrators and the Company's accounting staff, as their duties require.",
-              "The cloud infrastructure provider that hosts the System's servers, database and file storage (Railway), as a data processor under contract.",
+              "The cloud infrastructure provider that hosts the System's servers, database and file storage (Railway), as a data processor [data processing agreement with the provider — to be confirmed].",
               "The PDF rendering service that runs inside the Company's own System and does not send data to third parties.",
               "Government agencies, courts or officials with legal authority, where disclosure is required by law.",
               "The Company's auditors, legal counsel and professional advisers, under duties of confidentiality.",
@@ -188,7 +188,7 @@ export default {
       {
         heading: "7. Cross-border transfer",
         body: [
-          "The System runs in the cloud provider's data centre in the Singapore region, so personal data is stored and processed outside Thailand. The Company complies with sections 28 and 29 of the Personal Data Protection Act B.E. 2562 (2019) by applying appropriate safeguards, such as data processing terms with the provider, encryption in transit and access controls. Singapore has its own data protection law (the Personal Data Protection Act 2012). You may request details of these safeguards through the contact in section 12.",
+          "The System runs in the cloud provider's data centre in the Singapore region, so personal data is stored and processed outside Thailand. The Company complies with sections 28 and 29 of the Personal Data Protection Act B.E. 2562 (2019) by applying safeguards: encryption in transit, access controls and [data processing agreement with the provider — to be confirmed]. Singapore has its own data protection law (the Personal Data Protection Act 2012). You may request details of these safeguards through the contact in section 12.",
         ],
       },
       {
@@ -199,7 +199,7 @@ export default {
             list: [
               "Account data: while your access is active and, after the account is closed, for as long as needed for audit purposes [exact period — to be confirmed].",
               "Audit and sign-in logs: [exact period — to be confirmed], or longer where relevant to an investigation or dispute.",
-              "Purchase receipts, reports and other accounting or tax records that include the recording user's name: at least 5 years under the Revenue Code and the Accounting Act B.E. 2543 (2000), or longer if ordered by an authority [exact period — to be confirmed].",
+              "Purchase receipts, reports and other accounting or tax records that include the recording user's name: [at least 5 years — to be confirmed] under the Revenue Code and the Accounting Act B.E. 2543 (2000), or longer if ordered by an authority [exact period — to be confirmed].",
               "Session cookie: until sign-out or session expiry · theme and language preferences: until you clear your browser data.",
             ],
           },
@@ -209,7 +209,7 @@ export default {
       {
         heading: "9. Security",
         body: [
-          "The Company applies appropriate organisational and technical measures, including encryption in transit (HTTPS), one-way hashed passwords, HttpOnly session cookies, role- and branch-based access control, no public links to files, logging of file access and backups, and reviews these measures periodically.",
+          "The Company applies appropriate organisational and technical measures, including encryption in transit (HTTPS), one-way hashed passwords, HttpOnly session cookies, role- and branch-based access control, no public links to files, and logging of file access [backups and periodic review of these measures — to be confirmed].",
         ],
       },
       {
@@ -228,7 +228,7 @@ export default {
               "lodge a complaint with the Office of the Personal Data Protection Committee (PDPC) if you believe the Company has not complied with the law.",
             ],
           },
-          "The Company may refuse a request where the law allows — for example, where accounting and tax records must be retained — and will tell you why. The Company will act on a complete request within 30 days of receiving it.",
+          "The Company may refuse a request where the law allows — for example, where accounting and tax records must be retained — and will tell you why. The Company will act on a complete request within [response period — to be confirmed] of receiving it.",
         ],
       },
       {
