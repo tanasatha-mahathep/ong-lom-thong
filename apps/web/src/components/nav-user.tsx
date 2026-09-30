@@ -1,7 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
-import { Check, ChevronsUpDown, LogOut, type LucideIcon, Monitor, Moon, Sun, SunMoon } from "lucide-react";
-import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
+import { ChevronsUpDown, Languages, LogOut, SunMoon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -9,21 +8,18 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { LanguageRadioItems, ThemeRadioItems } from "@/components/preference-menus";
 import { RailTooltip } from "@/components/rail-tooltip";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
 import { errorMessage } from "@/lib/api";
 import type { Me } from "@/lib/queries";
 import { signOut } from "@/lib/session";
-import { THEMES, type Theme, isTheme, useTheme } from "@/lib/theme";
-
-const THEME_ICONS: Record<Theme, LucideIcon> = { light: Sun, dark: Moon, system: Monitor };
 
 /** สระหน้า (เ แ โ ใ ไ) ไม่ใช่ตัวแรกของชื่อที่อ่านออก — "เจน" ควรเป็น "จ" */
 const LEADING_VOWELS = /^[เ-ไ]/u;
@@ -59,13 +55,12 @@ function UserText({ me }: { me: Me }) {
 }
 
 /**
- * เมนูผู้ใช้ท้าย sidebar (NavUser ของ sidebar-07) — หัวเมนู = ผู้ใช้ + role · ธีม (สว่าง/มืด/ตามระบบ) · ออกจากระบบ
+ * เมนูผู้ใช้ท้าย sidebar (NavUser ของ sidebar-07) — หัวเมนู = ผู้ใช้ + role · ธีม (สว่าง/มืด/ตามระบบ) · ภาษา (ไทย/English) · ออกจากระบบ
  * สลับสาขาอยู่ที่หัว sidebar (branch-switcher.tsx)
  */
 export function NavUser({ me }: { me: Me }) {
   const { t } = useTranslation("shell");
   const { isMobile } = useSidebar();
-  const { theme, setTheme } = useTheme();
   const queryClient = useQueryClient();
   const router = useRouter();
 
@@ -114,30 +109,16 @@ export function NavUser({ me }: { me: Me }) {
                 {t("theme.label")}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent>
-                <DropdownMenuRadioGroup
-                  value={theme}
-                  onValueChange={(value) => {
-                    if (isTheme(value)) setTheme(value);
-                  }}
-                >
-                  {THEMES.map((option) => {
-                    const Icon = THEME_ICONS[option];
-                    return (
-                      // radio item ของ Radix ตรง ๆ — ไอคอนธีมนำหน้า · เช็กชิดขวาแทนจุดของ ui/dropdown-menu
-                      <DropdownMenuPrimitive.RadioItem
-                        key={option}
-                        value={option}
-                        className="relative flex min-w-40 cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[state=checked]:bg-accent data-[state=checked]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
-                      >
-                        <Icon className="text-muted-foreground" aria-hidden="true" />
-                        <span className="flex-1">{t(`theme.${option}`)}</span>
-                        <DropdownMenuPrimitive.ItemIndicator className="ml-auto flex items-center">
-                          <Check aria-hidden="true" />
-                        </DropdownMenuPrimitive.ItemIndicator>
-                      </DropdownMenuPrimitive.RadioItem>
-                    );
-                  })}
-                </DropdownMenuRadioGroup>
+                <ThemeRadioItems />
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <Languages aria-hidden="true" />
+                {t("language.label")}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                <LanguageRadioItems />
               </DropdownMenuSubContent>
             </DropdownMenuSub>
             <DropdownMenuSeparator />

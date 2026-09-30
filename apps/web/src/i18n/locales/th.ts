@@ -235,6 +235,11 @@ export default {
       light: "สว่าง",
       dark: "มืด",
       system: "ตามระบบ",
+      current: "ธีม: {{theme}}",
+    },
+    language: {
+      label: "ภาษา / Language",
+      loadFailed: "เปลี่ยนภาษาไม่สำเร็จ — ตรวจการเชื่อมต่อแล้วลองใหม่",
     },
     update: {
       message: "มีเวอร์ชันใหม่ กรุณารีเฟรช",
