@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { navFor } from "./nav";
 import type { Role } from "./queries";
-import { matchesQuery, normalizeForMatch, searchActionsFor, searchPagesFor } from "./search-items";
+import { matchesQuery, normalizeForMatch, searchPagesFor } from "./search-items";
 
 describe("normalizeForMatch", () => {
   it("ตัวพิมพ์เล็ก · ช่องว่างซ้อนและหัวท้าย · รูป Unicode เดียวกัน (NFC)", () => {
@@ -45,15 +45,5 @@ describe("รายการตาม role", () => {
     expect(pages.find((page) => page.item.to === "/reports/stock")?.group).toBe("reports");
     expect(pages.find((page) => page.item.to === "/settings/users")?.group).toBe("settings");
     expect(pages.find((page) => page.item.to === "/")?.group).toBeUndefined();
-  });
-
-  it.each<[Role, string[]]>([
-    ["staff", ["/buy", "/customers/new"]],
-    ["manager", ["/buy", "/customers/new"]],
-    ["admin", ["/buy", "/customers/new"]],
-    // ฝ่ายบัญชีเปิดบิลไม่ได้ (spec §10)
-    ["accounting", ["/customers/new"]],
-  ])("ทางลัดของ %s", (role, expected) => {
-    expect(searchActionsFor(role).map((action) => action.to)).toEqual(expected);
   });
 });

@@ -22,7 +22,7 @@ import type { CommandSearchState, SearchDestination } from "@/hooks/use-command-
 import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { formatMoney } from "@/lib/format";
 import type { Me } from "@/lib/queries";
-import { type SearchPage, matchesQuery, searchActionsFor, searchPagesFor } from "@/lib/search-items";
+import { type SearchPage, matchesQuery, searchPagesFor } from "@/lib/search-items";
 import { looksLikeNationalId } from "@/lib/sensitive-query";
 import { formatDocDateTime } from "@/lib/thai-date";
 import { cn } from "@/lib/utils";
@@ -58,7 +58,7 @@ function continuesFrom<T>(term: string) {
 
 /**
  * หน้าค้นหา (โหลดแบบ lazy จาก components/command-search.tsx) — combobox + listbox ของ cmdk ใน Dialog ของ Radix
- * กรองเอง (shouldFilter=false): หน้า/ทางลัดกรองในเครื่อง · ลูกค้า (ทั้งร้าน) และบิล (สาขาปัจจุบันเท่านั้น) กรองที่ API
+ * กรองเอง (shouldFilter=false): หน้ากรองในเครื่อง · ลูกค้า (ทั้งร้าน) และบิล (สาขาปัจจุบันเท่านั้น) กรองที่ API
  */
 export function CommandPalette({ state, me }: { state: CommandSearchState; me: Me }) {
   const { t } = useTranslation("shell");
@@ -116,9 +116,6 @@ function PaletteBody({ me, onSelect }: { me: Me; onSelect: (destination: SearchD
     item.to,
   ];
   const pages = searchPagesFor(me.role).filter((page) => matchesQuery(term, pageTexts(page)));
-  const actions = searchActionsFor(me.role).filter((action) =>
-    matchesQuery(term, [t(`search.actions.${action.key}`), t(`nav.${action.related}`), action.to]),
-  );
 
   const customersLoading = searching && (!settled || q === "" || customers.isFetching);
   const customerItems = searching ? customers.data?.items.slice(0, RESULT_LIMIT) : undefined;
@@ -131,7 +128,7 @@ function PaletteBody({ me, onSelect }: { me: Me; onSelect: (destination: SearchD
   // เลขบัตรประชาชนห้ามลง URL (CLAUDE.md กฎ 7) — ผลในหน้าค้นหาคือคำตอบ ไม่มีลิงก์ "ดูทั้งหมด" ที่พา q ไปด้วย
   const canSeeAll = !looksLikeNationalId(term);
 
-  const pageCount = pages.length + actions.length;
+  const pageCount = pages.length;
   const customerCount = customerItems?.length ?? 0;
   const billCount = billItems?.length ?? 0;
   const noResults =
@@ -166,16 +163,14 @@ function PaletteBody({ me, onSelect }: { me: Me; onSelect: (destination: SearchD
   /**
    * แถวที่เลือก = แถวแรกที่เลือกได้ (Enter เปิดผลแรกที่เห็น) จนกว่าผู้ใช้จะเลื่อนเอง — ผลแต่ละกลุ่มมาไม่พร้อมกัน (บิลมาก่อนลูกค้าได้)
    * แต่ cmdk เลือกแถวแรกเองเฉพาะตอนยังไม่มีแถวที่เลือก จึงคุม value เอง (aria-activedescendant ตามด้วย CommandInput)
-   * ลำดับเดียวกับ DOM ด้านล่าง: ทางลัด → หน้า → ลูกค้า → บิล (แถว "กำลังค้นหา…" / "ยังไม่ได้เลือกสาขา" เลือกไม่ได้)
+   * ลำดับเดียวกับ DOM ด้านล่าง: หน้า → ลูกค้า → บิล (แถว "กำลังค้นหา…" / "ยังไม่ได้เลือกสาขา" เลือกไม่ได้)
    */
   const [selected, setSelected] = useState("");
   const [movedFor, setMovedFor] = useState<string | null>(null);
-  const firstAction = actions[0];
   const firstPage = pages[0];
   const firstCustomer = customerItems?.[0];
   const firstBill = billItems?.[0];
   const top =
-    (firstAction && `action:${firstAction.key}`) ??
     (firstPage && `page:${firstPage.item.to}`) ??
     (customersFailed ? "retry:customers" : undefined) ??
     (firstCustomer && `customer:${firstCustomer.id}`) ??
@@ -229,24 +224,6 @@ function PaletteBody({ me, onSelect }: { me: Me; onSelect: (destination: SearchD
         // ชี้เมาส์ = เลือกแถวนั้น (cmdk) — ผลที่มาทีหลังไม่ดึงกลับ
         onPointerMove={markMoved}
       >
-        {actions.length > 0 && (
-          <CommandGroup heading={t("search.groups.actions")}>
-            {actions.map((action) => {
-              const label = t(`search.actions.${action.key}`);
-              return (
-                <CommandItem
-                  key={action.key}
-                  value={`action:${action.key}`}
-                  className="group/row"
-                  onSelect={go({ path: action.to, label, go: () => navigate({ to: action.to }) })}
-                >
-                  <action.icon aria-hidden="true" />
-                  <span className="truncate">{label}</span>
-                </CommandItem>
-              );
-            })}
-          </CommandGroup>
-        )}
         {pages.length > 0 && (
           <CommandGroup heading={t("search.groups.pages")}>
             {pages.map(({ item, group }) => {
