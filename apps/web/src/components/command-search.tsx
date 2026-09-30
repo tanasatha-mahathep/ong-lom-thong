@@ -11,11 +11,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Kbd } from "@/components/ui/kbd";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
 import type { CommandSearchState } from "@/hooks/use-command-search";
 import { isChunkLoadError, showUpdateToast } from "@/lib/app-update";
-import { isApplePlatform } from "@/lib/hotkeys";
 import { notifyError } from "@/lib/notify";
 import type { Me } from "@/lib/queries";
 
@@ -34,13 +32,12 @@ const IDLE_FALLBACK_MS = 3_000;
 
 /**
  * ปุ่มค้นหาใต้ตัวเลือกสาขา (แบบช่องค้นของ sidebar-01 แต่เป็นปุ่มเปิดหน้าค้นหา ไม่ใช่ช่องกรอกจริง)
- * ป้ายปุ่มลัดตามเครื่อง (⌘K / Ctrl K) · แถบไอคอนตอนย่อเหลือไอคอน + tooltip · มือถือ: ปิด sheet เมนูก่อนเปิดหน้าค้นหา
+ * ไม่มีป้ายปุ่มลัดแสดงบนปุ่ม (เจ้าของขอเอาออก 30 ก.ย. — ปุ่มลัด Ctrl/⌘+K ยังใช้ได้ ประกาศไว้ที่ aria-keyshortcuts
+ * ให้ screen reader เท่านั้น) · แถบไอคอนตอนย่อเหลือไอคอน + tooltip · มือถือ: ปิด sheet เมนูก่อนเปิดหน้าค้นหา
  */
 export function SearchTrigger({ onOpen }: { onOpen: () => void }) {
   const { t } = useTranslation("shell");
   const { isMobile, setOpenMobile } = useSidebar();
-  const [apple] = useState(isApplePlatform);
-  const shortcut = t(apple ? "search.shortcutApple" : "search.shortcutOther");
 
   return (
     <SidebarMenu>
@@ -48,7 +45,7 @@ export function SearchTrigger({ onOpen }: { onOpen: () => void }) {
         <SidebarMenuButton
           variant="outline"
           data-search-trigger=""
-          tooltip={t("search.tooltip", { shortcut })}
+          tooltip={t("search.tooltip")}
           aria-haspopup="dialog"
           aria-keyshortcuts="Control+K Meta+K"
           className="text-muted-foreground"
@@ -61,13 +58,6 @@ export function SearchTrigger({ onOpen }: { onOpen: () => void }) {
         >
           <Search aria-hidden="true" />
           <span className="truncate">{t("search.trigger")}</span>
-          {/* มือถือ (sheet) ไม่มีแป้นพิมพ์ — ไม่แสดงป้ายปุ่มลัด · ตัวอักษรเข้มกว่าค่าเริ่มต้นของ Kbd (muted-foreground บน muted
-              ได้ 4.3:1 ในธีมสว่าง ต่ำกว่า AA) */}
-          {!isMobile && (
-            <Kbd aria-hidden="true" className="ml-auto text-foreground/80 group-data-[collapsible=icon]:hidden">
-              {shortcut}
-            </Kbd>
-          )}
         </SidebarMenuButton>
       </SidebarMenuItem>
     </SidebarMenu>

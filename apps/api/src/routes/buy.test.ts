@@ -1271,7 +1271,7 @@ describe.skipIf(!available)("ซื้อเข้าหน้าร้าน (R
       total_amount: fmtMoney(items.reduce((sum, i) => sum.plus(i.total_amount), ZERO)),
     }).toEqual(p1.totals);
 
-    // การ์ดหน้าแรก: ?date_from=วันนี้&date_to=วันนี้&branch_id=สาขาปัจจุบัน
+    // การ์ดหน้าหลัก: ?date_from=วันนี้&date_to=วันนี้&branch_id=สาขาปัจจุบัน
     const card = await list(`date_from=${TODAY}&date_to=${TODAY}&branch_id=${t.branches["00000"]}`);
     expect(card.totals).toEqual(
       await expectedTotals(and(eq(buyReceipt.branchId, t.branches["00000"] ?? ""), eq(buyReceipt.date, TODAY))),

@@ -89,7 +89,7 @@ describe("ตั้งราคาทองวันนี้ — บันท�
 
     expect(await screen.findByText("บันทึกราคาทองวันนี้แล้ว")).toBeInTheDocument();
     expect(putBodies(api)).toEqual([{ bar_sell: "70850" }]);
-    // ราคาวันนี้ (query ที่หน้าแรกใช้) ถูกถามใหม่ — หัวหน้าไม่แสดงราคาแล้ว
+    // ราคาวันนี้ (query ที่หน้าหลักใช้) ถูกถามใหม่ — หัวหน้าไม่แสดงราคาแล้ว
     await waitFor(() => expect(api.callsTo("GET", "/api/gold-price/today").length).toBeGreaterThan(before));
     expect(screen.getByLabelText(LABEL)).toHaveValue("");
   });

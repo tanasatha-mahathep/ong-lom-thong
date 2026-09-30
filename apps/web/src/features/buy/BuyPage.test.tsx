@@ -452,7 +452,7 @@ describe("/buy", () => {
     await user.click(save);
     // ปุ่มบันทึกมีโฟกัสจากการคลิกอยู่แล้ว — ย้ายโฟกัสออกไปนอก fieldset ก่อน (เมนูข้างที่ไม่ได้อยู่ใต้ fieldset ที่ปิด)
     // แล้วค่อยลองย้ายกลับมาที่ปุ่ม เพื่อพิสูจน์ว่า .focus() ตรง ๆ ระหว่างรอคำตอบใช้ไม่ได้จริง (ไม่ใช่แค่ปุ่มยังมีโฟกัสเดิมค้างอยู่)
-    const homeLink = screen.getByRole("link", { name: "หน้าแรก" });
+    const homeLink = screen.getByRole("link", { name: "หน้าหลัก" });
     homeLink.focus();
     expect(homeLink).toHaveFocus();
     save.focus();

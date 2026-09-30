@@ -16,7 +16,7 @@ import { usePageMeta } from "@/hooks/use-page-meta";
 
 /**
  * หัวหน้าของ dashboard-01 — ปุ่มย่อ/ขยาย sidebar + breadcrumb ซ้าย · กระดิ่งแจ้งเตือนขวาสุด
- * สาขาอยู่ที่หัว sidebar (tooltip ตอนย่อ) · ธีมอยู่เมนูผู้ใช้ · ราคาทองวันนี้อยู่หน้าแรก (เจ้าของจะกำหนดที่แสดงเอง)
+ * สาขาอยู่ที่หัว sidebar (tooltip ตอนย่อ) · ธีมอยู่เมนูผู้ใช้ · ราคาทองวันนี้อยู่หน้าหลัก (เจ้าของจะกำหนดที่แสดงเอง)
  */
 export function SiteHeader() {
   const { t } = useTranslation("shell");

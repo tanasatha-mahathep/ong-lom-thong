@@ -143,7 +143,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
 
       await page.goto("/");
-      await expect(page.getByRole("heading", { level: 1, name: "หน้าแรก" })).toBeVisible();
+      await expect(page.getByRole("heading", { level: 1, name: "หน้าหลัก" })).toBeVisible();
       await expect(page.getByRole("button", { name: "ค้นหา…" })).toHaveAttribute(
         "aria-keyshortcuts",
         "Control+K Meta+K",

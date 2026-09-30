@@ -81,7 +81,7 @@ function SetPriceCard() {
       toast.success(t("saved"), {
         description: t("savedDescription", { price: formatBoardPrice(saved.bar_sell) }),
       });
-      // หัวหน้า · หน้าแรก · การ์ดราคาวันนี้ · ตารางราคาเฉพาะสาขา อ่านใหม่ (key ร่วม ["gold-price","today"])
+      // หัวหน้า · หน้าหลัก · การ์ดราคาวันนี้ · ตารางราคาเฉพาะสาขา อ่านใหม่ (key ร่วม ["gold-price","today"])
       // สาขาที่มีราคาเฉพาะสาขาไม่เปลี่ยนตามราคากลาง — ตารางแสดงที่มาของแต่ละสาขาหลังอ่านใหม่
       await queryClient.invalidateQueries({ queryKey: goldPriceTodayQueryOptions.queryKey });
     },
