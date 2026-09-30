@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { type KeyboardEvent, useMemo, useState } from "react";
-import { Trans, useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import { z } from "zod";
 import { AppForm, SubmitButton } from "@/components/app-form";
 import { BrandMark } from "@/components/brand-mark";
@@ -17,7 +17,6 @@ import {
 } from "@/components/ui/field";
 import { PasswordField, TextField } from "@/components/ui/form-field";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { LegalDialog } from "@/features/legal/legal-dialog";
 import { useAppForm } from "@/hooks/use-app-form";
 import { errorMessage } from "@/lib/api";
 import { type Me, canSwitchBranch, meQueryOptions } from "@/lib/queries";
@@ -138,14 +137,7 @@ function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => Promise<void> | vo
           <SubmitButton form={f} size="lg" pendingLabel={t("signIn.submitting")}>
             {t("signIn.submit")}
           </SubmitButton>
-          {/* ประโยคยอมรับ — สองวลีเป็นปุ่มเปิดกล่องข้อกำหนด/นโยบาย (features/legal) */}
-          <FieldDescription className="text-center text-balance">
-            <Trans
-              t={t}
-              i18nKey="signIn.consent"
-              components={{ terms: <LegalDialog doc="terms" />, privacy: <LegalDialog doc="privacy" /> }}
-            />
-          </FieldDescription>
+          {/* ประโยคยอมรับ (ข้อกำหนด/นโยบาย) ย้ายไปอยู่ใต้การ์ดที่ routes/login.tsx แล้ว */}
           <FieldDescription className="text-center">{t("signIn.help")}</FieldDescription>
         </Field>
       </FieldGroup>

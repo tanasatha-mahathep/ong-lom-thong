@@ -305,4 +305,35 @@ describe("หน้า login — กฎฟอร์ม U0–U6", () => {
     expect(screen.getByRole("button", { name: "เข้าสู่ระบบ" })).toBeEnabled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
+
+  it("ประโยคยอมรับข้อกำหนด/นโยบายอยู่นอกการ์ด ใต้การ์ด เหนือเลขเวอร์ชัน · ลิงก์เปิดกล่องเอกสารได้", async () => {
+    signInServer(makeMe("staff"));
+    const user = userEvent.setup();
+    renderApp("/login");
+
+    const card = await screen.findByRole("heading", { level: 1, name: "เข้าสู่ระบบ" });
+    const consent = (await screen.findByText(/การคลิกเข้าใช้งานถือว่าคุณยอมรับ/)).closest("p");
+    const version = document.querySelector('[data-slot="app-version"]');
+    expect(consent).not.toBeNull();
+    expect(version).not.toBeNull();
+    // ย้ายออกมานอกการ์ด (30 ก.ย.) — ไม่ใช่ descendant ของฟอร์ม
+    expect(consent?.closest("form")).toBeNull();
+    // ลำดับ DOM: การ์ด → ประโยคยอมรับ → เวอร์ชัน
+    expect(card.compareDocumentPosition(consent!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(consent!.compareDocumentPosition(version!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    const terms = screen.getByRole("button", { name: "ข้อกำหนดการใช้บริการ" });
+    const privacy = screen.getByRole("button", { name: "นโยบายความเป็นส่วนตัว" });
+    await user.click(terms);
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(terms).toHaveFocus());
+
+    await user.click(privacy);
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(privacy).toHaveFocus());
+  });
 });

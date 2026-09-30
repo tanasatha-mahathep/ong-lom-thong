@@ -13,11 +13,11 @@ async function renderLogin() {
 }
 
 describe("หน้า login — ภาษา · ธีม · เวอร์ชัน", () => {
-  it("เวอร์ชันของแอปท้ายหน้า (บรรทัดเดียวกับใต้เมนูผู้ใช้)", async () => {
+  it("เวอร์ชันของแอปมุมซ้ายล่างของจอ (แยกจากประโยคยอมรับตรงกลาง)", async () => {
     await renderLogin();
     const version = document.querySelector('[data-slot="app-version"]');
     expect(version).toHaveTextContent(/^v\d+\.\d+\.\d+/);
-    expect(version).toHaveClass("text-center", "text-[11px]");
+    expect(version).toHaveClass("absolute", "bottom-3", "left-3", "text-left", "text-[11px]");
   });
 
   it("เลือก English → ป้ายของฟอร์มเป็นภาษาอังกฤษ · <html lang=en> · จำไว้ในเครื่อง · กลับเป็นไทยได้", async () => {
