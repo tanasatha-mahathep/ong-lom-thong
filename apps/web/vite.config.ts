@@ -66,6 +66,8 @@ export default defineConfig({
           if (!id.includes("/node_modules/")) return undefined;
           if (/\/node_modules\/(react|react-dom|scheduler)\//.test(id)) return "react";
           if (id.includes("/node_modules/@tanstack/")) return "tanstack";
+          // cmdk ใช้เฉพาะหน้าค้นหา (Ctrl/⌘+K) ที่โหลดแบบ lazy — ให้อยู่ใน chunk ของหน้านั้น ไม่เพิ่ม vendor ที่ทุกหน้าโหลด
+          if (id.includes("/node_modules/cmdk/")) return undefined;
           return "vendor";
         },
       },
