@@ -104,9 +104,9 @@
 }
 
 /*
- * สว่าง (ค่าเริ่มต้น · ตอนพิมพ์ · กล่อง .theme-light) — ธีมทอง (primary สีทอง) ค่าตามเจ้าของร้าน (shadcn theme) ทุกตัว
+ * สว่าง (ค่าเริ่มต้น · ตอนพิมพ์ · กล่อง .theme-light) — ธีม neutral (shadcn) ค่าตามเจ้าของร้านทุกตัว
  * ยกเว้น --warning* / --success* ที่เป็นของแอป · ค่าของเจ้าของบางคู่ต่ำกว่า WCAG AA (--input / --ring / --muted-foreground
- * บน muted / --sidebar-primary-foreground) — ดูรายงานใน PR ที่ feat/web-gold-theme ก่อนปรับ
+ * บน muted) — ดูรายงานใน PR ที่ feat/web-gold-theme ก่อนปรับ
  * --warning* / --success* สำหรับป้าย/กล่องเตือน (ยังไม่ได้ตั้งราคาทอง) และสำเร็จ (ชำระเงินครบ) — หน้าใช้ bg-warning / bg-success
  *   ไม่ใช้สี amber/emerald ตรง ๆ · ทั้งสองธีม: ตัวอักษรบนพื้นของมัน ≥ 9:1 · ขอบ ≥ 3:1 ทั้งกับพื้นหน้าและพื้นของมัน
  */
@@ -120,10 +120,10 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.852 0.199 91.936);
-  --primary-foreground: oklch(0.421 0.095 57.708);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.97 0 0);
@@ -132,15 +132,15 @@
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.905 0.182 98.111);
-  --chart-2: oklch(0.795 0.184 86.047);
-  --chart-3: oklch(0.681 0.162 75.834);
-  --chart-4: oklch(0.554 0.135 66.442);
-  --chart-5: oklch(0.476 0.114 61.907);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.681 0.162 75.834);
-  --sidebar-primary-foreground: oklch(0.987 0.026 102.212);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
@@ -154,8 +154,8 @@
 }
 
 /*
- * มืด — บนจอเท่านั้น (พิมพ์ = สว่างเสมอ) · ค่าตามเจ้าของร้าน (ธีมทอง) · ตัวอักษรรอง ≥ 5.8:1 · ขอบช่องกรอก/วงโฟกัส ≥ 3.5:1
- * บนพื้น/การ์ด (ไม่ใช่บนปุ่มสีทอง)
+ * มืด — บนจอเท่านั้น (พิมพ์ = สว่างเสมอ) · ค่าตามเจ้าของร้าน (ธีม neutral) · ตัวอักษรรอง ≥ 5.8:1 · ขอบช่องกรอก/วงโฟกัส ≥ 3.5:1
+ * บนพื้น/การ์ด (ไม่ใช่บนปุ่ม primary)
  */
 @media screen {
   .dark {
@@ -166,9 +166,9 @@
     --card-foreground: oklch(0.985 0 0);
     --popover: oklch(0.205 0 0);
     --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.795 0.184 86.047);
-    --primary-foreground: oklch(0.421 0.095 57.708);
-    --secondary: oklch(0.274 0.006 286.033);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
     --secondary-foreground: oklch(0.985 0 0);
     --muted: oklch(0.269 0 0);
     --muted-foreground: oklch(0.708 0 0);
@@ -178,15 +178,15 @@
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.905 0.182 98.111);
-    --chart-2: oklch(0.795 0.184 86.047);
-    --chart-3: oklch(0.681 0.162 75.834);
-    --chart-4: oklch(0.554 0.135 66.442);
-    --chart-5: oklch(0.476 0.114 61.907);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
     --sidebar: oklch(0.205 0 0);
     --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.795 0.184 86.047);
-    --sidebar-primary-foreground: oklch(0.987 0.026 102.212);
+    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
     --sidebar-accent: oklch(0.269 0 0);
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
