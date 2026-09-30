@@ -83,6 +83,13 @@ export default {
     close: "ปิด",
     notifications: "การแจ้งเตือน",
     closeNotification: "ปิดการแจ้งเตือน",
+    /** กระดิ่งขวาสุดของหัวหน้า (components/notification-bell.tsx) */
+    bell: {
+      label: "การแจ้งเตือน",
+      labelUnread: "การแจ้งเตือน ({{count}} รายการใหม่)",
+      title: "การแจ้งเตือน",
+      empty: "ยังไม่มีการแจ้งเตือน",
+    },
     currentBranch: "สาขาปัจจุบัน",
     /** ปุ่มย้อนกลับ [←] หน้าชื่อหน้าเอกสาร (PageHeader `back`) */
     back: {

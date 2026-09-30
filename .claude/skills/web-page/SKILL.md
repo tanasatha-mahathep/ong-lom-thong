@@ -137,7 +137,7 @@ return (
 
 ## UX / a11y (WCAG 2.2 AA)
 
-- ภาษาไทยทั้งหมด (ผ่าน `t()`) · ฟอนต์ Sarabun (`/fonts`) · การ์ด/ตาราง/ฟอร์มเงินพื้นทึบ (`bg-card` / `bg-background` ห้ามโปร่ง) · `:focus-visible` เส้นน้ำเงิน 2px มาจาก `styles.css` อยู่แล้ว
+- ภาษาไทยทั้งหมด (ผ่าน `t()`) · ฟอนต์หน้าจอ Noto Sans Thai + Noto Sans (variable ฝังจาก `@fontsource-variable` · subset thai/latin) — Sarabun (`/fonts`) ใช้เฉพาะใบรับซื้อ/PDF · การ์ด/ตาราง/ฟอร์มเงินพื้นทึบ (`bg-card` / `bg-background` ห้ามโปร่ง) · `:focus-visible` เส้นน้ำเงิน 2px มาจาก `styles.css` อยู่แล้ว
 - ทุก input มี `<label>` ที่เห็นได้ · error ผูก `aria-describedby` · ใช้ `<button>` `<a>` `<table>` จริง · เป้ากด ≥ 24px · ไม่มี dark mode
 - คีย์บอร์ดล้วน: Tab/Enter ไล่ช่อง · `Ctrl+Enter` = บันทึก · `Esc` = ล้างแถวที่กำลังกรอก (สเปก §3.1)
 - ปุ่มบันทึกกันกดซ้ำ (disable ระหว่างส่ง + idempotency key)
