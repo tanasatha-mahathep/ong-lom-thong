@@ -186,6 +186,17 @@ export default defineRailway((ctx) => {
       ...COMPANY,
       // ใบจากระบบทดสอบต้องไม่ดูเหมือนใบรับซื้อจริง — production ไม่ประกาศ (apply แล้วถูกล้าง = ไม่มีลายน้ำ)
       ...(production ? {} : { RECEIPT_WATERMARK: "ตัวอย่าง — ระบบทดสอบ ไม่ใช่ใบรับซื้อจริง" }),
+      /**
+       * ราคาอ้างอิงประกาศสมาคมค้าทองคำ — แสดง/เติมค่าเริ่มต้นเท่านั้น ระบบไม่ตั้งราคาร้านเอง (.railway/README.md)
+       * parser ตรวจกับหน้าจริงแล้ว 30 ก.ย. 2569: id ทั้ง 5 มีครั้งเดียว · charset=utf-8 · ไม่มี redirect · 96 kB
+       * production ยังไม่ประกาศ (apply แล้วถูกล้าง = ปิด) — รอตรวจเงื่อนไขการใช้ข้อมูลกับสมาคมก่อน
+       */
+      ...(production
+        ? {}
+        : {
+            GOLD_REFERENCE_PROVIDER: "goldtraders-html",
+            GOLD_REFERENCE_URL: "https://classic.goldtraders.or.th/default.aspx",
+          }),
     },
   });
 
