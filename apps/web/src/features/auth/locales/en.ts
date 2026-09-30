@@ -16,6 +16,7 @@ export default {
     missingPassword: "Enter your password",
     invalidEmail: "Invalid email format, e.g. name@example.com",
     welcome: "Welcome, {{name}}",
+    consent: "By signing in, you agree to the <terms>Terms of Use</terms> and the <privacy>Privacy Notice</privacy>",
   },
   errors: {
     invalidCredentials: "Incorrect email or password",
@@ -34,6 +35,13 @@ export default {
     required: "Choose your branch",
     saveFailed: "Could not save the branch — {{reason}}",
     welcome: "Welcome, {{name}} — working at {{branch}}",
+  },
+  legal: {
+    terms: "Terms of Use",
+    privacy: "Privacy Notice",
+    draft: "Draft — pending legal review",
+    loading: "Loading…",
+    loadFailed: "Could not load the document — close it and open it again",
   },
   brandTagline: "Counter buy-in system · Members",
 } satisfies typeof th;
