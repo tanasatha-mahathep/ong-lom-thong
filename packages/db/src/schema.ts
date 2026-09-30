@@ -189,6 +189,39 @@ export const goldPriceSetting = pgTable(
   (t) => [check("gold_price_setting_single_row", sql`${t.id} = 1`)],
 );
 
+/**
+ * ประกาศราคาสมาคมค้าทองคำที่เซิร์ฟเวอร์ดึงได้ — ประวัติสำหรับกราฟ · ข้อมูลอ้างอิงสาธารณะ เหมือนกันทุกสาขา (ไม่มี branch_id)
+ * ไม่ใช่ราคาของร้าน: quoteBuy / ราคาวันนี้ไม่อ่านตารางนี้ (กฎ 2) · บันทึกเมื่อดึงสำเร็จ (apps/api services/goldReferenceHistory.ts)
+ * ประกาศหนึ่งครั้ง = หนึ่งแถว ไม่ว่าจะเห็นกี่ครั้งจากกี่ instance — unique (เวลาประกาศ, ครั้งที่) แบบ NULLS NOT DISTINCT:
+ * ประกาศที่ไม่มีครั้งที่ (round null) ก็ซ้ำไม่ได้ · เก็บตลอด (ไม่กี่แถวต่อวัน) ไม่มีงานลบ
+ */
+export const goldReferenceAnnouncement = pgTable(
+  "gold_reference_announcement",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** เวลาประกาศของสมาคม (ละเอียดถึงนาที · เวลาไทย) */
+    announcedAt: tz("announced_at").notNull(),
+    /** ครั้งที่ของวัน — ข้อความประกาศไม่มีครั้งที่ = null */
+    round: integer("round"),
+    /** host ที่ดึงมา เช่น classic.goldtraders.or.th */
+    source: text("source").notNull(),
+    barBuy: money("bar_buy").notNull(),
+    barSell: money("bar_sell").notNull(),
+    ornamentBuy: money("ornament_buy").notNull(),
+    ornamentSell: money("ornament_sell").notNull(),
+    /** เวลาที่เซิร์ฟเวอร์บันทึกแถวนี้ — ไม่ใช่เวลาประกาศ */
+    recordedAt: tz("recorded_at").notNull().defaultNow(),
+  },
+  (t) => [
+    unique("gold_reference_announcement_announced_at_round").on(t.announcedAt, t.round).nullsNotDistinct(),
+    check("gold_reference_announcement_round_positive", sql`${t.round} IS NULL OR ${t.round} > 0`),
+    check(
+      "gold_reference_announcement_prices_positive",
+      sql`${t.barBuy} > 0 AND ${t.barSell} > 0 AND ${t.ornamentBuy} > 0 AND ${t.ornamentSell} > 0`,
+    ),
+  ],
+);
+
 /** ตัวนับเลขที่เอกสารต่อสาขาต่องวด — อัปเดตผ่าน next_doc_no() เท่านั้น */
 export const docSequence = pgTable(
   "doc_sequence",

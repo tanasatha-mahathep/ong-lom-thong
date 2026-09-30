@@ -11,6 +11,7 @@ import { loggableError } from "./lib/log";
 import { sameOriginOnly } from "./lib/origin";
 import type { Storage } from "./lib/storage";
 import { type GoldReferenceService, createGoldReferenceService, providerFromEnv } from "./services/goldReference";
+import { recordGoldAnnouncement, withAnnouncementHistory } from "./services/goldReferenceHistory";
 import type { ReceiptPdfService } from "./services/receiptPdf";
 import { buyRoutes } from "./routes/buy";
 import { customerRoutes } from "./routes/customers";
@@ -36,14 +37,20 @@ const health = () => ({ ok: true, time: new Date().toISOString() });
 
 /** ประกอบแอปจาก dependency ที่ส่งเข้ามา — เทสต์เรียก app.request() ได้โดยไม่ต้องเปิดพอร์ต */
 export function createApp({ db, auth, env, storage, pdf, goldReference, now = () => new Date() }: AppDeps) {
-  const reference =
+  // ประกาศที่ดึงได้ถูกเก็บเป็นประวัติ (กราฟ) ทั้ง service จาก env และตัวที่เทสต์ส่งมา — ตัว service เองไม่แตะ DB
+  const reference = withAnnouncementHistory(
     goldReference ??
-    createGoldReferenceService({
-      provider: providerFromEnv(env),
-      now,
-      // ไม่ log URL/ข้อความเต็ม — บอกแค่ชนิดของปัญหา
-      onError: (reason) => console.warn(`[gold-reference] fetch failed: ${reason}`),
-    });
+      createGoldReferenceService({
+        provider: providerFromEnv(env),
+        now,
+        // ไม่ log URL/ข้อความเต็ม — บอกแค่ชนิดของปัญหา
+        onError: (reason) => console.warn(`[gold-reference] fetch failed: ${reason}`),
+      }),
+    {
+      record: (value) => recordGoldAnnouncement(db, value, now()),
+      onError: (e) => console.warn("[gold-reference] could not store the announcement:", loggableError(e)),
+    },
+  );
   const app = new Hono<AppEnv>();
   // ก่อนทุก route (รวม SPA ใน index.ts): access log ไม่มี PII · header ความปลอดภัย · API ไม่ cache
   app.use(accessLog(env.NODE_ENV === "test" ? null : (line) => console.log(line)));

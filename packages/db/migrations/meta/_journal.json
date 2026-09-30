@@ -43,6 +43,13 @@
       "when": 1790620281426,
       "tag": "0005_next_doc_no_wide_numbers",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790752043915,
+      "tag": "0006_gold_reference_announcement",
+      "breakpoints": true
     }
   ]
 }
