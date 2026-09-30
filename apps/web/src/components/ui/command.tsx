@@ -13,6 +13,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
  * - หัวข้อ/คำอธิบาย (sr-only) อยู่ใน DialogContent — ของเดิมอยู่นอก content จึงค้างในหน้าแม้ปิด dialog แล้ว
  * - แถวที่เลือกอยู่มีแถบซ้ายสี foreground (≥ 3:1 ทั้งสองธีม — WCAG 1.4.11) เพิ่มจากพื้น accent ที่ต่างจากพื้นแทบไม่เห็น
  * - ช่องค้น text-base บนจอเล็ก (iOS ไม่ซูมหน้าตอนโฟกัส) เหมือน Input ของแอป
+ * - ขนาด/สีไอคอนของแถวบังคับเฉพาะไอคอนนำหน้า (ลูกตรง) — ป้ายในแถว (Badge) คงไอคอนขนาด/สีของตัวเอง
+ * - aria-activedescendant ตามแถวที่เลือกจริงเสมอ (useActiveDescendantSync) · CommandDialog ให้ลูกถือ <Command> เองได้ (withCommand)
  */
 
 function Command({ className, ...props }: React.ComponentProps<typeof CommandPrimitive>) {
@@ -28,6 +30,19 @@ function Command({ className, ...props }: React.ComponentProps<typeof CommandPri
   );
 }
 
+/** <Command> ของ CommandDialog — ช่องค้นและแถวสูงขึ้นสำหรับหน้าค้นหาเต็มจอ */
+function CommandDialogCommand({ className, ...props }: React.ComponentProps<typeof Command>) {
+  return (
+    <Command
+      className={cn(
+        "**:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3",
+        className,
+      )}
+      {...props}
+    />
+  );
+}
+
 function CommandDialog({
   title,
   description,
@@ -35,6 +50,7 @@ function CommandDialog({
   className,
   showCloseButton = true,
   commandProps,
+  withCommand = true,
   onOpenAutoFocus,
   onCloseAutoFocus,
   ...props
@@ -43,8 +59,10 @@ function CommandDialog({
   description: React.ReactNode;
   className?: string;
   showCloseButton?: boolean;
-  /** props ของ <Command> (cmdk) เช่น label ของช่องค้น · shouldFilter · loop */
+  /** props ของ <Command> (cmdk) ที่ครอบ children เช่น label ของช่องค้น · shouldFilter · loop */
   commandProps?: Omit<React.ComponentProps<typeof Command>, "children">;
+  /** false = children มี <CommandDialogCommand> ของตัวเอง (component ลูกต้องคุม state ของ cmdk เอง เช่น value) */
+  withCommand?: boolean;
   /** เปิดด้วยปุ่มลัด (ไม่มี DialogTrigger) Radix ไม่รู้ว่าจะคืนโฟกัสไปไหน — ผู้ใช้จัดการเอง */
   onOpenAutoFocus?: React.ComponentProps<typeof DialogContent>["onOpenAutoFocus"];
   onCloseAutoFocus?: React.ComponentProps<typeof DialogContent>["onCloseAutoFocus"];
@@ -61,28 +79,59 @@ function CommandDialog({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        <Command
-          {...commandProps}
-          className={cn(
-            "**:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5",
-            commandProps?.className,
-          )}
-        >
-          {children}
-        </Command>
+        {withCommand ? <CommandDialogCommand {...commandProps}>{children}</CommandDialogCommand> : children}
       </DialogContent>
     </Dialog>
   );
 }
 
-function CommandInput({ className, ...props }: React.ComponentProps<typeof CommandPrimitive.Input>) {
+/**
+ * aria-activedescendant ของช่องค้น (และ listbox) ตามแถวที่ aria-selected="true" จริงใน DOM — cmdk 1.1.1 อัปเดตค่านี้เฉพาะตอน
+ * กดลูกศร: แถวที่ cmdk เลือกเอง (ตอนเปิด · พิมพ์ · ผลเปลี่ยน) ได้ค่าว่างหรือชี้แถวเก่า screen reader จึงไม่อ่านแถวที่เลือกอยู่
+ * (APG combobox · WCAG 4.1.2) — ค่าที่เขียนเองไม่ชน React: cmdk เขียนทับเฉพาะตอนค่าของมันเปลี่ยน แล้วตัวนี้ตามแก้อีกที
+ */
+function useActiveDescendantSync(input: React.RefObject<HTMLInputElement | null>) {
+  React.useEffect(() => {
+    const field = input.current;
+    const root = field?.closest("[cmdk-root]");
+    if (!field || !root) return;
+    const sync = () => {
+      const active = root.querySelector<HTMLElement>('[cmdk-item][aria-selected="true"]')?.id;
+      for (const element of [field, root.querySelector("[cmdk-list]")]) {
+        if (!element) continue;
+        if (active) {
+          if (element.getAttribute("aria-activedescendant") !== active) {
+            element.setAttribute("aria-activedescendant", active);
+          }
+        } else if (element.hasAttribute("aria-activedescendant")) {
+          element.removeAttribute("aria-activedescendant");
+        }
+      }
+    };
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(root, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["aria-selected", "aria-activedescendant"],
+    });
+    return () => observer.disconnect();
+  }, [input]);
+}
+
+function CommandInput({ className, ...props }: Omit<React.ComponentProps<typeof CommandPrimitive.Input>, "ref">) {
+  const input = React.useRef<HTMLInputElement>(null);
+  useActiveDescendantSync(input);
   return (
     <div data-slot="command-input-wrapper" className="flex h-9 items-center gap-2 border-b px-3">
       <SearchIcon className="size-4 shrink-0 opacity-50" aria-hidden="true" />
       <CommandPrimitive.Input
+        ref={input}
         data-slot="command-input"
         className={cn(
-          "flex h-10 w-full rounded-md bg-transparent py-3 text-base outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
+          // วงโฟกัส 2px ของแอป (styles.css) วาดด้านใน — ด้านนอกถูกขอบบนของ dialog (overflow-hidden) ตัด
+          "flex h-10 w-full rounded-md bg-transparent px-2 py-3 text-base outline-hidden placeholder:text-muted-foreground focus-visible:-outline-offset-2! disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
           className,
         )}
         {...props}
@@ -134,7 +183,7 @@ function CommandItem({ className, ...props }: React.ComponentProps<typeof Comman
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[selected=true]:shadow-[inset_3px_0_0_var(--foreground)] [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
+        "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[selected=true]:shadow-[inset_3px_0_0_var(--foreground)] [&_svg]:pointer-events-none [&_svg]:shrink-0 [&>svg:not([class*='size-'])]:size-4 [&>svg:not([class*='text-'])]:text-muted-foreground",
         className,
       )}
       {...props}
@@ -155,6 +204,7 @@ function CommandShortcut({ className, ...props }: React.ComponentProps<"span">) 
 export {
   Command,
   CommandDialog,
+  CommandDialogCommand,
   CommandInput,
   CommandList,
   CommandEmpty,
