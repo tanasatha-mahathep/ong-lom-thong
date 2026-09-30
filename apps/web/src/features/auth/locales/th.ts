@@ -14,6 +14,8 @@ export default {
     missingPassword: "กรอกรหัสผ่าน",
     invalidEmail: "รูปแบบอีเมลไม่ถูกต้อง เช่น name@example.com",
     welcome: "ยินดีต้อนรับ {{name}}",
+    consent:
+      "การคลิกเข้าใช้งานถือว่าคุณยอมรับ <terms>ข้อกำหนดการใช้บริการ</terms> และ <privacy>นโยบายความเป็นส่วนตัว</privacy>",
   },
   errors: {
     invalidCredentials: "อีเมลหรือรหัสผ่านไม่ถูกต้อง",
@@ -32,6 +34,14 @@ export default {
     required: "เลือกสาขาที่ทำงาน",
     saveFailed: "บันทึกสาขาไม่สำเร็จ — {{reason}}",
     welcome: "ยินดีต้อนรับ {{name}} — ทำงานที่{{branch}}",
+  },
+  /** ข้อกำหนดการใช้บริการ · นโยบายความเป็นส่วนตัว (features/legal) — เนื้อหาอยู่ใน features/legal/content */
+  legal: {
+    terms: "ข้อกำหนดการใช้บริการ",
+    privacy: "นโยบายความเป็นส่วนตัว",
+    draft: "ฉบับร่าง — รอตรวจสอบโดยที่ปรึกษากฎหมาย",
+    loading: "กำลังโหลด…",
+    loadFailed: "โหลดเอกสารไม่ได้ — ปิดแล้วเปิดใหม่อีกครั้ง",
   },
   brandTagline: "ระบบซื้อเข้าหน้าร้าน · สมาชิก",
 };

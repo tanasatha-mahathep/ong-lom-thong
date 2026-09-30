@@ -2,7 +2,7 @@
 import "@/lib/zod-config";
 import "@testing-library/jest-dom/vitest";
 // i18n ตัวเดียวกับแอป (ภาษาไทย) — component ที่ใช้ useTranslation ได้ข้อความจริงแม้ render เดี่ยว ๆ
-import "@/i18n";
+import i18next, { DEFAULT_LANGUAGE } from "@/i18n";
 import { cleanup, configure } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, vi } from "vitest";
@@ -21,6 +21,8 @@ afterEach(() => {
   toast.dismiss();
   // ชั้นบังหน้าจอ (lib/blocking.ts) เป็น store ระดับโมดูล — ไม่ให้ค้างไปเทสต์ถัดไป
   resetBlocking();
+  // ภาษาที่เทสต์เปลี่ยนไว้ (อังกฤษ) ไม่ค้างไปเทสต์ถัดไป — ภาษาไทยอยู่ใน bundle จึงเปลี่ยนกลับได้ทันที
+  void i18next.changeLanguage(DEFAULT_LANGUAGE);
   resetBackTargets();
   resetUnsavedChanges();
   // ธีม/ภาษาที่เทสต์ก่อนหน้าตั้งไว้ไม่ค้างมาเทสต์ถัดไป

@@ -15,12 +15,35 @@
 }
 
 /*
- * floated: ป้ายของช่องแบบ floating label (components/ui/floating-field.tsx) ลอยขึ้นเมื่อช่องที่อยู่ก่อนหน้า
- * (class "peer") ได้โฟกัส · มีค่า (placeholder ไม่แสดงแล้ว) · หรือ browser เติมค่าให้ (autofill)
+ * ฟอนต์ของหน้าจอ = Noto Sans (ละติน · ตัวเลข) + Noto Sans Thai (ไทย) แบบ variable (น้ำหนัก 100–900 ในไฟล์เดียว)
+ * ฝังเองจาก @fontsource-variable (CSP font-src 'self' · ไม่พึ่ง CDN) · โหลดเฉพาะ subset ที่ใช้: latin + thai
+ * (unicode-range แยกกันขาด — ตัวเลข/ละตินมาจาก Noto Sans เสมอ ไม่ว่าเรียงลำดับใน stack อย่างไร tabular-nums จึงคงที่)
  */
-@custom-variant floated (&:is(:where(.peer):focus ~ *, :where(.peer):not(:placeholder-shown) ~ *, :where(.peer):autofill ~ *));
+@font-face {
+  font-family: "Noto Sans Thai";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("../node_modules/@fontsource-variable/noto-sans-thai/files/noto-sans-thai-thai-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range: U+02D7, U+0303, U+0331, U+0E01-0E5B, U+200C-200D, U+25CC;
+}
+@font-face {
+  font-family: "Noto Sans";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("../node_modules/@fontsource-variable/noto-sans/files/noto-sans-latin-wght-normal.woff2")
+    format("woff2-variations");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
+    U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 
-/* Sarabun — ตระกูลเดียวกับ TH Sarabun ของใบเสร็จระบบเดิม · ฝังไว้เอง ไม่พึ่ง CDN */
+/*
+ * Sarabun — ใช้กับใบรับซื้อที่แสดงบนจอเท่านั้น (RECEIPT_CSS ของ @ong/core ให้ตรงกับ PDF ของ Gotenberg)
+ * browser โหลดไฟล์เมื่อมีข้อความที่ใช้ฟอนต์นี้จริง — หน้าอื่นไม่โหลด
+ */
 @font-face {
   font-family: "Sarabun";
   src: url("/fonts/Sarabun-Regular.ttf") format("truetype");
@@ -35,7 +58,7 @@
 }
 
 @theme {
-  --font-sans: "Sarabun", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Noto Sans Thai", "Noto Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 @theme inline {
@@ -81,9 +104,9 @@
 }
 
 /*
- * สว่าง (ค่าเริ่มต้น · ตอนพิมพ์ · กล่อง .theme-light) — ธีมทอง (primary สีทอง) ค่าตามเจ้าของร้าน (shadcn theme) ทุกตัว
+ * สว่าง (ค่าเริ่มต้น · ตอนพิมพ์ · กล่อง .theme-light) — ธีม neutral (shadcn) ค่าตามเจ้าของร้านทุกตัว
  * ยกเว้น --warning* / --success* ที่เป็นของแอป · ค่าของเจ้าของบางคู่ต่ำกว่า WCAG AA (--input / --ring / --muted-foreground
- * บน muted / --sidebar-primary-foreground) — ดูรายงานใน PR ที่ feat/web-gold-theme ก่อนปรับ
+ * บน muted) — ดูรายงานใน PR ที่ feat/web-gold-theme ก่อนปรับ
  * --warning* / --success* สำหรับป้าย/กล่องเตือน (ยังไม่ได้ตั้งราคาทอง) และสำเร็จ (ชำระเงินครบ) — หน้าใช้ bg-warning / bg-success
  *   ไม่ใช้สี amber/emerald ตรง ๆ · ทั้งสองธีม: ตัวอักษรบนพื้นของมัน ≥ 9:1 · ขอบ ≥ 3:1 ทั้งกับพื้นหน้าและพื้นของมัน
  */
@@ -97,10 +120,10 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.852 0.199 91.936);
-  --primary-foreground: oklch(0.421 0.095 57.708);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.97 0 0);
@@ -109,15 +132,15 @@
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.905 0.182 98.111);
-  --chart-2: oklch(0.795 0.184 86.047);
-  --chart-3: oklch(0.681 0.162 75.834);
-  --chart-4: oklch(0.554 0.135 66.442);
-  --chart-5: oklch(0.476 0.114 61.907);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.681 0.162 75.834);
-  --sidebar-primary-foreground: oklch(0.987 0.026 102.212);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
@@ -131,8 +154,8 @@
 }
 
 /*
- * มืด — บนจอเท่านั้น (พิมพ์ = สว่างเสมอ) · ค่าตามเจ้าของร้าน (ธีมทอง) · ตัวอักษรรอง ≥ 5.8:1 · ขอบช่องกรอก/วงโฟกัส ≥ 3.5:1
- * บนพื้น/การ์ด (ไม่ใช่บนปุ่มสีทอง)
+ * มืด — บนจอเท่านั้น (พิมพ์ = สว่างเสมอ) · ค่าตามเจ้าของร้าน (ธีม neutral) · ตัวอักษรรอง ≥ 5.8:1 · ขอบช่องกรอก/วงโฟกัส ≥ 3.5:1
+ * บนพื้น/การ์ด (ไม่ใช่บนปุ่ม primary)
  */
 @media screen {
   .dark {
@@ -143,9 +166,9 @@
     --card-foreground: oklch(0.985 0 0);
     --popover: oklch(0.205 0 0);
     --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.795 0.184 86.047);
-    --primary-foreground: oklch(0.421 0.095 57.708);
-    --secondary: oklch(0.274 0.006 286.033);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
     --secondary-foreground: oklch(0.985 0 0);
     --muted: oklch(0.269 0 0);
     --muted-foreground: oklch(0.708 0 0);
@@ -155,15 +178,15 @@
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.905 0.182 98.111);
-    --chart-2: oklch(0.795 0.184 86.047);
-    --chart-3: oklch(0.681 0.162 75.834);
-    --chart-4: oklch(0.554 0.135 66.442);
-    --chart-5: oklch(0.476 0.114 61.907);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
     --sidebar: oklch(0.205 0 0);
     --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.795 0.184 86.047);
-    --sidebar-primary-foreground: oklch(0.987 0.026 102.212);
+    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
     --sidebar-accent: oklch(0.269 0 0);
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);

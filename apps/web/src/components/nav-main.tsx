@@ -12,11 +12,13 @@ import { activeNavPath, navFor } from "@/lib/nav";
 import type { Role } from "@/lib/queries";
 
 /**
- * เมนูที่เลือกอยู่แบบ sidebar ของ Next.js docs — พื้นนุ่ม ๆ มุมมนเต็มแถว + ตัวอักษรเข้มขึ้นเล็กน้อย (น้ำหนักเท่าเดิม ไม่มีแถบซ้าย)
- * hover ของเมนูอื่นอ่อนกว่า (60%) — แยกออกจากเมนูที่เลือกได้ · แถบไอคอนตอนย่อได้พื้นสี่เหลี่ยมเดียวกัน
+ * เมนูที่เลือกอยู่ = pill สีหลัก (ทอง `--primary` + ตัวอักษรน้ำตาลเข้ม `--primary-foreground` 5.54:1 สว่าง · 4.54:1 มืด)
+ * ไม่ใช้ `--sidebar-primary` (คู่นั้นไม่ถึง 4.5:1) · ไอคอนใช้ currentColor ตามตัวอักษร · น้ำหนักตัวอักษรเท่าเดิม
+ * hover เมนูอื่น = พื้นเทาอ่อน (sidebar-accent) · hover เมนูที่เลือก = ทองเข้มขึ้นเล็กน้อย
+ * โฟกัส: เส้นขอบใน (ring) สีน้ำตาลบนพื้นทอง + outline ของ :focus-visible ด้านนอก · แถบไอคอนตอนย่อได้สี่เหลี่ยมทองเดียวกัน
  */
 const ITEM =
-  "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 data-[active=true]:bg-sidebar-accent data-[active=true]:font-normal data-[active=true]:text-sidebar-accent-foreground data-[active=true]:hover:bg-sidebar-accent";
+  "text-sidebar-foreground/80 hover:bg-sidebar-accent/60 data-[active=true]:bg-primary data-[active=true]:font-normal data-[active=true]:text-primary-foreground data-[active=true]:hover:bg-primary/90 data-[active=true]:hover:text-primary-foreground data-[active=true]:active:bg-primary/90 data-[active=true]:active:text-primary-foreground data-[active=true]:focus-visible:ring-primary-foreground";
 
 /**
  * เมนูหลักตาม role (spec §10) — ทุกเมนูมีไอคอน + tooltip (แถบไอคอนตอนย่อ sidebar แบบ sidebar-07)

@@ -36,6 +36,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { ApiError, errorMessage } from "@/lib/api";
 import { formatBoardPrice, formatMoney, formatThaiDate, formatWeight } from "@/lib/format";
+import { hasOpenLayer } from "@/lib/hotkeys";
 import { canCreateBill } from "@/lib/nav";
 import { type Role, useMe } from "@/lib/queries";
 import { type Bill, PDF_POLL_WINDOW_MS, billKeys, billQuery, isFilePending, retryPdf, voidBill } from "./bill-api";
@@ -83,7 +84,10 @@ function BillView({ bill, autoPrint }: { bill: Bill; autoPrint: boolean }) {
   const newBill = useRef<HTMLAnchorElement>(null);
 
   // หลังบันทึก: โฟกัสอยู่ที่ "ซื้อเข้าบิลใหม่" — Enter ครั้งเดียวเริ่มบิลถัดไป
-  useEffect(() => newBill.current?.focus(), []);
+  // มีชั้นเปิดทับอยู่ (เช่น เปิดบิลจากหน้าค้นหาแล้วกด Ctrl+K ค้นต่อระหว่างบิลโหลด) = ไม่แย่งโฟกัสจากชั้นนั้น
+  useEffect(() => {
+    if (!hasOpenLayer()) newBill.current?.focus();
+  }, []);
 
   // หลังบันทึก: พิมพ์หนึ่งครั้ง (รอฟอนต์ไทยก่อน) แล้วเอา ?print ออกจาก URL — กดย้อนกลับ/รีเฟรชไม่พิมพ์ซ้ำ
   // ใบพังต้องไม่พิมพ์ (พิมพ์กระดาษเปล่า/ข้อความ error) — <ReceiptErrorBoundary onError> ทำงานก่อน effect นี้เสมอ
