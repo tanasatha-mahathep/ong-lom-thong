@@ -15,12 +15,6 @@
 }
 
 /*
- * floated: ป้ายของช่องแบบ floating label (components/ui/floating-field.tsx) ลอยขึ้นเมื่อช่องที่อยู่ก่อนหน้า
- * (class "peer") ได้โฟกัส · มีค่า (placeholder ไม่แสดงแล้ว) · หรือ browser เติมค่าให้ (autofill)
- */
-@custom-variant floated (&:is(:where(.peer):focus ~ *, :where(.peer):not(:placeholder-shown) ~ *, :where(.peer):autofill ~ *));
-
-/*
  * ฟอนต์ของหน้าจอ = Noto Sans (ละติน · ตัวเลข) + Noto Sans Thai (ไทย) แบบ variable (น้ำหนัก 100–900 ในไฟล์เดียว)
  * ฝังเองจาก @fontsource-variable (CSP font-src 'self' · ไม่พึ่ง CDN) · โหลดเฉพาะ subset ที่ใช้: latin + thai
  * (unicode-range แยกกันขาด — ตัวเลข/ละตินมาจาก Noto Sans เสมอ ไม่ว่าเรียงลำดับใน stack อย่างไร tabular-nums จึงคงที่)

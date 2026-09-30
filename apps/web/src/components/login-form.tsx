@@ -15,7 +15,7 @@ import {
   FieldSet,
   FieldTitle,
 } from "@/components/ui/field";
-import { FloatingInput } from "@/components/ui/floating-field";
+import { PasswordField, TextField } from "@/components/ui/form-field";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useAppForm } from "@/hooks/use-app-form";
 import { errorMessage } from "@/lib/api";
@@ -26,7 +26,7 @@ import { signIn, signInErrorMessage, switchBranch } from "@/lib/session";
  * login-04 ของ shadcn ปรับเป็นสองขั้นในการ์ดเดียว:
  * 1) อีเมล + รหัสผ่าน  2) เลือกสาขาที่ทำงาน (เฉพาะบัญชีที่มีสิทธิ์มากกว่า 1 สาขา)
  * ไม่มี social login / สมัครเอง (ปิดที่เซิร์ฟเวอร์) · คีย์บอร์ดล้วน: โฟกัสอีเมลเอง · Enter = ส่ง
- * หน้าอ้างอิงของกฎฟอร์ม U0–U6: useAppForm · FloatingInput · toast · ชั้นบังหน้าจอตอนพาเข้าแอป (`onDone`)
+ * หน้าอ้างอิงของกฎฟอร์ม U0–U6: useAppForm · TextField/PasswordField · toast · ชั้นบังหน้าจอตอนพาเข้าแอป (`onDone`)
  */
 export function LoginForm({ onDone }: { onDone: () => Promise<void> | void }) {
   const [me, setMe] = useState<Me | null>(null);
@@ -107,7 +107,7 @@ function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => Promise<void> | vo
         />
         <f.form.Field name="email">
           {(field) => (
-            <FloatingInput
+            <TextField
               {...f.bind(field)}
               label={t("signIn.email")}
               placeholder={t("signIn.emailPlaceholder")}
@@ -123,11 +123,10 @@ function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => Promise<void> | vo
         </f.form.Field>
         <f.form.Field name="password">
           {(field) => (
-            <FloatingInput
+            <PasswordField
               {...f.bind(field)}
               label={t("signIn.password")}
               placeholder={t("signIn.passwordPlaceholder")}
-              type="password"
               autoComplete="current-password"
               required
               aria-invalid={f.formError ? true : undefined}
