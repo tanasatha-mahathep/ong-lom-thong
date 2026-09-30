@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { type KeyboardEvent, useMemo, useState } from "react";
-import { Trans, useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import { z } from "zod";
 import { AppForm, SubmitButton } from "@/components/app-form";
 import { BrandMark } from "@/components/brand-mark";
@@ -17,7 +17,6 @@ import {
 } from "@/components/ui/field";
 import { PasswordField, TextField } from "@/components/ui/form-field";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { LegalDialog } from "@/features/legal/legal-dialog";
 import { useAppForm } from "@/hooks/use-app-form";
 import { errorMessage } from "@/lib/api";
 import { type Me, canSwitchBranch, meQueryOptions } from "@/lib/queries";
@@ -28,8 +27,15 @@ import { signIn, signInErrorMessage, switchBranch } from "@/lib/session";
  * 1) อีเมล + รหัสผ่าน  2) เลือกสาขาที่ทำงาน (เฉพาะบัญชีที่มีสิทธิ์มากกว่า 1 สาขา)
  * ไม่มี social login / สมัครเอง (ปิดที่เซิร์ฟเวอร์) · คีย์บอร์ดล้วน: โฟกัสอีเมลเอง · Enter = ส่ง
  * หน้าอ้างอิงของกฎฟอร์ม U0–U6: useAppForm · TextField/PasswordField · toast · ชั้นบังหน้าจอตอนพาเข้าแอป (`onDone`)
+ * `onStepChange` แจ้งเมื่อเข้าขั้นเลือกสาขา — routes/login.tsx ใช้ซ่อนประโยคยอมรับข้อกำหนดตอนนั้น (ไม่ใช่ขั้นเข้าสู่ระบบแล้ว)
  */
-export function LoginForm({ onDone }: { onDone: () => Promise<void> | void }) {
+export function LoginForm({
+  onDone,
+  onStepChange,
+}: {
+  onDone: () => Promise<void> | void;
+  onStepChange?: (step: "signIn" | "branch") => void;
+}) {
   const [me, setMe] = useState<Me | null>(null);
 
   return (
@@ -38,7 +44,13 @@ export function LoginForm({ onDone }: { onDone: () => Promise<void> | void }) {
         {me ? (
           <BranchStep me={me} onDone={onDone} />
         ) : (
-          <SignInStep onSignedIn={(signedIn) => (canSwitchBranch(signedIn) ? setMe(signedIn) : onDone())} />
+          <SignInStep
+            onSignedIn={(signedIn) => {
+              if (!canSwitchBranch(signedIn)) return onDone();
+              setMe(signedIn);
+              onStepChange?.("branch");
+            }}
+          />
         )}
         <BrandPanel />
       </CardContent>
@@ -138,14 +150,7 @@ function SignInStep({ onSignedIn }: { onSignedIn: (me: Me) => Promise<void> | vo
           <SubmitButton form={f} size="lg" pendingLabel={t("signIn.submitting")}>
             {t("signIn.submit")}
           </SubmitButton>
-          {/* ประโยคยอมรับ — สองวลีเป็นปุ่มเปิดกล่องข้อกำหนด/นโยบาย (features/legal) */}
-          <FieldDescription className="text-center text-balance">
-            <Trans
-              t={t}
-              i18nKey="signIn.consent"
-              components={{ terms: <LegalDialog doc="terms" />, privacy: <LegalDialog doc="privacy" /> }}
-            />
-          </FieldDescription>
+          {/* ประโยคยอมรับ (ข้อกำหนด/นโยบาย) ย้ายไปอยู่ใต้การ์ดที่ routes/login.tsx แล้ว */}
           <FieldDescription className="text-center">{t("signIn.help")}</FieldDescription>
         </Field>
       </FieldGroup>
