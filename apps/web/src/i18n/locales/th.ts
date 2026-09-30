@@ -157,6 +157,10 @@ export default {
       light: "สว่าง",
       dark: "มืด",
       system: "ตามระบบ",
+      current: "ธีม: {{theme}}",
+    },
+    language: {
+      label: "ภาษา / Language",
     },
     update: {
       message: "มีเวอร์ชันใหม่ กรุณารีเฟรช",
