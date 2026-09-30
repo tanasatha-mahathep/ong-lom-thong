@@ -26,14 +26,22 @@ interface CspViolation {
  * Everything the browser complains about: console errors, uncaught exceptions, failed requests, HTTP ≥ 400 and
  * Content-Security-Policy violations (the production CSP only exists in the image — `vite dev` has none).
  * CSP violations are collected from `securitypolicyviolation` events, which say exactly what was blocked; the
- * console lines Chromium prints for them are left to that list. One response is by design: before signing in,
- * the SPA's session probe GET /api/me answers 401 (Chromium logs "Failed to load resource") — allowed only then.
+ * console lines Chromium prints for them are left to that list. Two responses are by design:
+ *   • before signing in, the SPA's session probe GET /api/me answers 401 — allowed only then;
+ *   • GET /api/gold-price/reference answers 503 reason "disabled" because this stack declares no
+ *     GOLD_REFERENCE_PROVIDER — no test may depend on the association's website. The api project covers
+ *     every reason of that 503; here the panel is only expected to say it is off (asserted in the journey).
+ * Chromium logs "Failed to load resource" for both, so the console filter allows the same two.
  */
 async function watchProblems(page: Page) {
   const problems: string[] = [];
   const csp: CspViolation[] = [];
   let signedIn = false;
-  const expected = (url: string, status: number) => !signedIn && status === 401 && new URL(url).pathname === "/api/me";
+  const expected = (url: string, status: number) => {
+    const { pathname } = new URL(url);
+    if (status === 401) return !signedIn && pathname === "/api/me";
+    return status === 503 && pathname === "/api/gold-price/reference";
+  };
 
   await page.exposeFunction("__e2eCspViolation", (v: CspViolation) => csp.push(v));
   await page.addInitScript(() => {
@@ -46,9 +54,8 @@ async function watchProblems(page: Page) {
     if (msg.type() !== "error") return;
     const text = msg.text();
     if (/Content Security Policy|'script-src' was not explicitly set|unsafe-eval|unsafe-inline/.test(text)) return;
-    if (text.startsWith("Failed to load resource") && text.includes("401") && expected(msg.location().url, 401)) {
-      return;
-    }
+    const failed = /^Failed to load resource.*?\bstatus of (\d{3})\b/.exec(text)?.[1];
+    if (failed && expected(msg.location().url, Number(failed))) return;
     problems.push(`console.error: ${text} (${msg.location().url})`);
   });
   page.on("pageerror", (error) => problems.push(`uncaught: ${error.message}`));
@@ -85,8 +92,10 @@ test.describe("SPA in Chromium from the production image — sign in to the firs
 
     const watch = await watchProblems(page);
     const apiCalls: string[] = [];
+    const fontCalls: string[] = [];
     page.on("request", (req) => {
       if (new URL(req.url()).pathname.startsWith("/api/")) apiCalls.push(req.url());
+      if (req.resourceType() === "font") fontCalls.push(req.url());
     });
 
     await test.step("signed out, / sends the cashier to /login", async () => {
@@ -98,15 +107,26 @@ test.describe("SPA in Chromium from the production image — sign in to the firs
       await expect(page.getByLabel("อีเมล")).toBeFocused(); // keyboard-first counter
     });
 
-    await test.step("the self-hosted Sarabun face is used and actually loads", async () => {
+    // the screen font is Noto Sans Thai (ไทย) + Noto Sans (ละติน · ตัวเลข), both embedded from
+    // @fontsource-variable — Sarabun stays for the receipt on screen only (it matches the Gotenberg PDF)
+    await test.step("the self-hosted Noto faces are used and actually load", async () => {
       // fonts.load() resolves [] when no face matches — check() would say true for a missing font
       const font = await page.evaluate(async () => {
-        const faces = await document.fonts.load('16px "Sarabun"', "ทองคำ");
-        return { body: getComputedStyle(document.body).fontFamily, faces: faces.map((f) => f.status) };
+        const thai = await document.fonts.load('16px "Noto Sans Thai"', "ทองคำ");
+        const latin = await document.fonts.load('16px "Noto Sans"', "67,850");
+        return {
+          body: getComputedStyle(document.body).fontFamily,
+          thai: thai.map((f) => f.status),
+          latin: latin.map((f) => f.status),
+        };
       });
-      expect(font.body).toMatch(/^"?Sarabun"?,/);
-      expect(font.faces.length, "a Sarabun @font-face exists").toBeGreaterThan(0);
-      expect(font.faces.every((status) => status === "loaded")).toBe(true);
+      expect(font.body).toMatch(/^"?Noto Sans Thai"?, "?Noto Sans"?,/);
+      expect(font.thai.length, 'a "Noto Sans Thai" @font-face exists').toBeGreaterThan(0);
+      expect(font.latin.length, 'a "Noto Sans" @font-face exists').toBeGreaterThan(0);
+      expect([...font.thai, ...font.latin].every((status) => status === "loaded")).toBe(true);
+      // CSP font-src 'self' — every face comes from the app's own origin, never a CDN
+      expect(fontCalls.length).toBeGreaterThan(0);
+      expect(fontCalls.filter((url) => new URL(url).origin !== target.origin)).toEqual([]);
     });
 
     await test.step("the login page passes axe", () => expectAccessible(page, "login"));
@@ -134,6 +154,14 @@ test.describe("SPA in Chromium from the production image — sign in to the firs
         await expect(main.getByRole("term").filter({ hasText: label })).toBeVisible();
         await expect(main.getByRole("definition").filter({ hasText: value }), label).toHaveText(`${value}บาท`);
       }
+    });
+
+    // the association reference is a separate, external source — off here, so the panel says so instead of
+    // showing a price, and the board above it is untouched (R7: the bill only ever uses the shop's own price)
+    await test.step("the association reference panel says the fetch is not switched on", async () => {
+      const panel = page.getByRole("region", { name: "ราคาสมาคม (อ้างอิง)" });
+      await expect(panel.getByText("ดึงราคาอ้างอิงไม่ได้")).toBeVisible();
+      await expect(panel.getByText("ยังไม่ได้เปิดใช้การดึงราคาสมาคม", { exact: false })).toBeVisible();
     });
 
     await test.step("the home page passes axe", () => expectAccessible(page, "home"));
