@@ -38,7 +38,7 @@ export function GoldPricePage() {
   return (
     <>
       <PageHeader description={t("description")} />
-      <div className="grid items-start gap-4 md:gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 items-start gap-4 md:gap-6 lg:grid-cols-2">
         {manager ? <SetPriceCard /> : <ManagersOnlyNotice />}
         <TodayPriceCard />
         {manager && <BranchPricesCard className="lg:col-span-2" />}
