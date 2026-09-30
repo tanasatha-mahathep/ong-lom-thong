@@ -137,7 +137,7 @@ test.describe("SPA in Chromium from the production image — sign in to the firs
       await page.keyboard.press("Tab");
       await page.keyboard.type(accounts.staff.password);
       await page.keyboard.press("Enter");
-      await expect(page.getByRole("heading", { level: 1, name: "หน้าแรก" })).toBeVisible();
+      await expect(page.getByRole("heading", { level: 1, name: "หน้าหลัก" })).toBeVisible();
       await expect(page).toHaveURL(`${target.baseURL}/`);
       await expect(page.getByRole("navigation", { name: "เมนูหลัก" })).toBeVisible();
     });
@@ -182,7 +182,7 @@ test.describe("SPA in Chromium from the production image — sign in to the firs
     await page.context().addCookies((await staff.storageState()).cookies);
     await page.goto("/");
     // the price board and the day's totals are parsed with zod schemas by now
-    await expect(page.getByRole("heading", { level: 1, name: "หน้าแรก" })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: "หน้าหลัก" })).toBeVisible();
     await expect(page.getByRole("main").getByRole("heading", { level: 2, name: "ยอดซื้อวันนี้" })).toBeVisible();
     // one more page task so a queued securitypolicyviolation event has reached the test
     await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
