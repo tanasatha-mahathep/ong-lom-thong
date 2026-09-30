@@ -36,7 +36,7 @@ async function chooseTheme(name: string) {
 }
 
 describe("เมนูผู้ใช้ท้าย sidebar (NavUser ของ sidebar-07)", () => {
-  it("ปุ่มและหัวเมนู = ชื่อ + ตำแหน่ง (ไม่มีอีเมล) · มีธีม และออกจากระบบอยู่ท้ายสุด", async () => {
+  it("ปุ่มและหัวเมนู = ชื่อ + ตำแหน่ง (ไม่มีอีเมล) · มีธีม ภาษา และออกจากระบบอยู่ท้ายสุด", async () => {
     setup();
     const user = userEvent.setup();
     const trigger = await screen.findByRole("button", { name: /ทดสอบ staff/ });
@@ -49,7 +49,7 @@ describe("เมนูผู้ใช้ท้าย sidebar (NavUser ของ 
     // อีเมลไม่แสดงที่ไหนเลย
     expect(screen.queryByText(/staff@ong\.test/)).not.toBeInTheDocument();
     const items = within(menu).getAllByRole("menuitem");
-    expect(items.map((item) => item.textContent)).toEqual(["ธีม", "ออกจากระบบ"]);
+    expect(items.map((item) => item.textContent)).toEqual(["ธีม", "ภาษา / Language", "ออกจากระบบ"]);
   });
 
   it("หัวหน้าไม่มีปุ่มธีมและป้ายสาขาแล้ว (ย้ายไปเมนูผู้ใช้/หัว sidebar)", async () => {
@@ -135,5 +135,28 @@ describe("ธีม (สว่าง · มืด · ตามระบบ)", ()
 
   it("ภาษาไทยเป็นภาษาของหน้า (<html lang>)", () => {
     expect(document.documentElement.lang).toBe("th");
+  });
+});
+
+describe("ภาษา (ไทย · English) จากเมนูผู้ใช้", () => {
+  it("เลือก English → เมนูและหน้าเป็นภาษาอังกฤษ · จำไว้ · เลือกไทยกลับได้", async () => {
+    setup();
+    const user = userEvent.setup();
+    (await screen.findByRole("button", { name: /ทดสอบ staff/ })).focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "ธีม" })).toHaveFocus());
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitem", { name: "ภาษา / Language" })).toHaveFocus();
+    await user.keyboard("{ArrowRight}");
+    const thai = await screen.findByRole("menuitemradio", { name: "ไทย" });
+    expect(thai).toBeChecked();
+    expect(screen.getByRole("menuitemradio", { name: "English" })).toHaveAttribute("lang", "en");
+    await user.click(screen.getByRole("menuitemradio", { name: "English" }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
+    expect(localStorage.getItem("ong.lang")).toBe("en");
+    expect(document.documentElement.lang).toBe("en");
+    // ชื่อตำแหน่ง (role) แปลด้วย · ชื่อคนไม่แปล
+    expect(await screen.findByRole("button", { name: /ทดสอบ staff.*Staff/ })).toBeInTheDocument();
   });
 });

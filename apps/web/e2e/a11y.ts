@@ -18,9 +18,12 @@ async function settleAnimations(page: Page) {
 /**
  * WCAG 2.2 AA ด้วย axe — แสดงเฉพาะ rule + element ที่ผิดให้อ่านง่าย
  * .ong-watermark: ลายน้ำ "ตัวอย่าง" ของ staging บนใบรับซื้อ (aria-hidden) ไม่ใช่ UI ที่ต้องตรวจ
+ * `include`: ตรวจเฉพาะชั้นนี้ — ตอน modal เปิด เนื้อหาข้างหลังถูก overlay ดำ 50% บัง (และ aria-hidden) axe จะคิด contrast
+ * จากสีที่ถูกบัง ซึ่งไม่ใช่สิ่งที่ผู้ใช้ทำงานด้วยตอนนั้น · หน้าปกติ (ไม่มี modal) ตรวจทั้งหน้าตามเดิม
  */
-export async function expectAccessible(page: Page) {
+export async function expectAccessible(page: Page, { include }: { include?: string } = {}) {
   await settleAnimations(page);
-  const { violations } = await new AxeBuilder({ page }).withTags(WCAG_TAGS).exclude(".ong-watermark").analyze();
+  const builder = new AxeBuilder({ page }).withTags(WCAG_TAGS).exclude(".ong-watermark");
+  const { violations } = await (include ? builder.include(include) : builder).analyze();
   expect(violations.map((v) => ({ rule: v.id, nodes: v.nodes.map((n) => n.target.join(" ")) }))).toEqual([]);
 }
