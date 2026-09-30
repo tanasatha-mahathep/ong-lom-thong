@@ -43,15 +43,16 @@ export function ReferencePricePanel({
   const titleId = useId();
   const { data, error, isPending } = useQuery(goldReferenceQueryOptions);
 
-  // การ์ดข้างในหน้าตาเดียวกับกระดานราคาของร้าน — กรอบจึงเป็นตัวแยก: เส้นประ muted-foreground/50 (border ปกติจางเกือบ
-  // มองไม่เห็นบนพื้นขาว) ให้เห็นชัดทั้งสองธีมว่าเป็นราคาอ้างอิง ไม่ใช่แถวที่สองของกระดานร้าน
+  // การ์ดข้างในหน้าตาเดียวกับกระดานราคาของร้าน — กรอบจึงเป็นตัวแยก: เส้นประ muted-foreground/70 (border ปกติจางเกือบ
+  // มองไม่เห็นบนพื้นขาว) ให้เห็นชัดทั้งสองธีมว่าเป็นราคาอ้างอิง ไม่ใช่แถวที่สองของกระดานร้าน — /70 ผ่าน WCAG 1.4.11
+  // (non-text contrast ≥ 3:1) ทั้งสองธีม (/50 เดิมได้แค่ ~2.1–2.7:1)
   // grid-cols-1 = track minmax(0,1fr): เนื้อหาใน action (ปุ่ม nowrap) ดันกรอบ/การ์ดให้กว้างเกินที่ไม่ได้
   return (
     <section
       aria-labelledby={titleId}
       aria-busy={isPending}
       className={cn(
-        "@container/reference grid grid-cols-1 gap-3 rounded-xl border border-dashed border-muted-foreground/50 bg-muted p-4",
+        "@container/reference grid grid-cols-1 gap-3 rounded-xl border border-dashed border-muted-foreground/70 bg-muted p-4",
         className,
       )}
     >
