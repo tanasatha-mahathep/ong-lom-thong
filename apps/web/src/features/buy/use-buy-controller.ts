@@ -242,8 +242,8 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
     const el = name ? nodes.current.get(name) : undefined;
     if (!el) return;
     if (el.getAttribute("role") === "radiogroup") {
-      // ตัวที่เลือกอยู่ก่อน — querySelector กับ selector list คืนตัวแรกตามลำดับ DOM (ทอง) ไม่ใช่ตามลำดับ selector
-      // โฟกัสผิดตัว = radio onFocus เลือกโลหะนั้นแทน (โลหะเปลี่ยนเงียบ ๆ และ error ใต้กลุ่มหาย)
+      // ตัวที่เลือกอยู่ก่อน (วิธีชำระ) — querySelector กับ selector list คืนตัวแรกตามลำดับ DOM ไม่ใช่ตามลำดับ selector
+      // โฟกัสผิดตัว = radio ที่เลือกเมื่อได้โฟกัสจะเปลี่ยนค่าเงียบ ๆ และ error ใต้กลุ่มหาย
       const radio =
         el.querySelector<HTMLElement>('[role="radio"][data-state="checked"]') ??
         el.querySelector<HTMLElement>('[role="radio"]');
