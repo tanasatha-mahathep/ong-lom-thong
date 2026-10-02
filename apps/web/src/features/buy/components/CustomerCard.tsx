@@ -1,5 +1,5 @@
 import { CircleAlert, ExternalLink, UserPlus, UserRoundPen } from "lucide-react";
-import { type KeyboardEvent, type ReactNode, useId } from "react";
+import { type ChangeEvent, type KeyboardEvent, type ReactNode, useId } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { useTranslation } from "../i18n";
+import { caretAfterDigits, deleteAcrossSeparator, digitsBefore, formatNationalIdInput } from "../national-id-input";
 import type { BuyController } from "../use-buy-controller";
 import { useSiamIdCapture } from "../use-siam-id-capture";
 import { CustomerSearch } from "./CustomerSearch";
@@ -58,16 +59,38 @@ export function CustomerCard({ c }: { c: BuyController }) {
   );
 }
 
-/** ช่องเลขบัตร — โฟกัสเมื่อเปิดหน้า (autofocus แบบระบบเดิม) · เสียบบัตร Siam ID แล้วค้นให้เอง */
+/**
+ * วางเคอร์เซอร์หลังตัวเลขตัวที่ n — หลัง React เขียนค่าที่จัดกลุ่มใหม่ (และคืนค่าเดิมกรณีพิมพ์ตัวที่ไม่ใช่ตัวเลข) เสร็จแล้ว
+ * ไม่แตะเมื่อโฟกัสย้ายไปแล้ว (เช่น Siam ID ค้นเจอแล้วพาไปช่องถัดไป)
+ */
+function placeCaret(el: HTMLInputElement, digits: number) {
+  queueMicrotask(() => {
+    if (document.activeElement !== el) return;
+    const pos = caretAfterDigits(el.value, digits);
+    el.setSelectionRange(pos, pos);
+  });
+}
+
+/**
+ * ช่องเลขบัตร — โฟกัสเมื่อเปิดหน้า (autofocus แบบระบบเดิม) · เสียบบัตร Siam ID แล้วค้นให้เอง
+ * จัดกลุ่มแบบหน้าบัตร (1 1037 00123 45 8) ขณะพิมพ์ — เจ้าของขอ 3 ต.ค. 2569 (ยกเว้นจากกติกา "format หลัง blur" ของฟอร์ม)
+ */
 function NationalIdBox({ c }: { c: BuyController }) {
   const { t } = useTranslation("buy");
   const id = useId();
   const { state, actions, register } = c;
   const capture = useSiamIdCapture({
     value: state.idText,
-    onValueChange: actions.typeId,
+    // ตัวรับ Siam ID นับเฉพาะตัวเลขจากข้อความดิบ — เก็บลง state เป็นรูปที่จัดกลุ่มแล้ว
+    onValueChange: (text) => actions.typeId(formatNationalIdInput(text)),
     onNationalId: actions.findByNationalId,
   });
+  const onChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const el = e.target;
+    const digits = digitsBefore(el.value, el.selectionStart ?? el.value.length);
+    capture.inputProps.onChange(e);
+    placeCaret(el, digits);
+  };
   const error =
     state.lookup === "badChecksum"
       ? t("customer.badChecksum")
@@ -78,6 +101,16 @@ function NationalIdBox({ c }: { c: BuyController }) {
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     capture.inputProps.onKeyDown(e);
     if (e.defaultPrevented) return;
+    const el = e.currentTarget;
+    if ((e.key === "Backspace" || e.key === "Delete") && el.selectionStart === el.selectionEnd) {
+      const next = deleteAcrossSeparator(el.value, el.selectionStart ?? el.value.length, e.key);
+      if (next) {
+        e.preventDefault();
+        actions.typeId(next.text);
+        placeCaret(el, next.digitsBeforeCaret);
+        return;
+      }
+    }
     if (e.key === "Escape") {
       capture.cancel();
       actions.typeId("");
@@ -103,7 +136,7 @@ function NationalIdBox({ c }: { c: BuyController }) {
         // หน้าร้านเริ่มที่ช่องนี้เสมอ (ระบบเดิม id_card autofocus) — เสียบบัตรได้ทันทีที่เปิดหน้า
         autoFocus
         value={capture.inputProps.value}
-        onChange={capture.inputProps.onChange}
+        onChange={onChange}
         onKeyDown={onKeyDown}
         aria-invalid={!!error}
         aria-describedby={describedBy(`${id}-nid-hint`, error && `${id}-nid-error`)}

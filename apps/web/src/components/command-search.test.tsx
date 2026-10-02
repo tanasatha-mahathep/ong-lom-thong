@@ -516,7 +516,7 @@ describe("เลือกผลค้น", { timeout: FLOW_TIMEOUT }, () => {
 
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
     expect(router.state.location.pathname).toBe("/buy");
-    expect(idBox).toHaveValue("1909");
+    expect(idBox).toHaveValue("1 909"); // จัดกลุ่มแบบหน้าบัตรขณะพิมพ์
     await waitFor(() => expect(idBox).toHaveFocus());
 
     dialog = await openPalette();
