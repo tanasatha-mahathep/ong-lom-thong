@@ -44,6 +44,7 @@ function setup({ role = "staff", me, customers = [CUSTOMER_OK, CUSTOMER_EXPIRED]
 }
 
 const idBox = () => screen.getByLabelText(t("customer.idLabel"));
+const metal = () => screen.getByLabelText<HTMLSelectElement>(t("lines.metal"));
 const purity = () => screen.getByLabelText(t("lines.purity"));
 const deduct = () => screen.getByLabelText<HTMLSelectElement>(t("lines.deduct"));
 const weight = () => screen.getByLabelText(t("lines.weight"));
@@ -132,7 +133,7 @@ describe("/buy", () => {
     expect(weight()).toHaveValue("");
     expect(deduct()).toHaveValue("0");
     expect(purity()).toHaveFocus();
-    expect(screen.getByRole("radio", { name: "ทอง" })).toBeChecked();
+    expect(metal()).toHaveDisplayValue("ทอง");
 
     // Enter ในแถวว่าง (มีรายการแล้ว) = จบรายการ ไปช่องรายละเอียด
     await user.keyboard("{Enter}");
@@ -165,7 +166,8 @@ describe("/buy", () => {
     await waitFor(() => expect(dataRows()).toHaveLength(1));
 
     // เงิน: ราคาต่อกรัมที่ร้านตั้ง 45 × 92.5% = ⌊41.625⌋ = 41 → 271.56 ก. = 11,133.00
-    await user.click(screen.getByRole("radio", { name: "เงิน" }));
+    await user.selectOptions(metal(), "เงิน");
+    metal().focus();
     await user.keyboard("{Enter}");
     expect(purity()).toHaveFocus();
     await user.keyboard("92.5{Enter}{Enter}271.56{Enter}");
@@ -191,16 +193,16 @@ describe("/buy", () => {
     await insertCard(user, CUSTOMER_OK.national_id);
     await waitFor(() => expect(purity()).toHaveFocus());
     // แพลตตินั่มยังไม่ได้ตั้งราคาต่อกรัมของวันนี้ (GOLD_PRICE.platinum_per_g = null)
-    await user.click(screen.getByRole("radio", { name: "แพลตตินั่ม" }));
+    await user.selectOptions(metal(), "แพลตตินั่ม");
     await addLine(user, { p: "95" });
 
     const message = "ยังไม่ได้ตั้งราคาแพลตตินั่มของวันนี้";
     expect(await screen.findByText(message)).toBeInTheDocument();
-    const platinum = screen.getByRole("radio", { name: "แพลตตินั่ม" });
-    // โฟกัสตัวที่เลือกอยู่ (ไม่ใช่ตัวแรกของกลุ่ม — ไม่งั้นโลหะเปลี่ยนเป็นทองเองและ error หาย)
-    expect(platinum).toHaveFocus();
-    expect(platinum).toBeChecked();
-    expect(platinum.closest('[role="radiogroup"]')).toHaveAccessibleDescription(message);
+    // โฟกัสกลับช่องโลหะ โดยโลหะที่เลือกไม่เปลี่ยนเอง (error ใต้ช่องจึงยังอยู่)
+    expect(metal()).toHaveFocus();
+    expect(metal()).toHaveDisplayValue("แพลตตินั่ม");
+    expect(metal()).toHaveAccessibleDescription(message);
+    expect(metal()).toHaveAttribute("aria-invalid", "true");
     expect(within(linesTable()).getByText(t("lines.empty"))).toBeInTheDocument();
     // ค่าที่กรอกยังอยู่ — ตั้งราคาแล้วกด Enter ใหม่ได้
     expect(purity()).toHaveValue("95");
@@ -259,7 +261,7 @@ describe("/buy", () => {
     expect(names).toEqual([
       t("customer.searchLabel"),
       `${t("customer.newCustomer")}${t("customer.opensInNewTab")}`,
-      "ทอง",
+      t("lines.metal"),
       t("lines.purity"),
       t("lines.deduct"),
       t("lines.weight"),
@@ -307,7 +309,7 @@ describe("/buy", () => {
     expect(weight()).toHaveValue("");
     expect(deduct()).toHaveValue("0");
     expect(purity()).toHaveFocus();
-    expect(screen.getByRole("radio", { name: "ทอง" })).toBeChecked();
+    expect(metal()).toHaveDisplayValue("ทอง");
   });
 
   it("checks payments before adding them: bank for transfers, duplicates and overpaying", async () => {

@@ -115,13 +115,13 @@ test("ซื้อเข้าด้วยคีย์บอร์ดจนไ�
   await expect(purity).toHaveValue("");
   await expect(deduct).toHaveValue("0");
 
-  // โลหะที่สอง: Shift+Tab กลับไปกลุ่มโลหะ → ลูกศรขวาสองครั้ง = เงิน → Enter ไปค่าบริสุทธิ์
+  // โลหะที่สอง: Shift+Tab กลับไปช่องโลหะ (select) → เลือกเงิน → Enter ไปค่าบริสุทธิ์
+  // (ลูกศรบน select ที่ปิดอยู่ทำงานต่างกันตามระบบปฏิบัติการ — เลือกค่าด้วย selectOption แล้วกลับมาใช้คีย์บอร์ดต่อ)
   await page.keyboard.press("Shift+Tab");
-  await page.keyboard.press("ArrowRight");
-  await page.keyboard.press("ArrowRight");
-  const silver = page.getByRole("radio", { name: "เงิน", exact: true });
-  await expect(silver).toBeFocused();
-  await expect(silver).toBeChecked();
+  const metal = page.getByLabel("ของเก่าที่รับซื้อ");
+  await expect(metal).toBeFocused();
+  await metal.selectOption({ label: "เงิน" });
+  await metal.focus();
   await page.keyboard.press("Enter");
   await expect(purity).toBeFocused();
   await page.keyboard.type("92.5");
