@@ -54,6 +54,7 @@ export default {
 
   customer: {
     idLabel: "National ID number",
+    idPlaceholder: "0 0000 00000 00 0",
     idHint: "Insert the card into Siam ID or type 13 digits — searched automatically",
     badChecksum: "Invalid national ID number (check digit does not match)",
     searching: "Searching…",
@@ -118,6 +119,7 @@ export default {
     remove: "Remove item {{n}}",
     rowProblem: "Row {{n}}: {{problems}}",
     detail: "Details of the items bought",
+    detailPlaceholder: "e.g. 1 necklace · 2 rings",
     detailHint: "Printed on the receipt (if any) · Enter goes to payment · Shift+Enter adds a new line",
   },
 
@@ -126,6 +128,7 @@ export default {
     methods: { cash: "Cash", transfer: "Bank transfer" },
     bank: "Bank",
     bankPlaceholder: "e.g. Kasikornbank",
+    amountPlaceholder: "0.00",
     amount: "Amount (baht)",
     add: "Add payment",
     payFull: "Full amount",

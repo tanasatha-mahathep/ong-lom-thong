@@ -25,7 +25,7 @@ export function CustomerCard({ c }: { c: BuyController }) {
     <Card className="gap-4">
       <CardHeader>
         <CardTitle>
-          <h2 className="text-base">{t("cards.customer")}</h2>
+          <h2>{t("cards.customer")}</h2>
         </CardTitle>
       </CardHeader>
       {/* แถวเดียวเมื่อการ์ดกว้างพอ (@3xl = 48rem ของการ์ดเอง ไม่ใช่ของจอ) — คอลัมน์เลขบัตรกว้างพอให้คำอธิบายอยู่บรรทัดเดียว */}
@@ -132,6 +132,7 @@ function NationalIdBox({ c }: { c: BuyController }) {
         inputMode="numeric"
         autoComplete="off"
         spellCheck={false}
+        placeholder={t("customer.idPlaceholder")}
         // หน้าร้านเริ่มที่ช่องนี้เสมอ (ระบบเดิม id_card autofocus) — เสียบบัตรได้ทันทีที่เปิดหน้า
         autoFocus
         value={capture.inputProps.value}
