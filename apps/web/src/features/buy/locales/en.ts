@@ -54,7 +54,7 @@ export default {
 
   customer: {
     idLabel: "National ID number",
-    idHint: "Insert the card into Siam ID or type the 13 digits — the search runs automatically",
+    idHint: "Insert the card into Siam ID or type 13 digits — searched automatically",
     badChecksum: "Invalid national ID number (check digit does not match)",
     searching: "Searching…",
     notFound:
@@ -69,7 +69,6 @@ export default {
     newCustomer: "New customer",
     edit: "Edit customer",
     change: "Change customer",
-    none: "No customer selected",
     name: "Full name",
     nationalId: "National ID / taxpayer ID",
     address: "Address",

@@ -28,12 +28,14 @@ export function CustomerCard({ c }: { c: BuyController }) {
           <h2 className="text-base">{t("cards.customer")}</h2>
         </CardTitle>
       </CardHeader>
-      <CardContent className="flex flex-col gap-4">
+      {/* แถวเดียวเมื่อการ์ดกว้างพอ (@3xl = 48rem ของการ์ดเอง ไม่ใช่ของจอ) — คอลัมน์เลขบัตรกว้างพอให้คำอธิบายอยู่บรรทัดเดียว */}
+      <CardContent className="@container/customer flex flex-col gap-4">
         {/* ลำดับ DOM = ลำดับ Tab: เลขบัตร → ค้นหา → ลูกค้าใหม่ */}
-        <div className="grid items-start gap-4 md:grid-cols-[16rem_1fr_auto]">
+        <div className="grid items-start gap-4 @3xl/customer:grid-cols-[22rem_1fr_auto]">
           <NationalIdBox c={c} />
           <CustomerSearch c={c} />
-          <Button asChild variant="outline" className="md:mt-[1.375rem]">
+          {/* ระยะบน = ความสูงป้าย (text-sm × leading-snug) + gap-3 ของ Field → ปุ่มตรงแนวกับช่องกรอกในแถวเดียวกัน */}
+          <Button asChild variant="outline" className="@3xl/customer:mt-[calc(0.875rem*1.375+0.75rem)]">
             <a ref={(el) => register("newCustomer", el)} href={NEW_CUSTOMER_HREF} target="_blank" rel="noopener">
               <UserPlus aria-hidden="true" />
               {t("customer.newCustomer")}
@@ -49,11 +51,8 @@ export function CustomerCard({ c }: { c: BuyController }) {
           </Alert>
         )}
 
-        {state.customer ? (
-          <CustomerSummary c={c} />
-        ) : (
-          <p className="text-sm text-muted-foreground">{t("customer.none")}</p>
-        )}
+        {/* ยังไม่ได้เลือกลูกค้า = ไม่แสดงอะไร (เจ้าของขอ 3 ต.ค. 2569) — ปุ่มบันทึกบอกเองว่าต้องระบุลูกค้าก่อน */}
+        {state.customer && <CustomerSummary c={c} />}
       </CardContent>
     </Card>
   );

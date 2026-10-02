@@ -16,7 +16,9 @@ function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="card-header"
       className={cn(
-        "@container/card-header grid auto-rows-min grid-rows-[auto_auto] items-start gap-2 px-6 has-data-[slot=card-action]:grid-cols-[1fr_auto] [.border-b]:pb-6",
+        // เส้นคั่นใต้หัวการ์ดทุกใบ (เจ้าของขอ 3 ต.ค. 2569) — border อยู่บนกล่องที่กว้างเต็มการ์ด จึงชนขอบซ้าย-ขวา
+        // (px-6 เป็น padding ไม่ใช่ margin) · pb-4 แทน [.border-b]:pb-6 เดิมของ shadcn ที่ตั้งไว้ตอนใส่เส้นเอง
+        "@container/card-header grid auto-rows-min grid-rows-[auto_auto] items-start gap-2 border-b px-6 pb-4 has-data-[slot=card-action]:grid-cols-[1fr_auto]",
         className,
       )}
       {...props}
