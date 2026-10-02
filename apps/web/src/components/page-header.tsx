@@ -42,7 +42,8 @@ export function PageHeader({
       data-slot="page-header"
       className="relative flex flex-wrap items-end justify-between gap-x-4 gap-y-3 pb-4 after:pointer-events-none after:absolute after:bottom-0 after:left-[calc((100%_-_100cqw)/2_-_var(--main-px,1rem))] after:h-px after:w-[calc(100cqw_+_2*var(--main-px,1rem))] after:bg-border"
     >
-      <div className="flex min-w-0 items-start gap-3">
+      {/* items-center: ปุ่มย้อนกลับอยู่กึ่งกลางของบล็อกชื่อ+คำอธิบายทั้งก้อน ไม่ใช่แค่บรรทัดชื่อ (เจ้าของขอ 3 ต.ค. 2569) */}
+      <div className="flex min-w-0 items-center gap-3">
         {back && <BackButton to={back} label={t(BACK_LABEL[back])} />}
         <div className="min-w-0 space-y-1">
           <h1 className="text-2xl font-bold break-words">{heading}</h1>
@@ -58,8 +59,8 @@ function BackButton({ to, label }: { to: BackListPath; label: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        {/* สูงเท่าบรรทัดชื่อ (text-2xl) — กึ่งกลางกับชื่อ */}
-        <Button asChild variant="outline" size="icon" className="size-8 shrink-0">
+        {/* ghost: ไม่มีพื้น/เส้นขอบตอนปกติ แสดงพื้นเฉพาะตอนชี้/โฟกัส (เจ้าของขอ 3 ต.ค. 2569 — เดิมเป็น outline มีเส้นขอบค้างตลอด) */}
+        <Button asChild variant="ghost" size="icon" className="size-8 shrink-0">
           <Link to={to} search={rememberedSearch(to)} aria-label={label} data-slot="page-back">
             <ArrowLeft aria-hidden="true" />
           </Link>
