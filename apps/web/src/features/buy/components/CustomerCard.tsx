@@ -132,6 +132,7 @@ function NationalIdBox({ c }: { c: BuyController }) {
         inputMode="numeric"
         autoComplete="off"
         spellCheck={false}
+        placeholder={t("customer.idPlaceholder")}
         // หน้าร้านเริ่มที่ช่องนี้เสมอ (ระบบเดิม id_card autofocus) — เสียบบัตรได้ทันทีที่เปิดหน้า
         autoFocus
         value={capture.inputProps.value}

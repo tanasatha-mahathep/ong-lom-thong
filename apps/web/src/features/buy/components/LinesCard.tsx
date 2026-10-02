@@ -177,7 +177,7 @@ export function LinesCard({ c }: { c: BuyController }) {
           {/* คีย์บอร์ดใช้ Enter ในช่องปริมาณ — ปุ่มนี้สำหรับเมาส์ จึงไม่อยู่ในลำดับ Tab */}
           <Button
             type="button"
-            variant="secondary"
+            variant="outline"
             tabIndex={-1}
             // แถวเดียว: ระยะบน = ความสูงป้าย (text-sm × leading-snug) + gap-3 ของ Field → ตรงระดับกับช่องกรอก แม้มีข้อความผิดใต้ช่อง
             className="justify-self-start @4xl/lines:mt-[calc(0.875rem*1.375+0.75rem)]"
@@ -203,6 +203,7 @@ export function LinesCard({ c }: { c: BuyController }) {
             id={`${id}-detail`}
             rows={2}
             maxLength={2000}
+            placeholder={t("lines.detailPlaceholder")}
             value={state.detail}
             onChange={(e) => actions.typeDetail(e.target.value)}
             onKeyDown={onDetailKey}
