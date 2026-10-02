@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { makeBill } from "@/test/bill-fixture";
+import { makeAssessedLine, makeBill } from "@/test/bill-fixture";
 import { RECEIPT_COMPANY_FALLBACK, toReceiptData } from "./to-receipt-data";
 
 describe("toReceiptData", () => {
@@ -16,13 +16,21 @@ describe("toReceiptData", () => {
         address: "99 หมู่ 9 ต.ทดสอบ อ.เมือง จ.ภูเก็ต",
         nationalId: "1 XXXX XXXXX 01 0",
       },
-      lines: [{ metalName: "ทอง", weightG: "5.860", amount: "20030.00" }],
+      // บิลก่อนมีค่าบริสุทธิ์ — null = ใบพิมพ์ชื่อโลหะอย่างเดียว
+      lines: [{ metalName: "ทอง", weightG: "5.860", amount: "20030.00", purityPercent: null, deductPercent: null }],
       detail: "ทอง 96.5%",
       totalAmount: "20030.00",
       payments: [{ label: "เงินสด", bank: null, amount: "20030.00" }],
       status: "active",
       voidReason: null,
     });
+  });
+
+  it("passes purity and deduction to the receipt lines so the screen matches the PDF", () => {
+    const data = toReceiptData(makeBill({ lines: [makeAssessedLine()] }));
+    expect(data.lines).toEqual([
+      { metalName: "ทอง", weightG: "10.000", amount: "41535.00", purityPercent: "96.50", deductPercent: "3" },
+    ]);
   });
 
   it("keeps the void reason only on void bills", () => {

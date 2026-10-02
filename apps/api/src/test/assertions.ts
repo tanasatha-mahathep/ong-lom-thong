@@ -49,9 +49,11 @@ export async function expectApiError(res: Response, status: number, where = ""):
 
 /**
  * คีย์เงิน/น้ำหนักตามคำศัพท์ของ spec §5 (bar_sell · jewelry_buy · diff · total_amount · weight_g · price_per_g …)
- * ค่าต้องเป็น string หรือ null เสมอ — ห้าม JSON number (CLAUDE.md กฎ 1)
+ * + เปอร์เซ็นต์ที่เข้าสูตรเงิน (purity_percent · deduct_percent — ไม่ใช่เงินแต่คิดเงินจากมัน จึงเป็น string เหมือนกัน)
+ * ค่าต้องเป็น string หรือ null เสมอ — ห้าม JSON number (CLAUDE.md กฎ 1) · "3" ไม่ใช่ 3 แม้เป็นเลขเต็ม
  */
-export const MONEY_KEY = /(?:^|_)(?:price|amount|total|sell|buy|diff|paid|balance|cost|weight|grams)(?:_|$)|_g$/;
+export const MONEY_KEY =
+  /(?:^|_)(?:price|amount|total|sell|buy|diff|paid|balance|cost|weight|grams|percent)(?:_|$)|_g$/;
 
 /**
  * เดิน JSON ทั้งก้อน คืน path ที่ผิดกติกาเงิน:

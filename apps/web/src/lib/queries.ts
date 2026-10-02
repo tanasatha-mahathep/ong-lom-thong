@@ -48,6 +48,12 @@ export const GoldPriceTodaySchema = z.object({
   bar_sell: decimalString,
   bar_buy: decimalString,
   jewelry_buy: decimalString,
+  /**
+   * ราคารับซื้อต่อกรัมของเงิน/แพลตตินั่มของวัน (ตั้งที่ราคากลางเท่านั้น ทุกสาขาใช้ร่วม)
+   * null = ยังไม่ได้ตั้ง → วันนี้รับซื้อโลหะนั้นไม่ได้ (quote ตอบ error ที่แถว)
+   */
+  silver_per_g: decimalString.nullable(),
+  platinum_per_g: decimalString.nullable(),
   diff: decimalString,
   /** "branch" = ราคาเฉพาะสาขา · "central" = ราคากลางทุกสาขา */
   source: z.enum(["branch", "central"]),

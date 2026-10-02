@@ -323,12 +323,15 @@ function probeBody(key: string): unknown {
       return {};
   }
 }
-/** บิลใบจริง 5.860 กรัม · 20,030 บาท ของลูกค้าที่มีรูป (บัตรยังไม่หมดอายุ) */
+/**
+ * บิลทอง 5.860 กรัมของลูกค้าที่มีรูป (บัตรยังไม่หมดอายุ) — ราคาระบบคิดเอง (UAT 30 ก.ย. 2569):
+ * ทอง 96.5% ไม่หัก @ ทองแท่งรับซื้อ 67,650 (ขายออก 67,850): ⌊67650 × 0.0656 × 0.965⌋ = 4,282/ก. → ⌊4282 × 5.86⌋ = 25,092
+ */
 function billBody() {
   return {
     customer_id: custWithPhoto,
-    lines: [{ metal_id: goldId, weight_g: "5.860", amount: "20030" }],
-    payments: [{ method: "cash", amount: "20030" }],
+    lines: [{ metal_id: goldId, weight_g: "5.860", purity_percent: "96.5" }],
+    payments: [{ method: "cash", amount: "25092" }],
   };
 }
 const bodyFor = (e: Endpoint) => (isStateChanging(e) ? probeBody(e.key) : undefined);
@@ -782,6 +785,36 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
         expect(priceSetBody).toMatchObject({ bar_sell: "67850.00" });
         expectMoneyAsStrings(priceSetBody, "PUT /api/gold-price/today");
       });
+
+      // POST /api/buy/quote ไม่อยู่ใน GET sweep — ตรวจที่นี่ทั้งรูป (expectMoneyAsStrings · MONEY_KEY รวม _percent) และค่าตรงสูตร
+      it("POST /api/buy/quote · GET /api/buy/:id — เงินเป็น string · purity_percent/deduct_percent เป็น string ด้วย", async () => {
+        const quote = await hit("/api/buy/quote", { method: "POST", cookie: cookies.super, body: billBody() });
+        expect(quote.status).toBe(200);
+        const q = (await quote.json()) as { ok: boolean; lines: Record<string, unknown>[] };
+        expectMoneyAsStrings(q, "POST /api/buy/quote");
+        expect(q.ok).toBe(true);
+        const detail = await hit(`/api/buy/${receiptId}`, { cookie: cookies.super });
+        expect(detail.status).toBe(200);
+        const d = (await detail.json()) as { lines: Record<string, unknown>[] };
+        const pairs: [string, Record<string, unknown>[]][] = [
+          ["POST /api/buy/quote", q.lines],
+          ["GET /api/buy/:id", d.lines],
+        ];
+        for (const [where, lines] of pairs) {
+          expect(lines, where).toHaveLength(1);
+          // ⌊67650 × 0.0656 × 0.965⌋ = 4282 · ⌊4282 × 5.86⌋ = 25092 · ไม่หัก
+          expect(lines[0], where).toMatchObject({
+            weight_g: "5.860",
+            purity_percent: "96.50",
+            deduct_percent: "0",
+            base_price: "67650.00",
+            unit_price: "4282.00",
+            gross_amount: "25092.00",
+            amount: "25092.00",
+            price_per_g: "4281.91",
+          });
+        }
+      });
     });
   });
 
@@ -907,7 +940,7 @@ describe.skipIf(!available)("สัญญา API — ทุก route ที่�
       }
       const bills: [string, Record<string, unknown>][] = [
         ["detail", { detail: "ทดสอบ\u0000" }],
-        ["payments.0.bank", { payments: [{ method: "transfer", bank: "ทดสอบ\u0000", amount: "20030" }] }],
+        ["payments.0.bank", { payments: [{ method: "transfer", bank: "ทดสอบ\u0000", amount: "25092" }] }],
       ];
       for (const [field, over] of bills) {
         const body = { ...billBody(), idempotency_key: `nul-${randomUUID()}`, ...over };

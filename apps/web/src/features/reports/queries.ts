@@ -15,6 +15,18 @@ const MetalAmountSchema = z.object({
   amount: decimalString,
 });
 
+/**
+ * รายการของบิลตามที่พิมพ์บนใบรับซื้อ (groupLinesByMetal ตัวเดียวกับ PDF) — หนึ่งแถวต่อ (โลหะ · ค่าบริสุทธิ์ · หัก %)
+ * เช่น "ทอง 96.5% หัก 3%" · บิลก่อนมีค่าบริสุทธิ์ = ชื่อโลหะ
+ */
+const PurchaseItemSchema = z.object({
+  label: z.string(),
+  /** Σ น้ำหนัก 3 ตำแหน่ง */
+  grams: decimalString,
+  /** Σ ราคารับซื้อ 2 ตำแหน่ง */
+  amount: decimalString,
+});
+
 const PurchaseTotalsSchema = z.object({
   count: countString,
   total_weight: decimalString,
@@ -32,6 +44,8 @@ const PurchaseRowSchema = z.object({
   /** ชื่อจาก snapshot ตอนเปิดบิล · เลขบัตรมาสก์จากเซิร์ฟเวอร์เสมอ (R13) */
   customer: z.object({ id: z.string(), name_th: z.string(), national_id_masked: z.string() }),
   metals: z.array(MetalAmountSchema),
+  /** รายการที่แสดงในคอลัมน์ "รายการ" (ชื่อเดียวกับบนใบรับซื้อ) */
+  items: z.array(PurchaseItemSchema),
   total_weight: decimalString,
   total_amount: decimalString,
   created_by: z.object({ id: z.string(), name: z.string() }),

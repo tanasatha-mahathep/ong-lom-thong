@@ -26,6 +26,9 @@ export const GOLD_PRICE = {
   bar_sell: "67850.00",
   bar_buy: "67650.00",
   jewelry_buy: "64268",
+  // เงินตั้งราคาแล้ว · แพลตตินั่มยังไม่ได้ตั้ง (รับซื้อไม่ได้) — ครบทั้งสองสถานะในชุดเดียว
+  silver_per_g: "45.00",
+  platinum_per_g: null,
   diff: "200.00",
   source: "central",
 };

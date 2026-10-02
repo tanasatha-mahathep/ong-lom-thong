@@ -66,7 +66,7 @@ export default {
       branch: "สาขา",
       customer: "ลูกค้า",
       items: "รายการ",
-      itemLine: "{{metal}} {{grams}} ก. · {{amount}} บาท",
+      itemLine: "{{item}} {{grams}} ก. · {{amount}} บาท",
       weight: "น้ำหนัก (กรัม)",
       amount: "ยอดเงิน (บาท)",
       createdBy: "ผู้บันทึก",

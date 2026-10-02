@@ -3,6 +3,7 @@ export * from "./goldPrice";
 export * from "./goldReference";
 export * from "./docNo";
 export * from "./card";
+export * from "./assess";
 export * from "./buy";
 export * from "./businessDate";
 export * from "./nationalId";
