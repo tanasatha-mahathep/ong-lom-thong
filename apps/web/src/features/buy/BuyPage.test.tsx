@@ -274,6 +274,24 @@ describe("/buy", () => {
     ]);
   });
 
+  it("groups the national ID like the card while typing (1-4-5-2-1) and keeps the caret in place", async () => {
+    const { user } = setup();
+    await waitFor(() => expect(idBox()).toHaveFocus());
+    await user.keyboard("1103700");
+    expect(idBox()).toHaveValue("1 1037 00");
+    await user.keyboard("{Backspace}");
+    expect(idBox()).toHaveValue("1 1037 0");
+    // เคอร์เซอร์หลังช่องว่าง (หน้า 0 ตัวท้าย): Backspace ลบเลข 7 ข้างช่องว่าง ไม่ใช่ช่องว่างเฉย ๆ — 110370 → 11030
+    await user.keyboard("{ArrowLeft}{Backspace}");
+    expect(idBox()).toHaveValue("1 1030");
+    // พิมพ์แทรกตรงเดิม (หลังเลข 3) → เคอร์เซอร์ไม่กระโดดไปท้ายช่อง: 11030 → 110370
+    await user.keyboard("7");
+    expect(idBox()).toHaveValue("1 1037 0");
+    // ตัวที่ไม่ใช่ตัวเลขไม่ลงช่อง
+    await user.keyboard("{End}x");
+    expect(idBox()).toHaveValue("1 1037 0");
+  });
+
   it("does not add a line the API rejects, and shows why under the field", async () => {
     const { user } = setup();
     await insertCard(user, CUSTOMER_OK.national_id);
