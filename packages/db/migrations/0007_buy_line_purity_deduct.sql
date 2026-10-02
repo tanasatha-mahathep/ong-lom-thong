@@ -1,3 +1,4 @@
+-- db-verify: allow contract buy_line_purity_range only bounds purity_percent, which no release has written (every existing row is NULL, which passes)
 ALTER TABLE "buy_line" ADD COLUMN "deduct_percent" numeric(5, 2);--> statement-breakpoint
 ALTER TABLE "buy_line" ADD COLUMN "base_price" numeric(14, 2);--> statement-breakpoint
 ALTER TABLE "buy_line" ADD COLUMN "assessed_price_per_g" numeric(14, 2);--> statement-breakpoint
