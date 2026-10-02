@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { sha256Hex } from "../lib/pdfArchive";
 import type { Storage } from "../lib/storage";
 import { ExportTimeoutError, exportPeriod, prepareMonthlyExport, streamMonthlyExport } from "../services/monthlyExport";
+import { PURCHASE_CSV_HEADER } from "../services/reports";
 import { type TestApp, databaseAvailable, startTestApp } from "../test/harness";
 import { readAll, readZip } from "../test/unzip";
 
@@ -47,7 +48,20 @@ interface Manifest {
   totals: { total_weight: string; total_amount: string; void_total_amount: string };
 }
 
-type Line = [metal: string, weight: string, amount: string];
+/**
+ * ราคาที่ระบบคิดของแถว (assessBuyLine · UAT 30 ก.ย. 2569) ตามที่คอลัมน์ numeric เก็บ
+ * ไม่ส่ง = บิลก่อนมีค่าบริสุทธิ์ (ราคาพิมพ์เอง) → ทั้ง 5 คอลัมน์เป็น null
+ */
+interface Assessed {
+  /** purity_percent numeric(6,3) เช่น "96.500" */
+  purity: string;
+  /** deduct_percent numeric(5,2) เช่น "3.00" */
+  deduct: string;
+  base: string;
+  unit: string;
+  gross: string;
+}
+type Line = [metal: string, weight: string, amount: string, assessed?: Assessed];
 type PdfState = "ready" | "pending" | "failed" | "invalid" | "tampered" | "gone";
 interface BillSpec {
   code: string;
@@ -118,13 +132,18 @@ describe.skipIf(!available)("ส่งบัญชีรายเดือน (s
         .returning({ id: buyReceipt.id });
       if (!r) throw new Error("insert failed");
       await tx.insert(buyLine).values(
-        s.lines.map(([m, w, a], i) => ({
+        s.lines.map(([m, w, a, x], i) => ({
           receiptId: r.id,
           lineNo: i + 1,
           metalId: metals[m] ?? "",
           weightG: w,
           amount: a,
           pricePerG: fmtMoney(pricePerGram(D(a), D(w))),
+          purityPercent: x?.purity ?? null,
+          deductPercent: x?.deduct ?? null,
+          basePrice: x?.base ?? null,
+          assessedPricePerG: x?.unit ?? null,
+          assessmentAmount: x?.gross ?? null,
         })),
       );
       await tx.insert(payment).values({ receiptId: r.id, method: "cash", amount: fmtMoney(amount) });
@@ -321,6 +340,41 @@ describe.skipIf(!available)("ส่งบัญชีรายเดือน (s
         lines: [["gold", "7.777", "25555.55"]],
         pdf: "ready",
       },
+      // ก.ค. 00001 — บิลที่คิดราคาด้วยค่าบริสุทธิ์/หัก % (UAT 30 ก.ย. 2569) คู่กับบิลแบบเก่า · เดือนนี้ไม่มีเทสต์อื่นแตะ
+      // ทองแท่งรับซื้อ 67,650: ⌊67650 × 0.0656 × 0.965⌋ = 4282 · ⌊4282 × 10⌋ = 42820 · ⌊42820 × 0.97⌋ = 41535
+      // เงิน 45.00/ก.: ⌊45 × 0.925⌋ = 41 · ⌊41 × 271.56⌋ = 11133 · หัก 0
+      x1: {
+        code: "00001",
+        date: "2026-07-10",
+        docNo: "RC6907-0001",
+        cust: "A",
+        lines: [
+          [
+            "gold",
+            "10.000",
+            "41535.00",
+            { base: "67650.00", purity: "96.500", unit: "4282.00", deduct: "3.00", gross: "42820.00" },
+          ],
+          [
+            "silver",
+            "271.560",
+            "11133.00",
+            { base: "45.00", purity: "92.500", unit: "41.00", deduct: "0.00", gross: "11133.00" },
+          ],
+        ],
+        pdf: "ready",
+      },
+      x2: {
+        code: "00001",
+        date: "2026-07-11",
+        docNo: "RC6907-0002",
+        cust: "B",
+        lines: [
+          ["gold", "1.000", "3000.00"],
+          ["silver", "10.000", "150.00"],
+        ],
+        pdf: "ready",
+      },
     };
     for (const [key, spec] of Object.entries(specs)) bills[key] = await addBill(spec);
   });
@@ -350,9 +404,9 @@ describe.skipIf(!available)("ส่งบัญชีรายเดือน (s
       readme: text("README.txt"),
     };
   }
-  /** CSV จาก endpoint รายงานยอดซื้อ ของเดือน ต.ค. — byte จริง (Response.text() ตัด BOM) */
-  async function reportCsv(who: string, branchId?: string) {
-    const qs = `date_from=2026-10-01&date_to=2026-10-31&format=csv${branchId ? `&branch_id=${branchId}` : ""}`;
+  /** CSV จาก endpoint รายงานยอดซื้อ ของเดือน (ค่าเริ่มต้น ต.ค.) — byte จริง (Response.text() ตัด BOM) */
+  async function reportCsv(who: string, branchId?: string, period = { from: "2026-10-01", to: "2026-10-31" }) {
+    const qs = `date_from=${period.from}&date_to=${period.to}&format=csv${branchId ? `&branch_id=${branchId}` : ""}`;
     const res = await t.request(`/api/reports/purchase?${qs}`, { cookie: cookies[who] });
     expect(res.status).toBe(200);
     return new Uint8Array(await res.arrayBuffer());
@@ -426,6 +480,55 @@ describe.skipIf(!available)("ส่งบัญชีรายเดือน (s
     const own = await download(OCT, "acct2");
     expect(own.csv).toEqual(await reportCsv("acct2"));
     expect(all.manifest.purchase_report).toEqual({ path: "purchase-report.csv", sha256: sha256Hex(all.csv) });
+  });
+
+  it("purchase-report.csv: รายการสินค้า = ป้ายเดียวกับใบรับซื้อ (โลหะ · ค่าบริสุทธิ์ · หัก %) · บิลก่อนมีค่าบริสุทธิ์ = ชื่อโลหะ", async () => {
+    const JUL = { from: "2026-07-01", to: "2026-07-31" };
+    const jul = await download("year=2026&month=7");
+    expect(jul.csv).toEqual(await reportCsv("acct", undefined, JUL));
+    const lines = new TextDecoder().decode(jul.csv).split("\r\n"); // TextDecoder ค่าเริ่มต้นตัด BOM ให้แล้ว
+    expect(lines.slice(0, 3)).toEqual([
+      PURCHASE_CSV_HEADER.join(","),
+      // ป้ายหลายรายการคั่นด้วย ", " → ช่องนี้อยู่ใน "…" (RFC 4180) · หัก 0 ไม่พิมพ์ "หัก"
+      `1,2026-07-10,10:00,RC6907-0001,00001 สาขา 2,${NAMES.A},1 XXXX XXXXX 45 8,"ทอง 96.5% หัก 3%, เงิน 92.5%",281.560,52668.00,staff0`,
+      // บิลแบบเก่า (purity null) = ชื่อโลหะเหมือนเดิม
+      `2,2026-07-11,10:00,RC6907-0002,00001 สาขา 2,${NAMES.B},3 XXXX XXXXX 65 7,"ทอง, เงิน",11.000,3150.00,staff0`,
+    ]);
+    // 2 บิล + 3 สาขา × (4 โลหะ + ทุกประเภท) + รวมทั้งสิ้น — แถวสรุปยังเป็นต่อโลหะ ไม่แตกตามค่าบริสุทธิ์
+    expect(lines).toHaveLength(1 + 2 + 3 * 5 + 5 + 1);
+    expect(lines.slice(-6, -1)).toEqual([
+      "รวมทั้งสิ้น,,,,ทุกสาขา,,,ทอง,11.000,44535.00,",
+      "รวมทั้งสิ้น,,,,ทุกสาขา,,,นาก,0.000,0.00,",
+      "รวมทั้งสิ้น,,,,ทุกสาขา,,,เงิน,281.560,11283.00,",
+      "รวมทั้งสิ้น,,,,ทุกสาขา,,,แพลตตินั่ม,0.000,0.00,",
+      "รวมทั้งสิ้น,,,,ทุกสาขา,,,ทุกประเภท (2 ใบ),292.560,55818.00,",
+    ]);
+    expect(jul.manifest.bills.map((b) => [b.doc_no, b.status, b.total_amount, b.pdf.path])).toEqual([
+      ["RC6907-0001", "active", "52668.00", "receipts/00001/RC6907-0001.pdf"],
+      ["RC6907-0002", "active", "3150.00", "receipts/00001/RC6907-0002.pdf"],
+    ]);
+    expect(jul.manifest.totals).toEqual({
+      total_weight: "292.560",
+      total_amount: "55818.00",
+      void_total_amount: "0.00",
+    });
+    expect(receiptsIn(jul.names)).toEqual(["receipts/00001/RC6907-0001.pdf", "receipts/00001/RC6907-0002.pdf"]);
+
+    // ต.ค. มีแต่บิลแบบเก่า — ชื่อโลหะล้วน ไม่มี % ที่ไหนในไฟล์
+    const oct = new TextDecoder().decode((await download(OCT)).csv);
+    expect(oct.split("\r\n")[1]).toBe(
+      `1,2026-10-01,10:00,RC6910-0001,00000 ${HQ},${NAMES.A},1 XXXX XXXXX 45 8,ทอง,5.860,20030.00,staff0`,
+    );
+    expect(oct).not.toContain("%");
+
+    // สาขาอื่นในเดือนเดียวกัน = ไม่มีบิล ไม่มีป้ายของ 00001 หลุดมา (เลือกสาขาเอง · บัญชีที่ดูแลสาขาเดียว)
+    for (const z of [
+      await download(`year=2026&month=7&branch_id=${t.branches["00000"]}`),
+      await download("year=2026&month=7", "acct2"),
+    ]) {
+      expect(z.manifest.bills).toEqual([]);
+      expect(new TextDecoder().decode(z.csv)).not.toContain("%");
+    }
   });
 
   it("manifest ของสาขา 00000: ทุกบิลของเดือน · sha256 จาก DB · ไฟล์ที่ไม่พร้อมมีสถานะ ไม่มี path · counts · totals", async () => {

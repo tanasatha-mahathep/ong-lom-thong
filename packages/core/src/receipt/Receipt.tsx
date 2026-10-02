@@ -83,8 +83,8 @@ export function Receipt({ data }: { data: ReceiptData }): JSX.Element {
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.metalName}>
-              <td className="c">{row.metalName}</td>
+            <tr key={row.label}>
+              <td className="c">{row.label}</td>
               <td className="c">{formatWeight(row.weightG)}</td>
               <td className="c">กรัม</td>
               <td className="r">{formatMoney(row.unitPrice)}</td>

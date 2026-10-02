@@ -27,6 +27,7 @@ const PURCHASE = {
       branch: BRANCH_HQ,
       customer: { id: "c-1", name_th: "สมชาย ทดสอบ", national_id_masked: "1 XXXX XXXXX 12 3" },
       metals: [metal],
+      items: [{ label: "ทองคำ 96.5%", grams: "1.000", amount: "1.00" }],
       total_weight: "1.000",
       total_amount: "1.00",
       created_by: { id: "u-1", name: "พนักงาน ทดสอบ" },

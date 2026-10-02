@@ -66,8 +66,8 @@ function isBillDirty(state: BuyState): boolean {
       state.idText,
       state.searchText,
       state.detail,
+      state.lineEntry.purity_percent,
       state.lineEntry.weight_g,
-      state.lineEntry.amount,
       state.paymentEntry.amount,
       state.paymentEntry.bank,
     ].some((text) => text.trim() !== "")

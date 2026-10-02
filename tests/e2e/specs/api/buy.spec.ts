@@ -21,7 +21,19 @@ interface Bill {
   branch: { code: string; tax_branch_code: string | null };
   customer: { id: string; name_th: string; national_id_masked: string };
   gold_price_snapshot: string;
-  lines: { line_no: number; metal: { code: string }; weight_g: string; amount: string; price_per_g: string }[];
+  lines: {
+    line_no: number;
+    metal: { code: string };
+    weight_g: string;
+    /** what the api priced the line from (UAT 30 Sep 2026) — null only on bills saved before that */
+    purity_percent: string | null;
+    deduct_percent: string | null;
+    base_price: string | null;
+    unit_price: string | null;
+    gross_amount: string | null;
+    amount: string;
+    price_per_g: string;
+  }[];
   payments: { method: string; method_label: string; bank: string | null; amount: string }[];
   total_weight: string;
   total_amount: string;
@@ -47,10 +59,28 @@ const idempotencyKey = () => `e2e-${randomBytes(12).toString("hex")}`;
 /** a 13-digit run — an unmasked national ID, unless it is the shop's own tax ID (R13) */
 const FULL_ID = /\d{13}/g;
 
-/** the counter's bill: the real-receipt gold line (5.860 g for 20,030) plus silver, paid in cash */
+/**
+ * The counter's bill: staff key metal · purity % · deduct % · weight and the api prices it (UAT 30 Sep 2026) —
+ * floored to whole baht at every step, worked out here by hand from the formula, never copied from the api:
+ * - gold 96.5 %, 5.860 g, no deduct, bar buy 67,650: ⌊67650 × 0.0656 × 0.965 = 4282.5156⌋ = 4,282 a gram
+ *   → ⌊4282 × 5.86 = 25,092.52⌋ = 25,092.00 · 25,092 ÷ 5.86 = 4,281.91
+ * - silver 92.5 %, 100 g, deduct 3 %, silver 45.00 a gram: ⌊45 × 0.925 = 41.625⌋ = 41 a gram → ⌊41 × 100⌋ = 4,100
+ *   → ⌊4100 × 0.97⌋ = 3,977.00 (123 deducted) · 3,977 ÷ 100 = 39.77
+ * - bill: 25,092 + 3,977 = 29,069.00 for 105.860 g · 29,069 ÷ 105.86 = 274.598… → 274.60
+ */
+const BILL = {
+  totalWeight: "105.860",
+  totalAmount: "29069.00",
+  avgPricePerG: "274.60",
+  inWords: "สองหมื่นเก้าพันหกสิบเก้าบาทถ้วน", // 29,069.00
+} as const;
+
+/** the counter's bill above, for a new synthetic seller, paid in cash */
 async function counterBill(staff: APIRequestContext, manager: APIRequestContext, options: { photo?: boolean } = {}) {
-  // R7: today's price must exist before a bill opens — the same 67,850 the gold-price journey sets
-  expect((await manager.put("/api/gold-price/today", { data: { bar_sell: "67850" } })).status()).toBe(200);
+  // R7: today's price must exist before a bill opens — the same 67,850 the gold-price journey sets (bar buy 67,650).
+  // Silver is priced per gram on the central price; every spec that sets it on this shared stack uses 45.00.
+  const price = await manager.put("/api/gold-price/today", { data: { bar_sell: "67850", silver_per_g: "45.00" } });
+  expect(price.status(), await price.text()).toBe(200);
 
   const metals = (await (await staff.get("/api/metals")).json()) as Metal[];
   const metal = (code: string) => metals.find((m) => m.code === code)?.id ?? "";
@@ -69,10 +99,10 @@ async function counterBill(staff: APIRequestContext, manager: APIRequestContext,
     body: {
       customer_id: customerId,
       lines: [
-        { metal_id: metal("gold"), weight_g: "5.860", amount: "20030" },
-        { metal_id: metal("silver"), weight_g: "100", amount: "1500" },
+        { metal_id: metal("gold"), weight_g: "5.860", purity_percent: "96.5" },
+        { metal_id: metal("silver"), weight_g: "100", purity_percent: "92.5", deduct_percent: "3" },
       ],
-      payments: [{ method: "cash", amount: "21530" }],
+      payments: [{ method: "cash", amount: "29069" }],
     },
   };
 }
@@ -89,7 +119,7 @@ test.describe("buy-in — quote, save, read back, scoped (R1–R5 · R7 · R9 ·
     const masked = `${nationalId[0]} XXXX XXXXX ${nationalId.slice(10, 12)} ${nationalId[12]}`;
     const today = thaiDate();
 
-    await test.step("the quote is exact to the satang, as strings (rules 1–3)", async () => {
+    await test.step("the api prices each line from purity and deduct, exact to the baht, as strings (rules 1–3)", async () => {
       const res = await staff.post("/api/buy/quote", { data: body });
       expect(res.status()).toBe(200);
       expect(await res.json()).toMatchObject({
@@ -98,13 +128,35 @@ test.describe("buy-in — quote, save, read back, scoped (R1–R5 · R7 · R9 ·
         branch: { code: "00000" },
         gold_price_snapshot: "67850.00",
         lines: [
-          { index: 0, weight_g: "5.860", amount: "20030.00", price_per_g: "3418.09" },
-          { index: 1, weight_g: "100.000", amount: "1500.00", price_per_g: "15.00" },
+          {
+            index: 0,
+            weight_g: "5.860",
+            purity_percent: "96.50",
+            deduct_percent: "0",
+            base_price: "67650.00",
+            unit_price: "4282.00",
+            gross_amount: "25092.00",
+            deduct_amount: "0.00",
+            amount: "25092.00",
+            price_per_g: "4281.91",
+          },
+          {
+            index: 1,
+            weight_g: "100.000",
+            purity_percent: "92.50",
+            deduct_percent: "3",
+            base_price: "45.00",
+            unit_price: "41.00",
+            gross_amount: "4100.00",
+            deduct_amount: "123.00",
+            amount: "3977.00",
+            price_per_g: "39.77",
+          },
         ],
-        total_weight: "105.860",
-        total_amount: "21530.00",
-        avg_price_per_g: "203.38",
-        paid: "21530.00",
+        total_weight: BILL.totalWeight,
+        total_amount: BILL.totalAmount,
+        avg_price_per_g: BILL.avgPricePerG,
+        paid: BILL.totalAmount,
         balance: "0.00",
       });
     });
@@ -154,21 +206,35 @@ test.describe("buy-in — quote, save, read back, scoped (R1–R5 · R7 · R9 ·
         branch: { code: "00000", tax_branch_code: "00000" },
         customer: { national_id_masked: masked },
         gold_price_snapshot: "67850.00",
-        total_weight: "105.860",
-        total_amount: "21530.00",
-        avg_price_per_g: "203.38",
+        total_weight: BILL.totalWeight,
+        total_amount: BILL.totalAmount,
+        avg_price_per_g: BILL.avgPricePerG,
         status: "active",
       });
-      expect(bill.lines.map((l) => [l.line_no, l.metal.code, l.weight_g, l.amount, l.price_per_g])).toEqual([
-        [1, "gold", "5.860", "20030.00", "3418.09"],
-        [2, "silver", "100.000", "1500.00", "15.00"],
+      // what the api priced each line from stays on the line, for checking a bill afterwards
+      expect(
+        bill.lines.map((l) => [
+          l.line_no,
+          l.metal.code,
+          l.weight_g,
+          l.purity_percent,
+          l.deduct_percent,
+          l.base_price,
+          l.unit_price,
+          l.gross_amount,
+          l.amount,
+          l.price_per_g,
+        ]),
+      ).toEqual([
+        [1, "gold", "5.860", "96.50", "0", "67650.00", "4282.00", "25092.00", "25092.00", "4281.91"],
+        [2, "silver", "100.000", "92.50", "3", "45.00", "41.00", "4100.00", "3977.00", "39.77"],
       ]);
-      expect(bill.payments).toEqual([{ method: "cash", method_label: "เงินสด", bank: null, amount: "21530.00" }]);
+      expect(bill.payments).toEqual([{ method: "cash", method_label: "เงินสด", bank: null, amount: BILL.totalAmount }]);
 
       const list = await staff.get(`/api/buy?q=${encodeURIComponent(saved.doc_no)}`);
       const found = (await list.json()) as BillList;
       expect(found.items.map((i) => [i.id, i.customer.national_id_masked, i.total_amount])).toEqual([
-        [saved.id, masked, "21530.00"],
+        [saved.id, masked, BILL.totalAmount],
       ]);
     });
 
@@ -190,7 +256,7 @@ test.describe("buy-in — quote, save, read back, scoped (R1–R5 · R7 · R9 ·
     const [staff, manager] = await Promise.all([signedIn("staff"), signedIn("manager")]);
     const { body, seller } = await counterBill(staff, manager);
     const res = await staff.post("/api/buy", {
-      data: { ...body, payments: [{ method: "cash", amount: "21000" }], idempotency_key: idempotencyKey() },
+      data: { ...body, payments: [{ method: "cash", amount: "29000" }], idempotency_key: idempotencyKey() },
     });
     // the quote now echoes the normalised payments (dev 09e5742)
     const quoteKeys = ["ok", "errors", "date", "branch", "gold_price_snapshot", "lines", "payments"];
@@ -202,17 +268,27 @@ test.describe("buy-in — quote, save, read back, scoped (R1–R5 · R7 · R9 ·
       "paid",
       "balance",
     ]);
-    expect(error).toMatchObject({ ok: false, paid: "21000.00", balance: "530.00" });
+    // 29,069.00 − 29,000.00 = 69.00 still owed
+    expect(error).toMatchObject({ ok: false, total_amount: BILL.totalAmount, paid: "29000.00", balance: "69.00" });
     const search = (await (await staff.get(`/api/buy?q=${encodeURIComponent(seller)}`)).json()) as BillList;
     expect(search.items).toEqual([]);
   });
 
-  test("money and weight travel as strings — JSON numbers are a 400 naming the field", async ({ signedIn }) => {
+  test("money, weight and percents travel as strings — JSON numbers are a 400 naming the field", async ({
+    signedIn,
+  }) => {
     const [staff, manager] = await Promise.all([signedIn("staff"), signedIn("manager")]);
     const { body } = await counterBill(staff, manager);
     const [first] = body.lines;
-    const asNumber = { ...body, lines: [{ ...first, weight_g: 5.86 }] };
-    await expectFieldError(await staff.post("/api/buy/quote", { data: asNumber }), 400, "lines.0.weight_g");
+    const asNumbers: [string, Record<string, unknown>][] = [
+      ["lines.0.weight_g", { weight_g: 5.86 }],
+      ["lines.0.purity_percent", { purity_percent: 96.5 }],
+      ["lines.0.deduct_percent", { deduct_percent: 3 }],
+    ];
+    for (const [field, over] of asNumbers) {
+      const asNumber = { ...body, lines: [{ ...first, ...over }] };
+      await expectFieldError(await staff.post("/api/buy/quote", { data: asNumber }), 400, field);
+    }
   });
 
   test("CSRF: a signed-in browser cannot open a bill from another site", async ({ signedIn }) => {
@@ -249,7 +325,7 @@ async function settled(client: APIRequestContext, id: string, field: FileField):
   return status;
 }
 
-/** "21530.00" → "21,530.00": how the receipt prints the api's strings (thousands grouping, nothing else) */
+/** "29069.00" → "29,069.00": how the receipt prints the api's strings (thousands grouping, nothing else) */
 const printed = (value: string) => {
   const [whole = "", fraction] = value.split(".");
   return `${whole.replace(/\B(?=(\d{3})+$)/g, ",")}${fraction === undefined ? "" : `.${fraction}`}`;
@@ -317,8 +393,12 @@ test.describe("receipt PDF — archived, private, immutable (R15 · rule 5 · R1
         `ชื่อผู้ขาย : ${seller}`,
         nationalId, // the archived tax document is the one place with the full ID (R13)
         "รายละเอียด (ถ้ามี): ทดสอบ e2e ใบรับซื้อ",
-        "สองหมื่นหนึ่งพันห้าร้อยสามสิบบาทถ้วน", // 21,530.00 in words
+        BILL.inWords,
         WATERMARK,
+        // one row per (metal · purity · deduct): the purity printed, "หัก" only when something was deducted
+        "ทอง 96.5%",
+        "เงิน 92.5% หัก 3%",
+        // each row is a single line here, so its unit price is the line's own price per gram
         ...bill.lines.flatMap((l) => [printed(l.weight_g), printed(l.price_per_g), printed(l.amount)]),
         ...bill.payments.map((p) => printed(p.amount)),
       ];

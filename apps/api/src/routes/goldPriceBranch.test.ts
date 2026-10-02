@@ -18,8 +18,14 @@ interface BranchPrice {
   bar_sell: string | null;
   bar_buy: string | null;
   jewelry_buy: string | null;
+  /** ราคาต่อกรัมที่สาขาใช้จริง (ของราคากลาง) — null = ยังไม่ได้ตั้ง */
+  silver_per_g: string | null;
+  platinum_per_g: string | null;
   source: "branch" | "central" | null;
 }
+
+/** ยังไม่ได้ตั้งราคาต่อกรัม — คีย์อยู่เสมอเป็น null */
+const NO_PER_GRAM = { silver_per_g: null, platinum_per_g: null };
 
 describe.skipIf(!available)("ราคาทองเฉพาะสาขา (อิงราคากลาง · override ได้ · R7 · R8 · R12)", () => {
   let t: TestApp;
@@ -166,6 +172,7 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
       bar_sell: "70100.00",
       bar_buy: "69900.00",
       jewelry_buy: "66405",
+      ...NO_PER_GRAM,
       source: "branch",
     });
     expect(await (await today("staff1")).json()).toMatchObject({ bar_sell: "70100.00", source: "branch" });
@@ -184,6 +191,7 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
         bar_sell: "67900.00",
         bar_buy: "67700.00",
         jewelry_buy: "64315",
+        ...NO_PER_GRAM,
         source: "central",
       },
       {
@@ -191,6 +199,7 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
         bar_sell: "70100.00",
         bar_buy: "69900.00",
         jewelry_buy: "66405",
+        ...NO_PER_GRAM,
         source: "branch",
       },
       {
@@ -198,6 +207,7 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
         bar_sell: "67900.00",
         bar_buy: "67700.00",
         jewelry_buy: "64315",
+        ...NO_PER_GRAM,
         source: "central",
       },
     ]);
@@ -251,7 +261,13 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
       date: TODAY,
       branch: { id: b1, code: "00001", name: "สาขา 2" },
       before: null,
-      after: { bar_sell: "70100.00", bar_buy: "69900.00", jewelry_buy: "66405.00", set_by: ids.mgr1 },
+      after: {
+        bar_sell: "70100.00",
+        bar_buy: "69900.00",
+        jewelry_buy: "66405.00",
+        ...NO_PER_GRAM,
+        set_by: ids.mgr1,
+      },
       typo_warning_confirmed: false,
     });
     expect(audits[1]?.diff).toMatchObject({
@@ -261,7 +277,13 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
     expect(audits[2]?.diff).toEqual({
       date: TODAY,
       branch: { id: b1, code: "00001", name: "สาขา 2" },
-      removed: { bar_sell: "70150.00", bar_buy: "69950.00", jewelry_buy: "66453.00", set_by: ids.mgr1 },
+      removed: {
+        bar_sell: "70150.00",
+        bar_buy: "69950.00",
+        jewelry_buy: "66453.00",
+        ...NO_PER_GRAM,
+        set_by: ids.mgr1,
+      },
     });
     expect(audits[2]?.rowId).toBe(audits[1]?.rowId);
   });
@@ -276,41 +298,80 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
       bar_sell: "67900.00",
       bar_buy: "67700.00",
       jewelry_buy: "64315",
+      ...NO_PER_GRAM,
       source: "central",
     });
     expect(await branchAudits()).toHaveLength(before);
   });
 
-  it("บิลที่เปิดไปแล้วเก็บราคาของตัวเอง (snapshot) — ลบ override ไม่กระทบบิลเก่า · บิลใหม่ได้ราคากลาง", async () => {
+  it("บิลที่เปิดไปแล้วเก็บราคาของตัวเอง (snapshot) — ลบ override ไม่กระทบบิลเก่า · บิลใหม่คิดยอดจากราคากลาง", async () => {
     await put("mgr1", b1, { bar_sell: "70100" });
     const [gold] = await t.db.select().from(metal).where(eq(metal.code, "gold"));
     const [cust] = await t.db
       .insert(customer)
       .values({ nationalId: FAKE_ID, nameTh: "นายทดสอบ ราคาสาขา", cardExpireText: "31/12/2574" })
       .returning();
+    // ระบบคิดยอดเอง (assessBuyLine · คิดมือ ปัดลงบาทเต็มทุกขั้น): ทองรับซื้อของ 00001 = 70,100 − 200 = 69,900
+    //   69,900 × 0.0656 = 4,585.44 × 96.5% = 4,424.9496 → 4,424/กรัม × 5.860 = 25,924.64 → 25,924 · หัก 0% → 25,924.00
+    //   ราคา/กรัม (แสดง) 25,924 ÷ 5.86 = 4,423.8907… → 4423.89
     const body = {
       customer_id: cust?.id,
-      lines: [{ metal_id: gold?.id, weight_g: "5.860", amount: "20030" }],
-      payments: [{ method: "cash", amount: "20030" }],
+      lines: [{ metal_id: gold?.id, weight_g: "5.860", purity_percent: "96.5" }],
+      payments: [{ method: "cash", amount: "25924" }],
     };
     const saved = await t.request("/api/buy", {
       cookie: cookies.staff1,
       body: { ...body, idempotency_key: "branch-price-snapshot-0001" },
     });
-    expect(saved.status).toBe(201);
+    expect(saved.status, await saved.clone().text()).toBe(201);
     const { id } = (await saved.json()) as { id: string };
-    const snapshot = async () =>
-      (
-        (await (await t.request(`/api/buy/${id}`, { cookie: cookies.staff1 })).json()) as {
-          gold_price_snapshot: string;
-        }
-      ).gold_price_snapshot;
-    expect(await snapshot()).toBe("70100.00");
+    const bill = async () => (await t.request(`/api/buy/${id}`, { cookie: cookies.staff1 })).json();
+    const atBranchPrice = {
+      gold_price_snapshot: "70100.00",
+      lines: [
+        {
+          weight_g: "5.860",
+          purity_percent: "96.50",
+          deduct_percent: "0",
+          base_price: "69900.00",
+          unit_price: "4424.00",
+          gross_amount: "25924.00",
+          amount: "25924.00",
+          price_per_g: "4423.89",
+        },
+      ],
+    };
+    expect(await bill()).toMatchObject(atBranchPrice);
 
     expect((await del("mgr1", b1)).status).toBe(200);
-    expect(await snapshot()).toBe("70100.00");
-    const q = await t.request("/api/buy/quote", { cookie: cookies.staff1, body });
-    expect(await q.json()).toMatchObject({ ok: true, gold_price_snapshot: "67900.00" });
+    expect(await bill()).toMatchObject(atBranchPrice);
+    // บิลใหม่ที่ 00001 ใช้ราคากลาง 67,900 → รับซื้อ 67,700 × 0.0656 = 4,441.12 × 96.5% = 4,285.6808 → 4,285/กรัม
+    //   × 5.860 = 25,110.10 → 25,110
+    const q = await t.request("/api/buy/quote", {
+      cookie: cookies.staff1,
+      body: { ...body, payments: [{ method: "cash", amount: "25110" }] },
+    });
+    expect(await q.json()).toMatchObject({
+      ok: true,
+      gold_price_snapshot: "67900.00",
+      lines: [
+        {
+          base_price: "67700.00",
+          unit_price: "4285.00",
+          gross_amount: "25110.00",
+          deduct_amount: "0.00",
+          amount: "25110.00",
+        },
+      ],
+      total_amount: "25110.00",
+    });
+    // ยอดชำระของบิลเดิม (25,924) ใช้กับราคาใหม่ไม่ได้ — ยอดมาจากราคาของวัน ไม่ใช่จากที่ผู้ใช้ส่ง
+    const stale = await t.request("/api/buy/quote", { cookie: cookies.staff1, body });
+    expect(await stale.json()).toMatchObject({
+      ok: false,
+      errors: [{ field: "payments", message: "เกินยอดที่ต้องชำระ" }],
+      total_amount: "25110.00",
+    });
   });
 
   it("ตั้งราคากลางใหม่ไม่ทับราคาเฉพาะสาขา", async () => {
@@ -371,7 +432,7 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
     const rows = await list("admin");
     expect(rows).toHaveLength(3);
     for (const row of rows) {
-      expect(row).toMatchObject({ bar_sell: null, bar_buy: null, jewelry_buy: null, source: null });
+      expect(row).toMatchObject({ bar_sell: null, bar_buy: null, jewelry_buy: null, ...NO_PER_GRAM, source: null });
     }
     expect((await today("staff1")).status).toBe(404);
 
@@ -382,5 +443,276 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
       ["00001", "branch"],
       ["00002", null],
     ]);
+  });
+
+  // ── ราคาต่อกรัมเงิน/แพลตตินั่ม (UAT 30 ก.ย. 2569) — ตั้งที่ราคากลางเท่านั้น ทุกสาขาใช้ค่าของราคากลาง ──
+  // วันที่ 1 ต.ค. (หลังทุกวันที่เทสต์ข้างบนใช้) — ยังไม่มีวันก่อนหน้าที่มีราคาต่อกรัม
+
+  const PER_GRAM_DAY = "2026-10-01";
+  const BRANCH_ONLY = "ราคาเงิน/แพลตตินั่มต่อกรัมตั้งได้ที่ราคากลางเท่านั้น";
+  const ref = (id: string, code: string, name: string) => ({ id, code, name });
+  const putCentral = async (body: unknown) =>
+    t.request("/api/gold-price/today", { method: "PUT", cookie: cookies.admin, body });
+  /** ราคากลาง 67,950 → รับซื้อ 67,750 → รูปพรรณ 67,750 × 0.95 = 64,362.50 → 64,363 (คิดมือ) */
+  const CENTRAL_GOLD = { bar_sell: "67950.00", bar_buy: "67750.00", jewelry_buy: "64363" };
+  /** ราคาเฉพาะสาขา 70,100 → 69,900 → 69,900 × 0.95 = 66,405 */
+  const B1_GOLD = { bar_sell: "70100.00", bar_buy: "69900.00", jewelry_buy: "66405" };
+
+  it("ราคาต่อกรัมของราคากลางใช้ทุกสาขา — สาขาที่มีราคาทองของตัวเองก็เห็นราคาเงิน/แพลตตินั่มของราคากลาง (ค่าที่ใช้จริง ไม่ใช่สำเนา)", async () => {
+    clock = new Date(`${PER_GRAM_DAY}T03:00:00Z`);
+    // ยืนยันด่านพิมพ์ผิดไว้ — เทสต์นี้ตรวจการกระจายราคา ไม่ใช่ด่าน (ด่านอยู่ใน goldPrice.test.ts)
+    const central = await putCentral({
+      bar_sell: "67950",
+      silver_per_g: "45",
+      platinum_per_g: "1000",
+      confirm_typo: true,
+    });
+    expect(central.status).toBe(200);
+    const perGram = { silver_per_g: "45.00", platinum_per_g: "1000.00" };
+    expect(await central.json()).toEqual({
+      date: PER_GRAM_DAY,
+      ...CENTRAL_GOLD,
+      ...perGram,
+      diff: "200.00",
+      source: "central",
+    });
+
+    // 00001 ตั้งราคาทองของตัวเอง — คำตอบคือราคาที่สาขาใช้จริง: ทองของสาขา + ราคาต่อกรัมของราคากลาง
+    const own = await put("mgr1", b1, { bar_sell: "70100", confirm_typo: true });
+    expect(own.status).toBe(200);
+    expect(await own.json()).toEqual({
+      branch: ref(b1, "00001", "สาขา 2"),
+      ...B1_GOLD,
+      ...perGram,
+      source: "branch",
+    });
+    // แถวของสาขาไม่ได้คัดลอกราคาต่อกรัมไป (null) และ audit ของแถวนั้นก็เป็น null — ราคากลางเปลี่ยนเมื่อไรสาขาเห็นทันที
+    const [row] = await t.db
+      .select()
+      .from(goldPrice)
+      .where(and(eq(goldPrice.branchId, b1), eq(goldPrice.date, PER_GRAM_DAY)));
+    expect(row).toMatchObject({ barSell: "70100.00", silverPerG: null, platinumPerG: null });
+    expect((await branchAudits()).at(-1)?.diff).toMatchObject({
+      before: null,
+      after: { bar_sell: "70100.00", ...NO_PER_GRAM, set_by: ids.mgr1 },
+    });
+
+    expect(await (await today("staff1")).json()).toEqual({
+      date: PER_GRAM_DAY,
+      ...B1_GOLD,
+      ...perGram,
+      diff: "200.00",
+      source: "branch",
+    });
+    expect(await (await today("staff2")).json()).toEqual({
+      date: PER_GRAM_DAY,
+      ...CENTRAL_GOLD,
+      ...perGram,
+      diff: "200.00",
+      source: "central",
+    });
+    expect(await list("admin")).toEqual([
+      { branch: ref(b0, "00000", "สำนักงานใหญ่ (สาขา 1)"), ...CENTRAL_GOLD, ...perGram, source: "central" },
+      { branch: ref(b1, "00001", "สาขา 2"), ...B1_GOLD, ...perGram, source: "branch" },
+      { branch: ref(b2, "00002", "สาขา 3"), ...CENTRAL_GOLD, ...perGram, source: "central" },
+    ]);
+
+    // ยอดรับซื้อเงินที่ 00001 คิดจากราคาเงินของราคากลาง ส่วนทองใช้ราคาของสาขา (คิดมือ ปัดลงบาทเต็มทุกขั้น):
+    //   45.00 × 92.5% = 41.625 → 41/กรัม × 271.56 = 11,133.96 → 11,133 · ราคา/กรัม 11,133 ÷ 271.56 = 40.996… → 41.00
+    const [silver] = await t.db.select().from(metal).where(eq(metal.code, "silver"));
+    const q = await t.request("/api/buy/quote", {
+      cookie: cookies.staff1,
+      body: {
+        lines: [{ metal_id: silver?.id, weight_g: "271.56", purity_percent: "92.5" }],
+        payments: [{ method: "cash", amount: "11133" }],
+      },
+    });
+    expect(q.status).toBe(200);
+    const quoted = (await q.json()) as { errors: { field: string }[] };
+    expect(quoted.errors.filter((e) => e.field.startsWith("lines"))).toEqual([]);
+    expect(quoted).toMatchObject({
+      gold_price_snapshot: "70100.00",
+      lines: [
+        {
+          weight_g: "271.560",
+          purity_percent: "92.50",
+          deduct_percent: "0",
+          base_price: "45.00",
+          unit_price: "41.00",
+          gross_amount: "11133.00",
+          deduct_amount: "0.00",
+          amount: "11133.00",
+          price_per_g: "41.00",
+        },
+      ],
+      total_amount: "11133.00",
+    });
+
+    // ราคากลางแก้ราคาเงิน (แพลตตินั่มไม่ส่ง = คงไว้) → ทุกสาขาเห็นทันที · ล้างแพลตตินั่ม → ทุกสาขาเป็น null
+    expect((await putCentral({ bar_sell: "67950", silver_per_g: "46", confirm_typo: true })).status).toBe(200);
+    expect((await list("admin")).map((r) => [r.branch.code, r.silver_per_g, r.platinum_per_g])).toEqual([
+      ["00000", "46.00", "1000.00"],
+      ["00001", "46.00", "1000.00"],
+      ["00002", "46.00", "1000.00"],
+    ]);
+    expect((await putCentral({ bar_sell: "67950", platinum_per_g: null, confirm_typo: true })).status).toBe(200);
+    expect((await list("admin")).map((r) => [r.branch.code, r.source, r.silver_per_g, r.platinum_per_g])).toEqual([
+      ["00000", "central", "46.00", null],
+      ["00001", "branch", "46.00", null],
+      ["00002", "central", "46.00", null],
+    ]);
+    expect(await (await today("staff1")).json()).toMatchObject({
+      bar_sell: "70100.00",
+      silver_per_g: "46.00",
+      platinum_per_g: null,
+      source: "branch",
+    });
+  });
+
+  it("ราคาเฉพาะสาขาตั้งราคาต่อกรัมไม่ได้: PUT /today/branches/:id และ quote ที่มี branch_id + ราคาต่อกรัม = 400 ชี้ช่องนั้น (ล้างก็ไม่ได้) · สิทธิ์/สาขา/CSRF เหมือนเดิม · ไม่เขียนอะไร", async () => {
+    clock = new Date(`${PER_GRAM_DAY}T03:00:00Z`);
+    const writes = async () => ({
+      prices: await t.db.select().from(goldPrice).orderBy(goldPrice.id),
+      audits: await t.db.select().from(auditLog).orderBy(auditLog.id),
+    });
+    const before = await writes();
+    const cases: [Record<string, unknown>, "silver_per_g" | "platinum_per_g"][] = [
+      [{ bar_sell: "70100", silver_per_g: "45.00" }, "silver_per_g"],
+      [{ bar_sell: "70100", silver_per_g: null }, "silver_per_g"],
+      [{ bar_sell: "70100", silver_per_g: "" }, "silver_per_g"],
+      [{ bar_sell: "70100", platinum_per_g: "1000" }, "platinum_per_g"],
+      [{ bar_sell: "70100", platinum_per_g: null }, "platinum_per_g"],
+      [{ bar_sell: "70100", silver_per_g: "45", platinum_per_g: "1000", confirm_typo: true }, "silver_per_g"],
+    ];
+    for (const [body, field] of cases) {
+      const where = JSON.stringify(body);
+      const res = await put("mgr1", b1, body);
+      expect(res.status, `PUT ${where}`).toBe(400);
+      expect(await res.json(), `PUT ${where}`).toEqual({ error: BRANCH_ONLY, field });
+      const q = await quote({ ...body, branch_id: b1 });
+      expect(q.status, `quote ${where}`).toBe(400);
+      expect(await q.json(), `quote ${where}`).toEqual({ error: BRANCH_ONLY, field });
+    }
+    // ตัวเลข JSON ถูกปฏิเสธที่ชนิดก่อน (กฎ 1) — ยังชี้ช่องราคาต่อกรัม
+    const numeric = await put("mgr1", b1, { bar_sell: "70100", silver_per_g: 45 });
+    expect(numeric.status).toBe(400);
+    expect(await numeric.json()).toEqual({
+      error: "ต้องส่ง silver_per_g เป็นข้อความตัวเลข หรือ null เพื่อล้าง",
+      field: "silver_per_g",
+    });
+    // quote: branch_id ที่อ่านไม่ได้ กับที่ไม่มีอยู่จริง ได้คำตอบเหมือนกันทุกตัวอักษร (ไม่บอกว่าสาขามีอยู่)
+    const probe = async (branchId: string) => {
+      const res = await quote({ bar_sell: "70100", branch_id: branchId, silver_per_g: "45" });
+      return { status: res.status, body: await res.json() };
+    };
+    expect(await probe(b0)).toEqual(await probe(NO_UUID));
+
+    // สาขาอื่น / ไม่มีจริง / uuid ผิดรูป = 404 ก่อนดู body · role ที่ตั้งราคาไม่ได้ = 403 · ไม่ login = 401 · origin อื่น = 403
+    const perGramBody = { bar_sell: "70100", silver_per_g: "45" };
+    for (const [label, res, status, error] of [
+      ["mgr0 → 00001", await put("mgr0", b1, perGramBody), 404, "not found"],
+      ["admin1 → 00000", await put("admin1", b0, perGramBody), 404, "not found"],
+      ["mgr1 → ไม่มีจริง", await put("mgr1", NO_UUID, perGramBody), 404, "not found"],
+      ["mgr1 → uuid ผิดรูป", await put("mgr1", "not-a-uuid", perGramBody), 404, "not found"],
+      ["staff1 (ราคาต่อกรัมอย่างเดียว)", await put("staff1", b1, { silver_per_g: "45" }), 403, "forbidden"],
+      ["accounting", await put("acct", b0, perGramBody), 403, "forbidden"],
+      ["ไม่ login", await t.request(path(b1), { method: "PUT", body: perGramBody }), 401, "unauthorized"],
+      ["origin อื่น", await put("mgr1", b1, perGramBody, "https://evil.test"), 403, "forbidden origin"],
+    ] as const) {
+      expect(res.status, label).toBe(status);
+      expect(await res.json(), label).toEqual({ error });
+    }
+    expect(await writes()).toEqual(before);
+  });
+
+  it("แถวของสาขาที่มีราคาต่อกรัมเอง (ไม่มี endpoint เขียน — ใส่ตรงใน DB) ชนะราคากลางทีละช่อง · ตั้งราคาทองของสาขาไม่แตะราคาต่อกรัม · audit set/clear เก็บราคาต่อกรัม (R12)", async () => {
+    clock = new Date(`${PER_GRAM_DAY}T03:00:00Z`);
+    // ราคากลาง: เงิน 46.00 · แพลตตินั่ม 1,000.00
+    expect(
+      (await putCentral({ bar_sell: "67950", silver_per_g: "46", platinum_per_g: "1000", confirm_typo: true })).status,
+    ).toBe(200);
+    await t.db.insert(goldPrice).values({
+      branchId: b2,
+      date: PER_GRAM_DAY,
+      barSell: "68000",
+      barBuy: "67800",
+      jewelryBuy: "64410",
+      silverPerG: "47.00",
+    });
+    expect(await (await today("staff2")).json()).toEqual({
+      date: PER_GRAM_DAY,
+      bar_sell: "68000.00",
+      bar_buy: "67800.00",
+      jewelry_buy: "64410",
+      silver_per_g: "47.00", // ของสาขาเอง
+      platinum_per_g: "1000.00", // สาขาไม่มี → ของราคากลาง
+      diff: "200.00",
+      source: "branch",
+    });
+    expect((await list("admin")).map((r) => [r.branch.code, r.source, r.silver_per_g, r.platinum_per_g])).toEqual([
+      ["00000", "central", "46.00", "1000.00"],
+      ["00001", "branch", "46.00", "1000.00"],
+      ["00002", "branch", "47.00", "1000.00"],
+    ]);
+
+    // 68,050 − 200 = 67,850 × 0.95 = 64,457.50 → 64,458 · ห่างจาก 70,100 ที่ 00002 ใช้ 28 ก.ย. 2.9% (ไม่เกินเกณฑ์)
+    const set = await put("admin", b2, { bar_sell: "68050" });
+    expect(set.status).toBe(200);
+    expect(await set.json()).toEqual({
+      branch: ref(b2, "00002", "สาขา 3"),
+      bar_sell: "68050.00",
+      bar_buy: "67850.00",
+      jewelry_buy: "64458",
+      silver_per_g: "47.00",
+      platinum_per_g: "1000.00",
+      source: "branch",
+    });
+    const setAudit = (await branchAudits()).at(-1);
+    expect(setAudit?.action).toBe("gold_price.set_branch");
+    expect(setAudit?.diff).toEqual({
+      date: PER_GRAM_DAY,
+      branch: ref(b2, "00002", "สาขา 3"),
+      before: {
+        bar_sell: "68000.00",
+        bar_buy: "67800.00",
+        jewelry_buy: "64410.00",
+        silver_per_g: "47.00",
+        platinum_per_g: null,
+        set_by: null,
+      },
+      after: {
+        bar_sell: "68050.00",
+        bar_buy: "67850.00",
+        jewelry_buy: "64458.00",
+        silver_per_g: "47.00",
+        platinum_per_g: null,
+        set_by: ids.admin,
+      },
+      typo_warning_confirmed: false,
+    });
+
+    const removed = await del("admin", b2);
+    expect(removed.status).toBe(200);
+    expect(await removed.json()).toEqual({
+      branch: ref(b2, "00002", "สาขา 3"),
+      ...CENTRAL_GOLD,
+      silver_per_g: "46.00",
+      platinum_per_g: "1000.00",
+      source: "central",
+    });
+    const clearAudit = (await branchAudits()).at(-1);
+    expect(clearAudit?.action).toBe("gold_price.clear_branch");
+    expect(clearAudit?.diff).toEqual({
+      date: PER_GRAM_DAY,
+      branch: ref(b2, "00002", "สาขา 3"),
+      removed: {
+        bar_sell: "68050.00",
+        bar_buy: "67850.00",
+        jewelry_buy: "64458.00",
+        silver_per_g: "47.00",
+        platinum_per_g: null,
+        set_by: ids.admin,
+      },
+    });
   });
 });

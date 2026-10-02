@@ -231,6 +231,130 @@ describe("ตั้งราคาทองวันนี้ — role และ
   });
 });
 
+const SILVER = "ราคาเงิน (บาท/กรัม)";
+const PLATINUM = "ราคาแพลตตินั่ม (บาท/กรัม)";
+
+describe("ตั้งราคาทองวันนี้ — ราคาเงิน/แพลตตินั่มต่อกรัม (ราคากลาง)", () => {
+  it("เติมราคาของวันนี้ไว้ในช่อง · ไม่แตะ = ไม่ส่ง (API คงค่าเดิม ไม่ล้างราคาที่ตั้งไว้)", async () => {
+    const { api, user } = await openAs("manager", { "PUT /api/gold-price/today": () => json(SAVED) });
+    await waitFor(() => expect(screen.getByLabelText(SILVER)).toHaveValue("45.00"));
+    expect(screen.getByLabelText(PLATINUM)).toHaveValue("");
+    expect(screen.getByLabelText(SILVER)).toHaveAccessibleDescription(/ทุกสาขาใช้ราคานี้/);
+
+    await user.keyboard("70850{Enter}");
+    expect(await screen.findByText("บันทึกราคาทองวันนี้แล้ว")).toBeInTheDocument();
+    expect(putBodies(api)).toEqual([{ bar_sell: "70850" }]);
+  });
+
+  it("Tab ไปช่องราคาต่อกรัม → ส่งเฉพาะช่องที่เปลี่ยน ทั้ง quote และบันทึก · ล้างช่อง = null", async () => {
+    const { api, user } = await openAs("manager", {
+      "POST /api/gold-price/quote": ({ body }) =>
+        json({
+          ...QUOTE_70850,
+          ...(body && typeof body === "object" && "platinum_per_g" in body ? { platinum_per_g: "1200.00" } : {}),
+          ...(body && typeof body === "object" && "silver_per_g" in body ? { silver_per_g: null } : {}),
+        }),
+      "PUT /api/gold-price/today": () => json(SAVED),
+    });
+    await waitFor(() => expect(screen.getByLabelText(SILVER)).toHaveValue("45.00"));
+    await user.keyboard("70850");
+    await user.tab();
+    expect(screen.getByLabelText(SILVER)).toHaveFocus();
+    await user.clear(screen.getByLabelText(SILVER));
+    await user.tab();
+    expect(screen.getByLabelText(PLATINUM)).toHaveFocus();
+    await user.keyboard("1200");
+
+    // preview แสดงค่าที่เซิร์ฟเวอร์ตอบ (รูปมาตรฐาน) — ไม่ใช่ข้อความที่พิมพ์
+    await waitFor(() => expect(previewStatus()).toHaveTextContent("1,200.00"));
+    expect(previewStatus()).toHaveTextContent("ยังไม่ได้ตั้ง");
+    expect(api.callsTo("POST", "/api/gold-price/quote").at(-1)?.body).toEqual({
+      bar_sell: "70850",
+      silver_per_g: null,
+      platinum_per_g: "1200",
+    });
+
+    await user.keyboard("{Enter}");
+    expect(await screen.findByText("บันทึกราคาทองวันนี้แล้ว")).toBeInTheDocument();
+    expect(putBodies(api)).toEqual([{ bar_sell: "70850", silver_per_g: null, platinum_per_g: "1200" }]);
+  });
+
+  it("400 ที่ชี้ช่องราคาเงิน → ข้อความใต้ช่องนั้น + โฟกัสช่องนั้น (ไม่ใช่ error ของทั้งฟอร์ม)", async () => {
+    const message = "ราคาเงินต่อกรัมต้องเป็นตัวเลขมากกว่า 0";
+    const { api, user } = await openAs("manager", {
+      "PUT /api/gold-price/today": () => json({ error: message, field: "silver_per_g" }, 400),
+    });
+    await waitFor(() => expect(screen.getByLabelText(SILVER)).toHaveValue("45.00"));
+    await user.clear(screen.getByLabelText(SILVER));
+    await user.keyboard("0");
+    await user.click(screen.getByLabelText(LABEL));
+    await user.keyboard("70850{Enter}");
+
+    const silver = screen.getByLabelText(SILVER);
+    await waitFor(() => expect(silver).toHaveFocus());
+    expect(silver).toHaveAttribute("aria-invalid", "true");
+    expect(silver).toHaveAccessibleDescription(new RegExp(`^${message}`));
+    expect(screen.getByLabelText(LABEL)).not.toHaveAttribute("aria-invalid", "true");
+    expect(screen.queryByText("บันทึกราคาไม่สำเร็จ ลองใหม่อีกครั้ง")).not.toBeInTheDocument();
+    expect(putBodies(api)).toEqual([{ bar_sell: "70850", silver_per_g: "0" }]);
+  });
+
+  it("409 ที่มีหลายคำเตือน (ทอง · เงิน) → ยืนยันแล้วส่งซ้ำพร้อมราคาต่อกรัมชุดเดิม", async () => {
+    const warning = `${WARNING} · ราคาเงินห่างจากครั้งก่อน 12.2% (45 → 50.50) — ตรวจสอบก่อนบันทึก`;
+    const { api, user } = await openAs("manager", {
+      "PUT /api/gold-price/today": ({ body }) =>
+        confirmedTypo(body) ? json(SAVED) : json({ error: warning, field: "confirm_typo", warning }, 409),
+    });
+    await waitFor(() => expect(screen.getByLabelText(SILVER)).toHaveValue("45.00"));
+    await user.clear(screen.getByLabelText(SILVER));
+    await user.keyboard("50.50");
+    await user.click(screen.getByLabelText(LABEL));
+    await user.keyboard("70850{Enter}");
+
+    const dialog = await screen.findByRole("alertdialog", { name: "ยืนยันราคาทองวันนี้" });
+    expect(dialog).toHaveAccessibleDescription(warning);
+    await user.click(within(dialog).getByRole("button", { name: "ยืนยันบันทึกราคานี้" }));
+
+    expect(await screen.findByText("บันทึกราคาทองวันนี้แล้ว")).toBeInTheDocument();
+    expect(putBodies(api)).toEqual([
+      { bar_sell: "70850", silver_per_g: "50.50" },
+      { bar_sell: "70850", silver_per_g: "50.50", confirm_typo: true },
+    ]);
+  });
+
+  it("ยังไม่รู้ราคาของวันนี้ (โหลดไม่ได้) → ไม่ส่ง null ไปล้างราคา · ส่งเฉพาะช่องที่พิมพ์", async () => {
+    const { api, user } = await openAs("manager", {
+      "GET /api/gold-price/today": () => json({ error: "Internal Server Error" }, 500),
+      "PUT /api/gold-price/today": () => json(SAVED),
+    });
+    expect(screen.getByLabelText(SILVER)).toHaveValue("");
+    await user.keyboard("70850{Enter}");
+    expect(await screen.findByText("บันทึกราคาทองวันนี้แล้ว")).toBeInTheDocument();
+    expect(putBodies(api)).toEqual([{ bar_sell: "70850" }]);
+  });
+
+  it("การ์ดราคาที่ใช้อยู่: ราคาเงินต่อกรัม · แพลตตินั่มยังไม่ได้ตั้ง = บอกว่ารับซื้อไม่ได้", async () => {
+    await openAs("staff");
+    const card = screen.getByRole("region", { name: "ราคาที่สาขานี้ใช้เปิดบิลวันนี้" });
+
+    expect(await within(card).findByText("45.00")).toBeInTheDocument();
+    expect(within(card).getByText(SILVER)).toBeInTheDocument();
+    expect(within(card).getByText(PLATINUM).nextElementSibling).toHaveTextContent("ยังไม่ได้ตั้ง");
+    expect(card).toHaveTextContent(
+      "ยังไม่ได้ตั้งราคาแพลตตินั่มของวันนี้ — รับซื้อแพลตตินั่มไม่ได้จนกว่าผู้จัดการจะตั้งราคาที่ราคากลาง",
+    );
+  });
+
+  it("ตั้งครบทั้งสองโลหะ → ไม่มีข้อความเตือน", async () => {
+    await openAs("staff", {
+      "GET /api/gold-price/today": () => json({ ...GOLD_PRICE, platinum_per_g: "1200.00" }),
+    });
+    const card = screen.getByRole("region", { name: "ราคาที่สาขานี้ใช้เปิดบิลวันนี้" });
+    expect(await within(card).findByText("1,200.00")).toBeInTheDocument();
+    expect(card).not.toHaveTextContent("ยังไม่ได้ตั้ง");
+  });
+});
+
 describe("ตั้งราคาทองวันนี้ — กรอบราคาสมาคมเต็มแถวบน ไม่ซ้อนในการ์ดฟอร์ม", () => {
   it("กรอบมาก่อนฟอร์มใน DOM · เต็มแถว (lg:col-span-2) · หัวข้อเป็น h2 (ไม่ข้ามระดับจาก h1 ของหน้า)", async () => {
     await openAs("manager");

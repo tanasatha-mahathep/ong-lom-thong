@@ -4,6 +4,7 @@ import {
   formatBoardPrice,
   formatInteger,
   formatMoney,
+  formatPercent,
   formatThaiDate,
   formatThaiDateTime,
   formatWeight,
@@ -71,6 +72,21 @@ describe("formatInteger — ราคาทองรูปพรรณ (0 ตำ
   it("เศษครึ่งปัดขึ้น", () => {
     expect(formatInteger("64268.5")).toBe("64,269");
     expect(formatInteger("-0.5")).toBe("-1");
+  });
+});
+
+describe("formatPercent — ค่าบริสุทธิ์ / หัก % แบบบนใบรับซื้อ", () => {
+  it("ตัดศูนย์ท้ายจากรูปมาตรฐานของ API", () => {
+    expect(formatPercent("96.50")).toBe("96.5");
+    expect(formatPercent("92.55")).toBe("92.55");
+    expect(formatPercent("100.00")).toBe("100");
+    expect(formatPercent("3")).toBe("3");
+    expect(formatPercent("0")).toBe("0");
+  });
+
+  it("ค่าว่างแสดงขีด · ค่าที่ไม่ใช่ทศนิยมคืนตามเดิม", () => {
+    expect(formatPercent(null)).toBe(EMPTY);
+    expect(formatPercent("96,5")).toBe("96,5");
   });
 });
 

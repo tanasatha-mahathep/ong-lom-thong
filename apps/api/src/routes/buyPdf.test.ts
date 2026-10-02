@@ -1,4 +1,5 @@
 import { maskNationalId } from "@ong/core";
+import { type ReceiptData, renderReceiptHtml } from "@ong/core/receipt";
 import { auditLog, branch, buyLine, buyReceipt, customer, goldPrice, metal, stockMovement } from "@ong/db";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -42,6 +43,18 @@ const PNG_1X1 = new Uint8Array(
 const PHOTO_KEY = "photos/a/card.png";
 const enc = (s: string) => new TextEncoder().encode(s);
 
+/**
+ * ตารางรายการของใบรับซื้อใน HTML ที่ส่งให้ Gotenberg → ข้อความทุกช่องของทุกแถว (ชื่อรายการ · ปริมาณ · หน่วย · ราคาต่อหน่วย · ราคารวม)
+ * อ่านจาก markup ที่พิมพ์จริง ไม่เรียกตัวรวมแถวของ @ong/core ซ้ำ (ไม่ใช้โค้ดที่ถูกเทสต์เป็นเฉลย)
+ */
+function itemRows(html: string | undefined): string[][] {
+  const body = /<table class="items">[\s\S]*?<tbody>([\s\S]*?)<\/tbody>/.exec(html ?? "")?.[1];
+  if (body === undefined) throw new Error("ไม่พบตารางรายการในใบรับซื้อ");
+  return [...body.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map((tr) =>
+    [...(tr[1] ?? "").matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((td) => td[1] ?? ""),
+  );
+}
+
 interface Saved {
   id: string;
   doc_no: string;
@@ -68,7 +81,8 @@ async function seed(t: TestApp) {
   }
   const metals = Object.fromEntries((await t.db.select().from(metal)).map((m) => [m.code, m.id]));
   await t.db.insert(goldPrice).values([
-    { date: TODAY, barSell: "67850", barBuy: "67650", jewelryBuy: "64268" },
+    // เงินรับซื้อต่อกรัมตั้งที่ราคากลางเท่านั้น (ทุกสาขาใช้ร่วม) — ฐานของแถวเงิน
+    { date: TODAY, barSell: "67850", barBuy: "67650", jewelryBuy: "64268", silverPerG: "45.00" },
     { date: "2026-09-30", barSell: "67000", barBuy: "66800", jewelryBuy: "63460" },
   ]);
   // เปิดบิลได้เฉพาะสาขาที่ตั้งรหัสสาขาสรรพากรแล้ว (#53) — seed ตั้งให้สำนักงานใหญ่เท่านั้น
@@ -116,18 +130,22 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
     await t?.close();
   });
 
+  /**
+   * บิลตั้งต้น: ทอง 96.5% 5.860 ก. ไม่หัก — ราคาระบบคิดเอง (UAT 30 ก.ย. 2569) จากทองแท่งรับซื้อ 67,650 ของวันนี้:
+   * ⌊67650 × 0.0656 × 0.965 = 4282.5156⌋ = 4,282/ก. → ⌊4282 × 5.86 = 25,092.52⌋ = 25,092.00
+   */
   const save = async (over: Record<string, unknown> = {}, who = "staff") => {
     const res = await t.request("/api/buy", {
       cookie: s.cookies[who],
       body: {
         idempotency_key: `pdf-test-key-${String(++keySeq).padStart(6, "0")}`,
         customer_id: s.custA,
-        lines: [{ metal_id: s.metals.gold, weight_g: "5.860", amount: "20030" }],
-        payments: [{ method: "cash", amount: "20030" }],
+        lines: [{ metal_id: s.metals.gold, weight_g: "5.860", purity_percent: "96.5" }],
+        payments: [{ method: "cash", amount: "25092" }],
         ...over,
       },
     });
-    expect(res.status).toBe(201);
+    expect(res.status, await res.clone().text()).toBe(201);
     return (await res.json()) as Saved;
   };
   const row = async (id: string) => {
@@ -173,6 +191,9 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
     // ใบรับซื้อ: เลขบัตรเต็มบน PDF (R13) + ฟอนต์แนบ · สำเนาบัตร: รูปบัตรแนบเป็นไฟล์แยก
     const receiptCall = t.fake.calls.find((c) => c.trace === "RC6910-0001");
     expect(receiptCall?.html).toContain(ID_A);
+    // ชื่อรายการพิมพ์ค่าบริสุทธิ์ (หัก 0 ไม่พิมพ์ "หัก") · 25,092.00 ÷ 5.860 = 4,281.911… → 4,281.91
+    expect(itemRows(receiptCall?.html)).toEqual([["ทอง 96.5%", "5.860", "กรัม", "4,281.91", "25,092.00"]]);
+    expect(receiptCall?.html).toContain("สองหมื่นห้าพันเก้าสิบสองบาทถ้วน");
     expect(receiptCall?.files?.map((f) => f.name)).toEqual(["Sarabun-Regular.ttf", "Sarabun-Bold.ttf"]);
     const idcardCall = t.fake.calls.find((c) => c.trace === "RC6910-0001-idcard");
     expect(idcardCall?.html).toContain('src="card.png"');
@@ -294,7 +315,7 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
     expect(await t.storage.get(key)).toBeNull();
     expect(await t.pdf.retryDue({ olderThanMs: 0 })).toBe(0); // ลองซ้ำก็ไม่หาย — ไม่เปลือง Gotenberg
 
-    await t.db.update(buyLine).set({ amount: "20030.00" }).where(eq(buyLine.receiptId, bill.id));
+    await t.db.update(buyLine).set({ amount: "25092.00" }).where(eq(buyLine.receiptId, bill.id));
     expect(await t.pdf.archive(bill.id)).toMatchObject({ pdf_status: "invalid" }); // งานอัตโนมัติไม่แตะ invalid
     expect(await t.pdf.archive(bill.id, { manual: true })).toMatchObject({ pdf_status: "ready" });
   });
@@ -595,8 +616,9 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
         cookie: s.cookies.staff,
         body: {
           customer_id: s.custA,
-          lines: [{ metal_id: s.metals.gold, weight_g: "1.000", amount: "3000" }],
-          payments: [{ method: "cash", amount: "3000" }],
+          // ทอง 96.5% 1 ก.: ⌊67650 × 0.0656 × 0.965⌋ = 4,282
+          lines: [{ metal_id: s.metals.gold, weight_g: "1.000", purity_percent: "96.5" }],
+          payments: [{ method: "cash", amount: "4282" }],
         },
       }),
     );
@@ -685,8 +707,16 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
   });
 
   it("ยกเลิกบิลย้อนหลัง: กลับสต็อกลงวันที่ของบิล (ตรงกับรายงานยอดซื้อ) · ไฟล์ _void อยู่โฟลเดอร์เดือนของบิล (S1)", async () => {
+    // ราคาของวันบิล (ทองแท่งรับซื้อ 66,800) ไม่ใช่ของวันนี้: ⌊66800 × 0.0656 × 0.965 = 4228.7072⌋ = 4,228/ก.
+    // → ⌊4228 × 5.86 = 24,776.08⌋ = 24,776.00
     const bill = await save(
-      { customer_id: s.custC, date: "2026-09-30", time: "16:30", backdate_reason: "คีย์ย้อนหลังจากใบเขียนมือ" },
+      {
+        customer_id: s.custC,
+        date: "2026-09-30",
+        time: "16:30",
+        backdate_reason: "คีย์ย้อนหลังจากใบเขียนมือ",
+        payments: [{ method: "cash", amount: "24776" }],
+      },
       "manager",
     );
     await t.tasks.idle();
@@ -788,6 +818,234 @@ describe.skipIf(!available)("PDF เก็บถาวรของบิล (spe
     for (const input of seen) expect(input.html).toContain("ตัวอย่าง — ระบบทดสอบ ไม่ใช่ใบรับซื้อจริง");
   });
 
+  /** แถวของบิลตามที่ GET /api/buy/:id ส่ง (ราคาที่ระบบคิดติดแถวไว้ตรวจย้อนหลัง) */
+  interface DetailLine {
+    line_no: number;
+    metal: { code: string };
+    weight_g: string;
+    purity_percent: string | null;
+    deduct_percent: string | null;
+    base_price: string | null;
+    unit_price: string | null;
+    gross_amount: string | null;
+    amount: string;
+    price_per_g: string;
+  }
+  interface Detail {
+    total_weight: string;
+    total_amount: string;
+    lines: DetailLine[];
+    receipt: ReceiptData;
+  }
+  const detailOf = async (id: string) => {
+    const res = await get(`/${id}`, "staff");
+    expect(res.status).toBe(200);
+    return (await res.json()) as Detail;
+  };
+  const lineCells = (l: DetailLine) => [
+    l.line_no,
+    l.metal.code,
+    l.weight_g,
+    l.purity_percent,
+    l.deduct_percent,
+    l.base_price,
+    l.unit_price,
+    l.gross_amount,
+    l.amount,
+    l.price_per_g,
+  ];
+
+  it("ใบรับซื้อพิมพ์ % ต่อรายการ: รวมแถวตาม (โลหะ · ค่าบริสุทธิ์ · หัก %) · หัก 0 ไม่พิมพ์ “หัก” · ยอดตรงสูตร", async () => {
+    // ราคาตั้งต้น: ทองแท่งรับซื้อ 67,650 → ทอง 96.5% = ⌊67650 × 0.0656 × 0.965 = 4282.5156⌋ = 4,282/ก.
+    //             เงิน 45.00/ก. (ราคากลาง) → เงิน 92.5% = ⌊45 × 0.925 = 41.625⌋ = 41/ก.
+    // ทุกขั้นปัดลงเป็นบาทเต็ม: ยอดก่อนหัก = ⌊ราคา/ก. × กรัม⌋ · ยอดสุทธิ = ⌊ยอดก่อนหัก × (100 − หัก) ÷ 100⌋
+    const lines = [
+      // ⌊4282 × 10⌋ = 42,820 → ⌊42820 × 0.97 = 41535.4⌋ = 41,535 (หัก 1,285)
+      { metal_id: s.metals.gold, weight_g: "10", purity_percent: "96.5", deduct_percent: "3" },
+      // ⌊4282 × 5.86 = 25092.52⌋ = 25,092 · ไม่ส่งหัก % = 0
+      { metal_id: s.metals.gold, weight_g: "5.860", purity_percent: "96.5" },
+      // ⌊4282 × 2⌋ = 8,564 → ⌊8564 × 0.97 = 8307.08⌋ = 8,307 (หัก 257) — กลุ่มเดียวกับแถวแรก
+      { metal_id: s.metals.gold, weight_g: "2", purity_percent: "96.5", deduct_percent: "3" },
+      // ⌊41 × 271.56 = 11133.96⌋ = 11,133 · หัก null = 0
+      { metal_id: s.metals.silver, weight_g: "271.56", purity_percent: "92.5", deduct_percent: null },
+      // "96.50" กับหัก "0" = กลุ่มเดียวกับแถวที่สอง (รูปมาตรฐานเดียวกัน) · ⌊4282 × 1⌋ = 4,282
+      { metal_id: s.metals.gold, weight_g: "1.000", purity_percent: "96.50", deduct_percent: "0" },
+    ];
+    // Σ = 41,535 + 25,092 + 8,307 + 11,133 + 4,282 = 90,349.00 · Σกรัม = 10 + 5.86 + 2 + 271.56 + 1 = 290.420
+    const payments = [{ method: "cash", amount: "90349" }];
+
+    const quote = await t.request("/api/buy/quote", {
+      cookie: s.cookies.staff,
+      body: { customer_id: s.custC, lines, payments },
+    });
+    expect(quote.status).toBe(200);
+    const g = s.metals.gold;
+    const ag = s.metals.silver;
+    expect(await quote.json()).toMatchObject({
+      ok: true,
+      errors: [],
+      lines: [
+        {
+          index: 0,
+          metal_id: g,
+          weight_g: "10.000",
+          purity_percent: "96.50",
+          deduct_percent: "3",
+          base_price: "67650.00",
+          unit_price: "4282.00",
+          gross_amount: "42820.00",
+          deduct_amount: "1285.00",
+          amount: "41535.00",
+          price_per_g: "4153.50",
+        },
+        {
+          index: 1,
+          metal_id: g,
+          weight_g: "5.860",
+          purity_percent: "96.50",
+          deduct_percent: "0",
+          base_price: "67650.00",
+          unit_price: "4282.00",
+          gross_amount: "25092.00",
+          deduct_amount: "0.00",
+          amount: "25092.00",
+          price_per_g: "4281.91",
+        },
+        {
+          index: 2,
+          metal_id: g,
+          weight_g: "2.000",
+          purity_percent: "96.50",
+          deduct_percent: "3",
+          base_price: "67650.00",
+          unit_price: "4282.00",
+          gross_amount: "8564.00",
+          deduct_amount: "257.00",
+          amount: "8307.00",
+          price_per_g: "4153.50",
+        },
+        {
+          index: 3,
+          metal_id: ag,
+          weight_g: "271.560",
+          purity_percent: "92.50",
+          deduct_percent: "0",
+          base_price: "45.00",
+          unit_price: "41.00",
+          gross_amount: "11133.00",
+          deduct_amount: "0.00",
+          amount: "11133.00",
+          // 11,133 ÷ 271.56 = 40.99646… → 41.00
+          price_per_g: "41.00",
+        },
+        {
+          index: 4,
+          metal_id: g,
+          weight_g: "1.000",
+          purity_percent: "96.50",
+          deduct_percent: "0",
+          base_price: "67650.00",
+          unit_price: "4282.00",
+          gross_amount: "4282.00",
+          deduct_amount: "0.00",
+          amount: "4282.00",
+          price_per_g: "4282.00",
+        },
+      ],
+      total_weight: "290.420",
+      total_amount: "90349.00",
+      // 90,349 ÷ 290.42 = 311.0977… → 311.10
+      avg_price_per_g: "311.10",
+      paid: "90349.00",
+      balance: "0.00",
+    });
+
+    const bill = await save({ customer_id: s.custC, lines, payments });
+    await t.tasks.idle();
+    expect(await row(bill.id)).toMatchObject({ pdfStatus: "ready", totalAmount: "90349.00", totalWeight: "290.420" });
+
+    // ใบที่เก็บถาวร: 1 บรรทัดต่อ (โลหะ · บริสุทธิ์ · หัก %) ตามลำดับที่ปรากฏ · ราคาต่อหน่วย = Σราคา ÷ Σกรัม ปัดครึ่งขึ้น 2 ตำแหน่ง
+    const expectedRows = [
+      // 10 + 2 = 12.000 ก. · 41,535 + 8,307 = 49,842.00 · 49,842 ÷ 12 = 4,153.50
+      ["ทอง 96.5% หัก 3%", "12.000", "กรัม", "4,153.50", "49,842.00"],
+      // 5.86 + 1 = 6.860 ก. · 25,092 + 4,282 = 29,374.00 · 29,374 ÷ 6.86 = 4,281.924… → 4,281.92
+      ["ทอง 96.5%", "6.860", "กรัม", "4,281.92", "29,374.00"],
+      ["เงิน 92.5%", "271.560", "กรัม", "41.00", "11,133.00"],
+    ];
+    const html = t.fake.calls.find((c) => c.trace === bill.doc_no)?.html;
+    expect(itemRows(html)).toEqual(expectedRows);
+    expect(html).toContain("เก้าหมื่นสามร้อยสี่สิบเก้าบาทถ้วน"); // 90,349.00
+    expect(html).not.toContain("หัก 0%");
+
+    // GET /api/buy/:id: ราคาที่ระบบคิดติดแถวไว้ (รูปเดียวกับ quote)
+    const detail = await detailOf(bill.id);
+    expect(detail).toMatchObject({ total_weight: "290.420", total_amount: "90349.00" });
+    expect(detail.lines.map(lineCells)).toEqual([
+      [1, "gold", "10.000", "96.50", "3", "67650.00", "4282.00", "42820.00", "41535.00", "4153.50"],
+      [2, "gold", "5.860", "96.50", "0", "67650.00", "4282.00", "25092.00", "25092.00", "4281.91"],
+      [3, "gold", "2.000", "96.50", "3", "67650.00", "4282.00", "8564.00", "8307.00", "4153.50"],
+      [4, "silver", "271.560", "92.50", "0", "45.00", "41.00", "11133.00", "11133.00", "41.00"],
+      [5, "gold", "1.000", "96.50", "0", "67650.00", "4282.00", "4282.00", "4282.00", "4282.00"],
+    ]);
+    // ใบบนจอ (receipt ของ GET) ได้ % ของทุกแถวไปพิมพ์เอง แล้วพิมพ์แถวเดียวกับ PDF ทุกตัวอักษร
+    // % เทียบแบบตัดศูนย์ท้าย — ใบได้ค่าตามสเกลของคอลัมน์ (numeric(6,3) / (5,2)) จึงไม่ผูกกับจำนวนศูนย์
+    const pct = (v: string | null | undefined) => v?.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "") ?? null;
+    expect(
+      detail.receipt.lines.map((l) => [l.metalName, l.weightG, l.amount, pct(l.purityPercent), pct(l.deductPercent)]),
+    ).toEqual([
+      ["ทอง", "10.000", "41535.00", "96.5", "3"],
+      ["ทอง", "5.860", "25092.00", "96.5", "0"],
+      ["ทอง", "2.000", "8307.00", "96.5", "3"],
+      ["เงิน", "271.560", "11133.00", "92.5", "0"],
+      ["ทอง", "1.000", "4282.00", "96.5", "0"],
+    ]);
+    expect(itemRows(renderReceiptHtml(detail.receipt))).toEqual(expectedRows);
+  });
+
+  it("บิลก่อนมีค่าบริสุทธิ์ (purity/deduct เป็น null) พิมพ์ชื่อโลหะอย่างเดียว · รวมตามโลหะเหมือนเดิม", async () => {
+    t.fake.failNext(1); // ยังไม่มีไฟล์ — จะพิมพ์หลังทำแถวให้เป็นแบบเก่า
+    // ⌊4282 × 5.86⌋ = 25,092 · ทอง 90%: ⌊67650 × 0.0656 × 0.9 = 3994.056⌋ = 3,994/ก. × 1 = 3,994 · รวม 29,086.00
+    const bill = await save({
+      customer_id: s.custC,
+      lines: [
+        { metal_id: s.metals.gold, weight_g: "5.860", purity_percent: "96.5" },
+        { metal_id: s.metals.gold, weight_g: "1.000", purity_percent: "90" },
+      ],
+      payments: [{ method: "cash", amount: "29086" }],
+    });
+    await t.tasks.idle();
+    expect((await row(bill.id)).pdfStatus).toBe("failed");
+    // แถวที่บันทึกก่อน UAT 30 ก.ย. 2569: ราคาพิมพ์เอง ไม่มีค่าบริสุทธิ์/หัก %/ราคาที่ระบบคิด
+    await t.db
+      .update(buyLine)
+      .set({
+        purityPercent: null,
+        deductPercent: null,
+        basePrice: null,
+        assessedPricePerG: null,
+        assessmentAmount: null,
+      })
+      .where(eq(buyLine.receiptId, bill.id));
+
+    expect(await t.pdf.archive(bill.id, { manual: true })).toMatchObject({ pdf_status: "ready" });
+    const html = t.fake.calls.filter((c) => c.trace === bill.doc_no).at(-1)?.html;
+    // 5.86 + 1 = 6.860 ก. · 29,086 ÷ 6.86 = 4,239.941… → 4,239.94 — แถวเดียวแบบใบจริง RC6909-0010
+    expect(itemRows(html)).toEqual([["ทอง", "6.860", "กรัม", "4,239.94", "29,086.00"]]);
+    expect(html).toContain("สองหมื่นเก้าพันแปดสิบหกบาทถ้วน");
+    expect(html).not.toContain("%</td>");
+
+    const detail = await detailOf(bill.id);
+    expect(detail.lines.map(lineCells)).toEqual([
+      [1, "gold", "5.860", null, null, null, null, null, "25092.00", "4281.91"],
+      [2, "gold", "1.000", null, null, null, null, null, "3994.00", "3994.00"],
+    ]);
+    expect(detail.receipt.lines.map((l) => [l.metalName, l.purityPercent, l.deductPercent])).toEqual([
+      ["ทอง", null, null],
+      ["ทอง", null, null],
+    ]);
+    expect(itemRows(renderReceiptHtml(detail.receipt))).toEqual([["ทอง", "6.860", "กรัม", "4,239.94", "29,086.00"]]);
+  });
+
   it("ไฟล์ที่เก็บไม่เคยถูกเขียนซ้ำ (ทุก key ถูก PUT ครั้งเดียว)", () => {
     const pdfPuts = puts.filter((k) => k.startsWith("receipts/") || k.startsWith("idcards/"));
     expect(pdfPuts.length).toBeGreaterThan(5);
@@ -802,9 +1060,19 @@ const gotenberg = available && (await gotenbergAvailable());
 describe.skipIf(!gotenberg)("PDF จริงผ่าน Gotenberg — บันทึกบิล → ใบรับซื้อ + สำเนาบัตรภาษาไทย", () => {
   let t: TestApp;
   let s: Awaited<ReturnType<typeof seed>>;
+  /** HTML ที่ส่งเข้า Gotenberg จริง (renderer จริงห่อด้วยตัวจด) — api ไม่มีตัวดึงข้อความจาก PDF · ข้อความใน PDF ตรวจใน e2e */
+  const sent: HtmlToPdfInput[] = [];
 
   beforeAll(async () => {
-    t = await startTestApp({ now: () => NOW, pdfTasks: "auto", renderer: createGotenbergClient(TEST_GOTENBERG) });
+    const real = createGotenbergClient(TEST_GOTENBERG);
+    const recording: PdfRenderer = {
+      htmlToPdf(input) {
+        sent.push(input);
+        return real.htmlToPdf(input);
+      },
+      health: () => real.health(),
+    };
+    t = await startTestApp({ now: () => NOW, pdfTasks: "auto", renderer: recording });
     s = await seed(t);
   });
   afterAll(async () => {
@@ -818,15 +1086,24 @@ describe.skipIf(!gotenberg)("PDF จริงผ่าน Gotenberg — บั�
         idempotency_key: "real-gotenberg-key-000001",
         customer_id: s.custA,
         lines: [
-          { metal_id: s.metals.gold, weight_g: "5.860", amount: "20030" },
-          { metal_id: s.metals.silver, weight_g: "100.000", amount: "2500.50" },
+          // ⌊67650 × 0.0656 × 0.965⌋ = 4,282/ก. → ⌊4282 × 5.86⌋ = 25,092 → หัก 3%: ⌊25092 × 0.97 = 24339.24⌋ = 24,339
+          { metal_id: s.metals.gold, weight_g: "5.860", purity_percent: "96.5", deduct_percent: "3" },
+          // เงิน 45.00/ก. × 92.5% = ⌊41.625⌋ = 41/ก. → ⌊41 × 271.56 = 11133.96⌋ = 11,133
+          { metal_id: s.metals.silver, weight_g: "271.560", purity_percent: "92.5" },
         ],
-        payments: [{ method: "cash", amount: "22530.50" }],
+        payments: [{ method: "cash", amount: "35472" }], // 24,339 + 11,133
       },
     });
-    expect(res.status).toBe(201);
-    const { id } = (await res.json()) as Saved;
+    expect(res.status, await res.clone().text()).toBe(201);
+    const { id, doc_no } = (await res.json()) as Saved;
     await t.tasks.idle();
+    const html = sent.find((c) => c.trace === doc_no)?.html;
+    // 24,339 ÷ 5.86 = 4,153.412… → 4,153.41 · 11,133 ÷ 271.56 = 40.996… → 41.00
+    expect(itemRows(html)).toEqual([
+      ["ทอง 96.5% หัก 3%", "5.860", "กรัม", "4,153.41", "24,339.00"],
+      ["เงิน 92.5%", "271.560", "กรัม", "41.00", "11,133.00"],
+    ]);
+    expect(html).toContain("สามหมื่นห้าพันสี่ร้อยเจ็ดสิบสองบาทถ้วน"); // 35,472.00
 
     const receipt = await t.request(`/api/buy/${id}/pdf`, { cookie: s.cookies.staff });
     expect(receipt.status).toBe(200);

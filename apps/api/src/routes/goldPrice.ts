@@ -5,6 +5,7 @@ import { type AppEnv, apiError, requireAnyBranch, requireRole, requireSession } 
 import { type BranchRef, currentBranch, forUser } from "../lib/scope";
 import {
   GoldPriceInputError,
+  type PerGramInput,
   type TodayPrice,
   clearBranchPrice,
   loadGoldSetting,
@@ -25,13 +26,22 @@ import {
 } from "../services/goldReferenceHistory";
 
 // เงินรับเป็น string เท่านั้น — ตัวเลข JSON (float) ถูกปฏิเสธ (CLAUDE.md กฎ 1)
+/**
+ * ราคารับซื้อต่อกรัมของเงิน/แพลตตินั่ม (UAT 30 ก.ย. 2569) — ตั้งที่ราคากลางเท่านั้น ทุกสาขาใช้ร่วม
+ * ไม่ส่ง = คงค่าเดิมของวันนี้ · null หรือ "" = ล้าง (วันนี้รับซื้อโลหะนั้นไม่ได้) · ข้อความตัวเลข = ตั้งใหม่
+ */
+const perGramText = z.string().max(32).nullable().optional();
 const QuoteBody = z.object({
   bar_sell: z.string(),
   /** ใส่เมื่อกำลังตั้งราคาเฉพาะสาขา — คำเตือนเทียบราคาที่สาขานั้นใช้ครั้งก่อน (เหมือนตอนบันทึก) */
   branch_id: z.string().max(64).nullish(),
+  silver_per_g: perGramText,
+  platinum_per_g: perGramText,
 });
 const SetBody = z.object({
   bar_sell: z.string(),
+  silver_per_g: perGramText,
+  platinum_per_g: perGramText,
   confirm_typo: z.boolean().optional(),
   /**
    * ผู้จัดการกด "ใช้ราคาสมาคมเป็นค่าเริ่มต้น" ก่อนบันทึก — ประกาศที่ browser เติมมา (เป็นคำอ้าง ไม่ใช่ข้อเท็จจริง)
@@ -61,6 +71,14 @@ const DAYS_ERROR = apiError(`days ต้องเป็นจำนวนเต�
 const BRANCH_ID_ERROR = apiError("branch_id ไม่ถูกต้อง", "branch_id");
 const CONFIRM_TYPO_ERROR = apiError("confirm_typo ต้องเป็นจริงหรือเท็จ", "confirm_typo");
 const FROM_REFERENCE_ERROR = apiError("from_reference ต้องมี announced_at และ round ของประกาศ", "from_reference");
+const perGramError = (field: "silver_per_g" | "platinum_per_g") =>
+  apiError(`ต้องส่ง ${field} เป็นข้อความตัวเลข หรือ null เพื่อล้าง`, field);
+/** ราคาต่อกรัมตั้งได้ที่ราคากลางเท่านั้น — ส่งมากับราคาเฉพาะสาขา = 400 (ไม่ทิ้งเงียบ ๆ) */
+const branchPerGramError = (body: { silver_per_g?: unknown; platinum_per_g?: unknown }) => {
+  const field =
+    body.silver_per_g !== undefined ? "silver_per_g" : body.platinum_per_g !== undefined ? "platinum_per_g" : null;
+  return field ? apiError("ราคาเงิน/แพลตตินั่มต่อกรัมตั้งได้ที่ราคากลางเท่านั้น", field) : null;
+};
 
 /**
  * ช่องที่ผิดจริงของ SetBody (F5) — zod คืน issue ของ bar_sell ก่อนเสมอถ้าทั้งคู่ผิด (ลำดับตาม schema)
@@ -70,6 +88,7 @@ const setBodyError = (e: z.ZodError) => {
   const field = e.issues[0]?.path[0];
   if (field === "confirm_typo") return CONFIRM_TYPO_ERROR;
   if (field === "from_reference") return FROM_REFERENCE_ERROR;
+  if (field === "silver_per_g" || field === "platinum_per_g") return perGramError(field);
   return BAR_SELL_ERROR;
 };
 
@@ -102,6 +121,8 @@ const toJson = (p: TodayPrice, diff: string) => ({
   bar_sell: p.barSell,
   bar_buy: p.barBuy,
   jewelry_buy: p.jewelryBuy,
+  silver_per_g: p.silverPerG,
+  platinum_per_g: p.platinumPerG,
   diff,
   source: p.source,
 });
@@ -112,7 +133,15 @@ const toBranchJson = (b: BranchRef, p: TodayPrice | null) => ({
   bar_sell: p?.barSell ?? null,
   bar_buy: p?.barBuy ?? null,
   jewelry_buy: p?.jewelryBuy ?? null,
+  silver_per_g: p?.silverPerG ?? null,
+  platinum_per_g: p?.platinumPerG ?? null,
   source: p?.source ?? null,
+});
+
+/** ราคาต่อกรัมจาก body → อินพุตของ quoteGoldPrice (ไม่ส่ง = undefined คงค่าเดิม) */
+const perGramOf = (b: { silver_per_g?: string | null; platinum_per_g?: string | null }): PerGramInput => ({
+  silverPerG: b.silver_per_g,
+  platinumPerG: b.platinum_per_g,
 });
 
 /**
@@ -162,26 +191,37 @@ export const goldPriceRoutes = new Hono<AppEnv>()
   .post("/quote", async (c) => {
     const body = QuoteBody.safeParse(await c.req.json().catch(() => null));
     if (!body.success) {
-      const onBranch = body.error.issues[0]?.path[0] === "branch_id";
-      return c.json(onBranch ? BRANCH_ID_ERROR : BAR_SELL_ERROR, 400);
+      const field = body.error.issues[0]?.path[0];
+      if (field === "silver_per_g" || field === "platinum_per_g") return c.json(perGramError(field), 400);
+      return c.json(field === "branch_id" ? BRANCH_ID_ERROR : BAR_SELL_ERROR, 400);
     }
     let branchId: string | null = null;
     if (body.data.branch_id != null) {
+      const perGram = branchPerGramError(body.data);
+      if (perGram) return c.json(perGram, 400);
       const readable = await forUser(c.var.db, c.var.viewer);
       const target = readable.find((b) => b.id === body.data.branch_id);
       if (!target) return c.json(apiError("not found", "branch_id"), 404);
       branchId = target.id;
     }
     try {
-      const q = await quoteGoldPrice(c.var.db, body.data.bar_sell, businessDate(c.var.now()), branchId);
+      const q = await quoteGoldPrice(
+        c.var.db,
+        body.data.bar_sell,
+        businessDate(c.var.now()),
+        branchId,
+        perGramOf(body.data),
+      );
       return c.json({
         bar_sell: q.barSell,
         bar_buy: q.barBuy,
         jewelry_buy: q.jewelryBuy,
+        ...(q.silverPerG === undefined ? {} : { silver_per_g: q.silverPerG }),
+        ...(q.platinumPerG === undefined ? {} : { platinum_per_g: q.platinumPerG }),
         ...(q.warning ? { warning: q.warning } : {}),
       });
     } catch (e) {
-      if (e instanceof GoldPriceInputError) return c.json(apiError(e.message, "bar_sell"), 400);
+      if (e instanceof GoldPriceInputError) return c.json(apiError(e.message, e.field), 400);
       throw e;
     }
   })
@@ -191,7 +231,7 @@ export const goldPriceRoutes = new Hono<AppEnv>()
     if (!body.success) return c.json(setBodyError(body.error), 400);
     const date = businessDate(c.var.now());
     try {
-      const q = await quoteGoldPrice(c.var.db, body.data.bar_sell, date);
+      const q = await quoteGoldPrice(c.var.db, body.data.bar_sell, date, null, perGramOf(body.data));
       if (q.warning && !body.data.confirm_typo) {
         return c.json({ ...apiError(q.warning, "confirm_typo"), warning: q.warning }, 409);
       }
@@ -201,7 +241,7 @@ export const goldPriceRoutes = new Hono<AppEnv>()
       const setting = await loadGoldSetting(c.var.db);
       return c.json(toJson(price as TodayPrice, setting.diff));
     } catch (e) {
-      if (e instanceof GoldPriceInputError) return c.json(apiError(e.message, "bar_sell"), 400);
+      if (e instanceof GoldPriceInputError) return c.json(apiError(e.message, e.field), 400);
       throw e;
     }
   })
@@ -212,6 +252,8 @@ export const goldPriceRoutes = new Hono<AppEnv>()
     if (!target) return c.json(apiError("not found"), 404);
     const body = SetBody.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json(setBodyError(body.error), 400);
+    const perGram = branchPerGramError(body.data);
+    if (perGram) return c.json(perGram, 400);
     const date = businessDate(c.var.now());
     try {
       const q = await quoteGoldPrice(c.var.db, body.data.bar_sell, date, target.id);
@@ -222,7 +264,7 @@ export const goldPriceRoutes = new Hono<AppEnv>()
       await setBranchPrice(c.var.db, date, target, q, c.var.viewer.userId, !!q.warning, reference);
       return c.json(toBranchJson(target, await priceForBranch(c.var.db, date, target.id)));
     } catch (e) {
-      if (e instanceof GoldPriceInputError) return c.json(apiError(e.message, "bar_sell"), 400);
+      if (e instanceof GoldPriceInputError) return c.json(apiError(e.message, e.field), 400);
       throw e;
     }
   })

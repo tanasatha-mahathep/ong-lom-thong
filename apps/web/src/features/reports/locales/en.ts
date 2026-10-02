@@ -71,7 +71,7 @@ export default {
       branch: "Branch",
       customer: "Customer",
       items: "Items",
-      itemLine: "{{metal}} {{grams}} g · {{amount}} baht",
+      itemLine: "{{item}} {{grams}} g · {{amount}} baht",
       weight: "Weight (g)",
       amount: "Amount (baht)",
       createdBy: "Recorded by",

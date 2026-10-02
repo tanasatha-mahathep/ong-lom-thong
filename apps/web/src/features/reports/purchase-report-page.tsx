@@ -483,14 +483,15 @@ function BillRows({ rows }: { rows: PurchaseRow[] }) {
       column.display({
         id: "items",
         header: t("purchase.rows.items"),
+        // ป้ายเดียวกับบนใบรับซื้อ ("ทอง 96.5% หัก 3%") — ชิ้นที่ % ต่างกันแยกบรรทัด · ป้ายไม่ซ้ำกันในบิลเดียว (API รวมกลุ่มแล้ว)
         cell: (info) => (
           <ul className="grid gap-0.5">
-            {info.row.original.metals.map((metal) => (
-              <li key={metal.metal_code} className="whitespace-nowrap tabular-nums">
+            {info.row.original.items.map((item) => (
+              <li key={item.label} className="whitespace-nowrap tabular-nums">
                 {t("purchase.rows.itemLine", {
-                  metal: metal.name_th,
-                  grams: formatWeight(metal.grams),
-                  amount: formatMoney(metal.amount),
+                  item: item.label,
+                  grams: formatWeight(item.grams),
+                  amount: formatMoney(item.amount),
                 })}
               </li>
             ))}

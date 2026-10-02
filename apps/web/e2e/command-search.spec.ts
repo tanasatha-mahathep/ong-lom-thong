@@ -47,14 +47,24 @@ interface SavedBill {
   doc_no: string;
 }
 
-/** บิลเงินสดหนึ่งรายการ (ทอง 5.86 g = 20,030 บาท ที่ราคา 67,850) ในสาขาปัจจุบันของ session */
-function saveBill(request: APIRequestContext, origin: string, customerId: string, metalId: string, key: string) {
+/**
+ * บิลเงินสดหนึ่งรายการ (ทอง 96.5% 5.86 g ไม่หัก) ในสาขาปัจจุบันของ session — ราคาเซิร์ฟเวอร์คิดจากราคาของวัน
+ * จึงถาม quote ก่อน แล้วจ่ายเต็มยอดที่เซิร์ฟเวอร์ตอบ (เทสต์ไม่คิดเงินเอง)
+ */
+async function saveBill(request: APIRequestContext, origin: string, customerId: string, metalId: string, key: string) {
+  const lines = [{ metal_id: metalId, weight_g: "5.86", purity_percent: "96.5", deduct_percent: "0" }];
+  const quote = await request.post("/api/buy/quote", {
+    headers: { origin },
+    data: { customer_id: customerId, lines, payments: [] },
+  });
+  expect(quote.ok(), `quote: HTTP ${quote.status()}`).toBeTruthy();
+  const { total_amount } = (await quote.json()) as { total_amount: string };
   return request.post("/api/buy", {
     headers: { origin },
     data: {
       customer_id: customerId,
-      lines: [{ metal_id: metalId, weight_g: "5.86", amount: "20030" }],
-      payments: [{ method: "cash", amount: "20030" }],
+      lines,
+      payments: [{ method: "cash", amount: total_amount }],
       full_tax: false,
       idempotency_key: key,
     },

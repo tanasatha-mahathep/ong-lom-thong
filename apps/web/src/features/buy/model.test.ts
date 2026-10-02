@@ -31,7 +31,7 @@ const CUSTOMER: CustomerListItem = {
 const withBill = (patch: Partial<BuyState> = {}): BuyState => ({
   ...initialBuyState,
   customer: CUSTOMER,
-  lines: [{ key: "l1", metal_id: "gold", weight_g: "5.86", amount: "20,030" }],
+  lines: [{ key: "l1", metal_id: "gold", purity_percent: "96.5", deduct_percent: "3", weight_g: "5.86" }],
   payments: [
     { key: "p1", method: "cash", bank: "ค้างจากโอน", amount: "20000" },
     { key: "p2", method: "transfer", bank: " กสิกรไทย ", amount: "30" },
@@ -56,10 +56,10 @@ const quote = (patch: Partial<Quote> = {}): Quote => ({
 });
 
 describe("buildQuoteBody", () => {
-  it("sends typed numbers as text, a bank only for transfers, and no date outside backdating", () => {
+  it("sends typed numbers as text (no price — the server computes it), a bank only for transfers, no date", () => {
     expect(buildQuoteBody(withBill())).toEqual({
       customer_id: "c-1",
-      lines: [{ metal_id: "gold", weight_g: "5.86", amount: "20,030" }],
+      lines: [{ metal_id: "gold", weight_g: "5.86", purity_percent: "96.5", deduct_percent: "3" }],
       payments: [
         { method: "cash", amount: "20000" },
         { method: "transfer", bank: "กสิกรไทย", amount: "30" },
@@ -171,27 +171,48 @@ describe("backdate", () => {
 });
 
 describe("entry rows", () => {
-  it("clears the entry after an add but keeps the metal and anything typed meanwhile", () => {
-    const entry = { metal_id: "nak", weight_g: "1", amount: "100" };
-    const s = { ...initialBuyState, lineEntry: entry };
-    const added = buyReducer(s, { type: "lineAdded", line: { key: "k", ...entry }, entry });
-    expect(added.lineEntry).toEqual({ metal_id: "nak", weight_g: "", amount: "" });
-    const typing = { ...s, lineEntry: { ...entry, weight_g: "12" } };
-    expect(buyReducer(typing, { type: "lineAdded", line: { key: "k", ...entry }, entry }).lineEntry.weight_g).toBe(
-      "12",
-    );
+  const entry = { metal_id: "nak", purity_percent: "90", deduct_percent: "2", weight_g: "1" };
+  const LINE_FIELDS = ["metal_id", "purity_percent", "deduct_percent", "weight_g"] as const;
+
+  it("starts with no deduction and an empty purity", () => {
+    expect(initialBuyState.lineEntry).toEqual({ metal_id: "", purity_percent: "", deduct_percent: "0", weight_g: "" });
   });
 
-  it("maps a server error of the new row to its entry field", () => {
+  it("clears purity and weight and resets the deduction after an add, but keeps the metal and anything typed meanwhile", () => {
+    const s = { ...initialBuyState, lineEntry: entry };
+    const added = buyReducer(s, { type: "lineAdded", line: { key: "k", ...entry }, entry });
+    expect(added.lines).toHaveLength(1);
+    expect(added.lineEntry).toEqual({ metal_id: "nak", purity_percent: "", deduct_percent: "0", weight_g: "" });
+    const typing = { ...s, lineEntry: { ...entry, purity_percent: "75" } };
+    expect(buyReducer(typing, { type: "lineAdded", line: { key: "k", ...entry }, entry }).lineEntry).toEqual({
+      ...entry,
+      purity_percent: "75",
+    });
+  });
+
+  it("Esc clears the row being typed: purity and weight empty, deduction back to 0, metal kept", () => {
+    const s = { ...initialBuyState, lineEntry: entry, lineError: { field: "weight_g" as const, message: "x" } };
+    const cleared = buyReducer(s, { type: "lineEntryCleared" });
+    expect(cleared.lineEntry).toEqual({ metal_id: "nak", purity_percent: "", deduct_percent: "0", weight_g: "" });
+    expect(cleared.lineError).toBeNull();
+  });
+
+  it("maps a server error of the new row to its entry field, the first one in typing order", () => {
     const errors = [
       { field: "customer_id", message: "ต้องระบุลูกค้าก่อนบันทึก" },
-      { field: "lines.2.amount", message: "ราคาเกิน 99,999,999.99 บาท — ตรวจตัวเลขอีกครั้ง" },
+      // เซิร์ฟเวอร์ตรวจน้ำหนักก่อนค่าบริสุทธิ์ — แต่พนักงานกรอกค่าบริสุทธิ์ก่อน จึงชี้ช่องนั้นก่อน
+      { field: "lines.2.weight_g", message: "น้ำหนักต้องมากกว่า 0" },
+      { field: "lines.2.purity_percent", message: "กรุณากรอกค่าบริสุทธิ์ (%)" },
     ];
-    expect(entryErrorFrom(errors, "lines", 2, ["metal_id", "weight_g", "amount"])).toEqual({
-      field: "amount",
-      message: "ราคาเกิน 99,999,999.99 บาท — ตรวจตัวเลขอีกครั้ง",
+    expect(entryErrorFrom(errors, "lines", 2, LINE_FIELDS)).toEqual({
+      field: "purity_percent",
+      message: "กรุณากรอกค่าบริสุทธิ์ (%)",
     });
-    expect(entryErrorFrom(errors, "lines", 1, ["metal_id", "weight_g", "amount"])).toBeNull();
+    expect(entryErrorFrom(errors.slice(0, 2), "lines", 2, LINE_FIELDS)).toEqual({
+      field: "weight_g",
+      message: "น้ำหนักต้องมากกว่า 0",
+    });
+    expect(entryErrorFrom(errors, "lines", 1, LINE_FIELDS)).toBeNull();
   });
 });
 
@@ -238,7 +259,8 @@ describe("quote helpers", () => {
   it("sends focus to the field that needs fixing", () => {
     expect(focusTargetForField("customer_id", false)).toBe("idBox");
     expect(focusTargetForField("customer_id", true)).toBe("editCustomer");
-    expect(focusTargetForField("lines.0.amount", true)).toBe("weight");
+    expect(focusTargetForField("lines", true)).toBe("purity");
+    expect(focusTargetForField("lines.0.purity_percent", true)).toBe("purity");
     expect(focusTargetForField("payments.1.bank", true)).toBe("bank");
     expect(focusTargetForField("payments", true)).toBe("paymentAmount");
     expect(focusTargetForField("backdate_reason", true)).toBe("backdateReason");

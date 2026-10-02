@@ -22,7 +22,15 @@ import { canSetGoldPrice } from "@/lib/nav";
 import { goldPriceTodayQueryOptions, goldReferenceQueryOptions, useMe } from "@/lib/queries";
 import { BranchPricesCard } from "./branch-prices";
 import { useTranslation } from "./i18n";
-import { PriceFormError, PriceInputField, PriceList, QuotePreview, TypoConfirmDialog } from "./price-form";
+import {
+  PerGramInputs,
+  PerGramMissingNote,
+  PriceFormError,
+  PriceInputField,
+  PriceList,
+  QuotePreview,
+  TypoConfirmDialog,
+} from "./price-form";
 import { saveGoldPrice } from "./queries";
 import { ReferencePricePanel } from "./reference-price";
 import { usePriceForm } from "./use-price-form";
@@ -61,6 +69,7 @@ function ManagersOnlyNotice() {
 
 /**
  * ราคากลางของวัน: พิมพ์ → quote สดจากเซิร์ฟเวอร์ → Enter บันทึก
+ * ราคาเงิน/แพลตตินั่มต่อกรัม (ไม่บังคับ) ตั้งได้ที่นี่ที่เดียว — เติมราคาของวันนี้ไว้ให้ · ส่งเฉพาะช่องที่เปลี่ยน
  * ด่านกันพิมพ์ผิด (409) → AlertDialog โฟกัสที่ "กลับไปแก้ไข" ก่อน — Enter ซ้ำโดยไม่ได้อ่านจึงไม่ผ่านด่าน
  * ราคาสมาคม (อ้างอิง): ปุ่มเติมค่าเริ่มต้น (ไม่บันทึก) · วันนี้ยังไม่มีราคา → เติมให้เองครั้งเดียว (ยกเว้นประกาศเก่า)
  * — ระบบไม่ตั้งราคาร้านเอง ผู้จัดการต้องกดบันทึก
@@ -76,6 +85,13 @@ function SetPriceCard() {
   const form = usePriceForm({
     inputRef,
     currentReference: reference ?? null,
+    // ราคาต่อกรัมของวันนี้ — สาขาไม่มีของตัวเอง (API ตั้งได้ที่ราคากลางเท่านั้น) ค่าที่ GET /today ตอบจึงเป็นราคากลาง
+    perGram: {
+      current:
+        todayPrice === undefined
+          ? undefined
+          : { silver_per_g: todayPrice?.silver_per_g ?? null, platinum_per_g: todayPrice?.platinum_per_g ?? null },
+    },
     save: saveGoldPrice,
     onSaved: async (saved) => {
       toast.success(t("saved"), {
@@ -127,6 +143,7 @@ function SetPriceCard() {
           <CardContent className="grid gap-6">
             <PriceFormError form={form} />
             <PriceInputField form={form} inputRef={inputRef} label={t("barSellLabel")} autoFocus />
+            <PerGramInputs form={form} />
             {/* live region อยู่ก่อนเสมอ — ข้อความที่เพิ่มเข้ามาภายหลังจึงถูกประกาศ */}
             <div role="status">
               {form.referenceChanged && !form.fromReference ? (
@@ -199,7 +216,11 @@ function TodayPriceCard() {
             )
           ) : price ? (
             <>
-              <PriceList prices={price} />
+              <PriceList
+                prices={price}
+                perGram={{ silver_per_g: price.silver_per_g, platinum_per_g: price.platinum_per_g }}
+              />
+              <PerGramMissingNote perGram={price} />
               {price.source === "branch" && (
                 <p className="text-sm text-muted-foreground">{t("todayCard.branchOverride")}</p>
               )}
