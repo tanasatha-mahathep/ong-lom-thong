@@ -45,7 +45,7 @@ description: สร้างหรือแก้หน้าใน apps/web (Vi
 ## shadcn/ui
 
 - style new-york · สี neutral · Tailwind 4 · component อยู่ `src/components/ui/` · เพิ่มด้วย `pnpm dlx shadcn@latest add <ชื่อ>` ใน `apps/web` (แล้ว `pnpm exec prettier --write` ไฟล์ใหม่) · MCP `shadcn` ใน `.mcp.json` ใช้ค้น registry
-- component ใน `ui/` แก้แล้วบางตัว — **ห้าม `add --overwrite`**: `sidebar` (SidebarInset เป็น `<div>`, ป้ายไทย, skeleton ไม่สุ่ม) · `input` (พื้นทึบ `bg-background`) · `breadcrumb` (หน้าปัจจุบันไม่ใช่ role=link, ป้ายไทย) · `sonner` (ไม่ใช้ next-themes) · `sheet` (ป้ายไทย)
+- component ใน `ui/` แก้แล้วบางตัว — **ห้าม `add --overwrite`**: `sidebar` (SidebarInset เป็น `<div>`, ป้ายไทย, skeleton ไม่สุ่ม) · `input` (พื้นทึบ `bg-background`) · `breadcrumb` (หน้าปัจจุบันไม่ใช่ role=link, ป้ายไทย) · `sonner` (ไม่ใช้ next-themes) · `sheet` (ป้ายไทย) · `card` (CardHeader มีเส้นคั่นชนขอบซ้าย-ขวาเสมอ `border-b pb-4`)
 - ไอคอน `lucide-react` ชุดเดียว · ไอคอนประดับใส่ `aria-hidden="true"` · ปุ่มไอคอนล้วนต้องมี `aria-label` หรือ `sr-only`
 - block ที่ใช้: `dashboard-01` (site-header) + `sidebar-07` (app-sidebar `collapsible="icon"` · branch-switcher = TeamSwitcher · nav-main · nav-user พร้อมเมนูธีม) · `login-04` (login-form) — ส่วน demo ถูกลบแล้ว · เมนูใหม่ใน `lib/nav.ts` ต้องมีไอคอน (แถบไอคอนตอนย่อใช้ไอคอน + tooltip) · ปุ่มลัด Alt+1…9 = สลับสาขา อย่าใช้ซ้ำ
 - ตาราง: `<DataTable columns data caption page hasMore onPageChange onRowClick? isLoading?>` (`src/components/data-table.tsx`) — TanStack Table · แบ่งหน้าฝั่งเซิร์ฟเวอร์ด้วย `page` + `has_more` (ไม่มียอดรวมแถว) · คอลัมน์เงินใส่ `meta: { numeric: true }` · **คอลัมน์หลัก (เลขที่บิล/ชื่อลูกค้า) ต้องเป็น `<Link>` จริง** = ทางของคีย์บอร์ด/screen reader (แถวไม่รับโฟกัส) · `onRowClick` เป็นแค่ทางลัดของเมาส์ (คลิกโดนลิงก์/ปุ่มในแถวไม่เรียกซ้ำ)
@@ -133,6 +133,7 @@ return (
 - ใน 11 ช่องใช้แค่ shadcn `Input` / `Textarea` หรือ `TextField` / `TextareaField` (สร้างบนตัวเดียวกัน · ค่าเริ่มต้น `type="text"`) — **ห้าม `Select` / `SelectField` · `Calendar` · `DatePicker` · Combobox** (ป๊อปอัปแย่งโฟกัสจาก Siam ID) · `useAppForm({ submitOnEnter: false })`
 - element อื่นที่รับ focus ได้ระหว่างช่อง (ปุ่ม ลิงก์ โซนวางรูป) → `tabIndex={-1}` · ช่องวันที่ `<input type="text">` ห้าม date picker / input mask
 - `autoComplete="off"` · Enter ไม่ submit (submit ด้วยปุ่มหรือ `Ctrl+Enter`) · format หลัง blur เท่านั้น
+- ข้อยกเว้นนอกฟอร์ม 11 ช่อง: ช่องเลขบัตรของ `/buy` จัดกลุ่ม 1-4-5-2-1 ขณะพิมพ์ (เจ้าของขอ 3 ต.ค. 2569 · `features/buy/national-id-input.ts`) — ตัวรับ Siam ID นับเฉพาะตัวเลข เคอร์เซอร์คงที่ตำแหน่งเดิม
 - รูป: โซน `onPaste` (`clipboardData.files[0]`) + `<input type="file" accept="image/*">` + preview · ส่ง multipart (`apiFetch(path, { form })`)
 
 ## UX / a11y (WCAG 2.2 AA)
