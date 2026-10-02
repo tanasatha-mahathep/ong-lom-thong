@@ -28,7 +28,9 @@ import { describedBy, isPlainEnter } from "./field-helpers";
 
 /**
  * ของเก่าที่รับซื้อ: เลือกโลหะ → ค่าบริสุทธิ์ (%) → หัก % → ปริมาณ → Enter เพิ่มแถว (API ตรวจแถวก่อนเพิ่ม)
- * ไม่มีช่องราคา — เซิร์ฟเวอร์คิดราคาจากราคาของวันให้เอง (UAT 30 ก.ย. 2569) · ลำดับบนจอ = ลำดับ DOM = ลำดับ Tab
+ * ไม่มีช่องราคา — เซิร์ฟเวอร์คิดราคาจากราคาของวันให้เอง (UAT 30 ก.ย. 2569)
+ * วางตามภาพที่เจ้าของวงไว้: หัก % อยู่แถวเดียวกับปุ่มโลหะ ก่อนช่องปริมาณ · ค่าบริสุทธิ์อยู่ใต้ปุ่มโลหะ
+ * ลำดับ DOM = ลำดับ Tab (โลหะ → ค่าบริสุทธิ์ใต้มัน → หัก % → ปริมาณ) · grid วางตำแหน่งบนจอจอใหญ่
  */
 export function LinesCard({ c }: { c: BuyController }) {
   const { t } = useTranslation("buy");
@@ -89,41 +91,48 @@ export function LinesCard({ c }: { c: BuyController }) {
           <h2 className="text-base">{t("cards.lines")}</h2>
         </CardTitle>
       </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <FieldSet className="gap-2" data-invalid={!!metalError}>
-          <FieldLegend variant="label" className="mb-0">
-            {t("lines.metal")}
-          </FieldLegend>
-          <RadioGroup
-            ref={(el) => register("metal", el)}
-            value={metalId}
-            onValueChange={(value) => actions.setLineEntry({ metal_id: value })}
-            onKeyDown={onMetalKey}
-            className="flex flex-wrap gap-2"
-            aria-describedby={metalError ? `${id}-metal-error` : undefined}
+      {/* แถวเดียวแบบภาพ UAT เมื่อการ์ดกว้างพอ (@4xl = 56rem ของการ์ดเอง ไม่ใช่ของจอ — sidebar กางแล้วยังไม่ล้น) */}
+      <CardContent className="@container/lines flex flex-col gap-4">
+        <div className="grid grid-cols-2 items-start gap-4 @4xl/lines:grid-cols-[1fr_9rem_12rem_auto]">
+          <FieldSet
+            className="col-span-2 gap-0 @4xl/lines:col-span-1 @4xl/lines:col-start-1 @4xl/lines:row-start-1"
+            data-invalid={!!metalError}
           >
-            {metals.map((m) => (
-              <Label
-                key={m.id}
-                htmlFor={`${id}-metal-${m.code}`}
-                className="flex h-9 cursor-pointer items-center gap-2 rounded-md border bg-background px-3 has-data-[state=checked]:border-primary has-data-[state=checked]:bg-primary/5"
-              >
-                <RadioGroupItem
-                  id={`${id}-metal-${m.code}`}
-                  value={m.id}
-                  // ลูกศรย้ายโฟกัส = เลือกด้วย (แบบ radio ปกติ) — ไม่พึ่งจังหวะปล่อยปุ่มของ Radix
-                  onFocus={() => m.id !== metalId && actions.setLineEntry({ metal_id: m.id })}
-                />
-                {m.name_th}
-              </Label>
-            ))}
-          </RadioGroup>
-          <FieldError id={`${id}-metal-error`}>{metalError}</FieldError>
-        </FieldSet>
+            {/* <legend> ไม่อยู่ใน flex ของ fieldset — ใช้ margin แทน gap ให้ปุ่มโลหะตรงระดับกับช่องข้าง ๆ (ป้าย + gap-3 ของ Field) */}
+            <FieldLegend variant="label" className="mb-3 leading-snug">
+              {t("lines.metal")}
+            </FieldLegend>
+            <RadioGroup
+              ref={(el) => register("metal", el)}
+              value={metalId}
+              onValueChange={(value) => actions.setLineEntry({ metal_id: value })}
+              onKeyDown={onMetalKey}
+              className="flex flex-wrap gap-2"
+              aria-describedby={metalError ? `${id}-metal-error` : undefined}
+            >
+              {metals.map((m) => (
+                <Label
+                  key={m.id}
+                  htmlFor={`${id}-metal-${m.code}`}
+                  className="flex h-9 cursor-pointer items-center gap-2 rounded-md border bg-background px-3 has-data-[state=checked]:border-primary has-data-[state=checked]:bg-primary/5"
+                >
+                  <RadioGroupItem
+                    id={`${id}-metal-${m.code}`}
+                    value={m.id}
+                    // ลูกศรย้ายโฟกัส = เลือกด้วย (แบบ radio ปกติ) — ไม่พึ่งจังหวะปล่อยปุ่มของ Radix
+                    onFocus={() => m.id !== metalId && actions.setLineEntry({ metal_id: m.id })}
+                  />
+                  {m.name_th}
+                </Label>
+              ))}
+            </RadioGroup>
+            <FieldError id={`${id}-metal-error`} className="mt-2">
+              {metalError}
+            </FieldError>
+          </FieldSet>
 
-        {/* แถวใต้โลหะ: ค่าบริสุทธิ์ → หัก % → ปริมาณ — ซ้ายไปขวาตามลำดับที่กรอก */}
-        <div className="grid grid-cols-2 items-start gap-4 sm:grid-cols-[9rem_9rem_minmax(0,12rem)_auto]">
-          <Field data-invalid={!!purityError}>
+          {/* ใต้ปุ่มโลหะ (จอใหญ่) — ค่าบริสุทธิ์ของชิ้นนั้น */}
+          <Field className="@4xl/lines:col-start-1 @4xl/lines:row-start-2 @4xl/lines:w-48" data-invalid={!!purityError}>
             <FieldLabel htmlFor={`${id}-purity`}>{t("lines.purity")}</FieldLabel>
             <Input
               ref={(el) => register("purity", el)}
@@ -143,7 +152,7 @@ export function LinesCard({ c }: { c: BuyController }) {
             <FieldError id={`${id}-purity-error`}>{purityError}</FieldError>
           </Field>
 
-          <Field data-invalid={!!deductError}>
+          <Field className="@4xl/lines:col-start-2 @4xl/lines:row-start-1" data-invalid={!!deductError}>
             <FieldLabel htmlFor={`${id}-deduct`}>{t("lines.deduct")}</FieldLabel>
             {/* select ของเบราว์เซอร์: Tab เข้าได้ · พิมพ์เลขกระโดดไปตัวเลือก · ลูกศรเปลี่ยนค่า · Enter ไปช่องปริมาณ */}
             <NativeSelect
@@ -165,7 +174,7 @@ export function LinesCard({ c }: { c: BuyController }) {
             <FieldError id={`${id}-deduct-error`}>{deductError}</FieldError>
           </Field>
 
-          <Field data-invalid={!!weightError}>
+          <Field className="@4xl/lines:col-start-3 @4xl/lines:row-start-1" data-invalid={!!weightError}>
             <FieldLabel htmlFor={`${id}-weight`}>{t("lines.weight")}</FieldLabel>
             <Input
               ref={(el) => register("weight", el)}
@@ -190,7 +199,8 @@ export function LinesCard({ c }: { c: BuyController }) {
             type="button"
             variant="secondary"
             tabIndex={-1}
-            className="self-end sm:mt-[1.375rem] sm:self-start sm:justify-self-start"
+            // ระยะบน = ความสูงป้าย (text-sm × leading-snug) + gap-3 ของ Field → ตรงระดับกับช่องกรอก แม้มีข้อความผิดใต้ช่อง
+            className="mt-[calc(0.875rem*1.375+0.75rem)] justify-self-start @4xl/lines:col-start-4 @4xl/lines:row-start-1"
             onClick={() => void actions.addLine()}
           >
             {t("lines.add")}
