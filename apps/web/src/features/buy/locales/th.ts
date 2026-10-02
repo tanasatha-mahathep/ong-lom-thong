@@ -50,6 +50,7 @@ export default {
 
   customer: {
     idLabel: "เลขบัตรประชาชน",
+    idPlaceholder: "0 0000 00000 00 0",
     idHint: "เสียบบัตร Siam ID หรือพิมพ์ 13 หลัก — ค้นหาอัตโนมัติ",
     badChecksum: "เลขบัตรประชาชนไม่ถูกต้อง (หลักตรวจสอบไม่ตรง)",
     searching: "กำลังค้นหา…",
@@ -114,6 +115,7 @@ export default {
     remove: "ลบรายการที่ {{n}}",
     rowProblem: "แถวที่ {{n}}: {{problems}}",
     detail: "รายละเอียดของเก่าที่รับซื้อ",
+    detailPlaceholder: "เช่น สร้อยคอ 1 เส้น · แหวน 2 วง",
     detailHint: "พิมพ์บนใบรับซื้อ (ถ้ามี) · Enter ไปช่องชำระเงิน · Shift+Enter ขึ้นบรรทัดใหม่",
   },
 
@@ -122,6 +124,7 @@ export default {
     methods: { cash: "เงินสด", transfer: "โอนเงิน" },
     bank: "ธนาคาร",
     bankPlaceholder: "เช่น กสิกรไทย",
+    amountPlaceholder: "0.00",
     amount: "จำนวนเงิน (บาท)",
     add: "เพิ่มการชำระ",
     payFull: "เต็มจำนวน",
