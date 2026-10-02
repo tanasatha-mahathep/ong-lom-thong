@@ -133,6 +133,7 @@ return (
 - ใน 11 ช่องใช้แค่ shadcn `Input` / `Textarea` หรือ `TextField` / `TextareaField` (สร้างบนตัวเดียวกัน · ค่าเริ่มต้น `type="text"`) — **ห้าม `Select` / `SelectField` · `Calendar` · `DatePicker` · Combobox** (ป๊อปอัปแย่งโฟกัสจาก Siam ID) · `useAppForm({ submitOnEnter: false })`
 - element อื่นที่รับ focus ได้ระหว่างช่อง (ปุ่ม ลิงก์ โซนวางรูป) → `tabIndex={-1}` · ช่องวันที่ `<input type="text">` ห้าม date picker / input mask
 - `autoComplete="off"` · Enter ไม่ submit (submit ด้วยปุ่มหรือ `Ctrl+Enter`) · format หลัง blur เท่านั้น
+- ข้อยกเว้นนอกฟอร์ม 11 ช่อง: ช่องเลขบัตรของ `/buy` จัดกลุ่ม 1-4-5-2-1 ขณะพิมพ์ (เจ้าของขอ 3 ต.ค. 2569 · `features/buy/national-id-input.ts`) — ตัวรับ Siam ID นับเฉพาะตัวเลข เคอร์เซอร์คงที่ตำแหน่งเดิม
 - รูป: โซน `onPaste` (`clipboardData.files[0]`) + `<input type="file" accept="image/*">` + preview · ส่ง multipart (`apiFetch(path, { form })`)
 
 ## UX / a11y (WCAG 2.2 AA)
