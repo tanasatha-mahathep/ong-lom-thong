@@ -52,6 +52,6 @@ describe("ชื่อหน้าจาก staticData", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "ไม่พบหน้านี้" })).toBeInTheDocument();
     expect(screen.getAllByRole("main")).toHaveLength(1);
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
-    expect(screen.getByRole("link", { name: "กลับหน้าแรก" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "กลับหน้าหลัก" })).toHaveAttribute("href", "/");
   });
 });

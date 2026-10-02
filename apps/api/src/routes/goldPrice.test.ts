@@ -128,11 +128,14 @@ describe.skipIf(!available)("ราคาทองวันนี้ (R7 · R8 �
     expect((await put("staff", { bar_sell: "67850" })).status).toBe(403);
     const res = await put("manager", { bar_sell: "67850" });
     expect(res.status).toBe(200);
+    // ยังไม่ได้ตั้งราคาต่อกรัม = null (รับซื้อเงิน/แพลตตินั่มไม่ได้) — คีย์อยู่เสมอ ไม่หายไป
     expect(await res.json()).toEqual({
       date: "2026-09-28",
       bar_sell: "67850.00",
       bar_buy: "67650.00",
       jewelry_buy: "64268",
+      silver_per_g: null,
+      platinum_per_g: null,
       diff: "200.00",
       source: "central",
     });
@@ -255,9 +258,13 @@ const CENTRAL_SEEDED = {
   bar_sell: "67850.00",
   bar_buy: "67650.00",
   jewelry_buy: "64268",
+  silver_per_g: null,
+  platinum_per_g: null,
   diff: "200.00",
   source: "central",
 };
+/** ราคาต่อกรัมที่ยังไม่ได้ตั้ง — GET/PUT /today ส่งคีย์มาเสมอ (null) · quote ส่งเฉพาะเมื่อ request ส่งมา */
+const NO_PER_GRAM = { silver_per_g: null, platinum_per_g: null };
 
 describe.skipIf(!available)("สัญญา API ราคาทอง: สิทธิ์ · CSRF · validation · เงินเป็น string · สาขา · audit", () => {
   let t: TestApp;
@@ -336,24 +343,40 @@ describe.skipIf(!available)("สัญญา API ราคาทอง: สิ�
   it.each([
     ["GET", "/api/gold-price/today", undefined],
     ["POST", "/api/gold-price/quote", { bar_sell: "67850" }],
+    ["POST", "/api/gold-price/quote", { bar_sell: "67850", silver_per_g: "45.50", platinum_per_g: "1000.00" }],
     ["PUT", "/api/gold-price/today", { bar_sell: "67850", confirm_typo: true }],
-  ] as const)("%s %s: ไม่มี cookie หรือ cookie ปลอม = 401 unauthorized · ไม่เขียนอะไร", async (method, path, body) => {
-    onDay(DAY.guard);
-    const before = await writes();
-    for (const cookie of [undefined, FORGED_COOKIE]) {
-      const res = await t.request(path, { method, cookie, body });
-      const where = `${method} ${path} (${cookie ? "cookie ปลอม" : "ไม่มี cookie"})`;
-      expect(await expectApiError(res, 401, where)).toEqual({ error: "unauthorized" });
-    }
-    expect(await writes()).toEqual(before);
-  });
+    [
+      "PUT",
+      "/api/gold-price/today",
+      { bar_sell: "67850", silver_per_g: "45.50", platinum_per_g: null, confirm_typo: true },
+    ],
+  ] as const)(
+    "%s %s %j: ไม่มี cookie หรือ cookie ปลอม = 401 unauthorized · ไม่เขียนอะไร",
+    async (method, path, body) => {
+      onDay(DAY.guard);
+      const before = await writes();
+      for (const cookie of [undefined, FORGED_COOKIE]) {
+        const res = await t.request(path, { method, cookie, body });
+        const where = `${method} ${path} (${cookie ? "cookie ปลอม" : "ไม่มี cookie"})`;
+        expect(await expectApiError(res, 401, where)).toEqual({ error: "unauthorized" });
+      }
+      expect(await writes()).toEqual(before);
+    },
+  );
 
   it.each(ROLES.filter((role) => !PRICE_SETTERS.includes(role)))(
     "PUT /today โดย %s = 403 forbidden (ตัดสินก่อนดู body) · ไม่เขียนอะไร (spec §10 · API5)",
     async (who) => {
       onDay(DAY.roles);
       const before = await writes();
-      for (const body of [{ bar_sell: "67850", confirm_typo: true }, {}]) {
+      // รวมถึง body ที่ตั้งแค่ราคาต่อกรัมของเงิน/แพลตตินั่ม — สิทธิ์ตั้งราคาเดียวกับราคาทอง
+      for (const body of [
+        { bar_sell: "67850", confirm_typo: true },
+        {},
+        { silver_per_g: "45.50" },
+        { platinum_per_g: null },
+        { bar_sell: "67850", silver_per_g: "45.50", platinum_per_g: "1000.00", confirm_typo: true },
+      ]) {
         const res = await put(cookies[who], body);
         expect(await expectApiError(res, 403, `PUT โดย ${who} body=${JSON.stringify(body)}`)).toEqual({
           error: "forbidden",
@@ -407,7 +430,7 @@ describe.skipIf(!available)("สัญญา API ราคาทอง: สิ�
       onDay(DAY.guard);
       const before = await writes();
       for (const [method, path] of BODY_ROUTES) {
-        const body = JSON.stringify({ bar_sell: "67850", confirm_typo: true });
+        const body = JSON.stringify({ bar_sell: "67850", silver_per_g: "45.50", confirm_typo: true });
         const res = await raw(method, path, { cookie: cookies.manager, origin, body });
         expect(await expectApiError(res, 403, `${method} ${path} origin=${origin}`)).toEqual({
           error: "forbidden origin",
@@ -465,7 +488,7 @@ describe.skipIf(!available)("สัญญา API ราคาทอง: สิ�
   it("เงินใน response เป็น string ทศนิยมตายตัวทุก route — bar_sell/bar_buy/diff 2 ตำแหน่ง · jewelry_buy จำนวนเต็ม (กฎ 1 · R8)", async () => {
     onDay(DAY.money);
     const derived = { bar_sell: "67850.50", bar_buy: "67650.50", jewelry_buy: "64268" };
-    const saved = { date: DAY.money, ...derived, diff: "200.00", source: "central" };
+    const saved = { date: DAY.money, ...derived, ...NO_PER_GRAM, diff: "200.00", source: "central" };
     const responses = [
       ["PUT /today", await put(cookies.manager, { bar_sell: "67850.5" }), saved],
       ["POST /quote", await quote(cookies.staff, { bar_sell: "67,850.5" }), derived],
@@ -536,6 +559,7 @@ describe.skipIf(!available)("สัญญา API ราคาทอง: สิ�
       bar_sell: "67850.00",
       bar_buy: "67650.00",
       jewelry_buy: "64268",
+      ...NO_PER_GRAM,
       diff: "200.00",
       source: "central",
     });
@@ -548,6 +572,8 @@ describe.skipIf(!available)("สัญญา API ราคาทอง: สิ�
         barSell: "67850.00",
         barBuy: "67650.00",
         jewelryBuy: "64268.00",
+        silverPerG: null,
+        platinumPerG: null,
         setBy: uid("manager"),
       },
     ]);
@@ -571,7 +597,13 @@ describe.skipIf(!available)("สัญญา API ราคาทอง: สิ�
     expect(added[0]?.diff).toEqual({
       date: DAY.audit,
       before: null,
-      after: { bar_sell: "67850.00", bar_buy: "67650.00", jewelry_buy: "64268.00", set_by: uid("manager") },
+      after: {
+        bar_sell: "67850.00",
+        bar_buy: "67650.00",
+        jewelry_buy: "64268.00",
+        ...NO_PER_GRAM,
+        set_by: uid("manager"),
+      },
       typo_warning_confirmed: false,
     });
     expect(moneyShapeViolations(added[0]?.diff)).toEqual([]);
@@ -783,3 +815,466 @@ describe.skipIf(!available)("สัญญา API ราคาทอง: สิ�
     await expectApiError(res, 415, "quote text/plain");
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ราคารับซื้อต่อกรัมของเงิน/แพลตตินั่ม (UAT 30 ก.ย. 2569 · อนุมัติ 2 ต.ค. 2569) — ฐานของสูตรรับซื้อเงิน/แพลตตินั่ม
+// ตั้งที่ราคากลางเท่านั้น ทุกสาขาใช้ร่วม · PUT: ไม่ส่ง = คงค่าเดิมของวันนี้ · null หรือ "" = ล้าง · ข้อความตัวเลข = ตั้งใหม่
+// ด่านพิมพ์ผิดเทียบวันก่อนหน้าล่าสุดที่มีค่า (ข้ามวันที่ไม่ได้ตั้ง) · หลายคำเตือนต่อด้วย " · " ใน 409 เดียว
+// ฝั่งสาขา (GET /today/branches · PUT /today/branches/:id · quote ที่มี branch_id) อยู่ใน goldPriceBranch.test.ts
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * วันทำการแยกตามเรื่อง — ด่านพิมพ์ผิดมองย้อนไปวันก่อนหน้าที่มีค่า จึงวางช่วงวันไม่ให้เรื่องหนึ่งเป็น "ครั้งก่อน" ของอีกเรื่อง
+ * quote/life อยู่ต้นสุด (ไม่มีวันก่อนหน้าที่มีราคาต่อกรัม) · typo* อยู่ท้ายสุดและมีวันก่อนหน้าของตัวเองที่ใส่ตรงใน DB
+ */
+const PG = {
+  quote: "2026-11-02", // quote อย่างเดียว ไม่เขียน
+  life: "2026-11-03", // ตั้ง → คงไว้ → ล้าง
+  guard: "2026-11-04", // request ที่ต้องถูกปฏิเสธ — ถ้าหลุดจะเขียนลงวันนี้
+  cap: "2026-11-05", // เพดาน 99,999.99 — ค่าที่ผ่านเขียนลงวันนี้
+  typoSet: "2026-11-20", // ครั้งก่อนที่มีราคาต่อกรัม: ทอง 67,900 · เงิน 45.00 · แพลตตินั่ม 1,000.00
+  typoBlank: "2026-11-21", // วันถัดมาไม่ได้ตั้งราคาต่อกรัม (null) · ทอง 68,000 — ทองเทียบวันนี้ เงิน/แพลตตินั่มต้องข้ามไป typoSet
+  typo: "2026-11-22",
+} as const;
+const PER_GRAM_MSG = {
+  silverPositive: "ราคาเงินต่อกรัมต้องเป็นตัวเลขมากกว่า 0",
+  silverHigh: "ราคาเงินต่อกรัมสูงผิดปกติ — ตรวจตัวเลขอีกครั้ง",
+  platinumPositive: "ราคาแพลตตินั่มต่อกรัมต้องเป็นตัวเลขมากกว่า 0",
+  platinumHigh: "ราคาแพลตตินั่มต่อกรัมสูงผิดปกติ — ตรวจตัวเลขอีกครั้ง",
+  scale: "ราคาทศนิยมไม่เกิน 2 ตำแหน่ง",
+} as const;
+/** ตัวเลข JSON / ชนิดอื่นที่ไม่ใช่ string (zod) — routes/goldPrice.ts perGramError */
+const notText = (field: string) => `ต้องส่ง ${field} เป็นข้อความตัวเลข หรือ null เพื่อล้าง`;
+/**
+ * คำเตือนคิดมือ (เกณฑ์ seed typo_guard_percent = 3 · ไม่ใช้เซิร์ฟเวอร์เป็นคำตอบ) — ราคาเต็มบาทพิมพ์ไม่มีทศนิยม มีสตางค์พิมพ์ 2 ตำแหน่ง
+ * เงิน 45 → 50.50: |50.50 − 45| ÷ 45 × 100 = 12.22…% → "12.2"
+ * เงิน 45 → 46.36: 1.36 ÷ 45 × 100 = 3.02…% → "3.0" (เกินเกณฑ์) · 46.35 และ 43.65 ห่าง 1.35 ÷ 45 = 3% พอดี → ไม่เตือน
+ * แพลตตินั่ม 1,000 → 1,100: 100 ÷ 1,000 × 100 = 10% → "10.0"
+ * ทอง 68,000 → 76,000: 8,000 ÷ 68,000 × 100 = 11.76…% → "11.8"
+ */
+const WARN = {
+  silver: "ราคาเงินห่างจากครั้งก่อน 12.2% (45 → 50.50) — ตรวจสอบก่อนบันทึก",
+  silverEdge: "ราคาเงินห่างจากครั้งก่อน 3.0% (45 → 46.36) — ตรวจสอบก่อนบันทึก",
+  platinum: "ราคาแพลตตินั่มห่างจากครั้งก่อน 10.0% (1000 → 1100) — ตรวจสอบก่อนบันทึก",
+  gold: "ราคาห่างจากครั้งก่อน 11.8% (68000 → 76000) — ตรวจสอบก่อนบันทึก",
+} as const;
+/** ราคาทองที่ derive แล้ว (diff 200 · รูปพรรณ × 0.95 ปัดครึ่งขึ้น) — คิดมือ */
+const GOLD = {
+  g67850: { bar_sell: "67850.00", bar_buy: "67650.00", jewelry_buy: "64268" }, // 67,650 × 0.95 = 64,267.50 → 64,268
+  g67900: { bar_sell: "67900.00", bar_buy: "67700.00", jewelry_buy: "64315" }, // 67,700 × 0.95 = 64,315
+  g68000: { bar_sell: "68000.00", bar_buy: "67800.00", jewelry_buy: "64410" }, // 67,800 × 0.95 = 64,410
+  g76000: { bar_sell: "76000.00", bar_buy: "75800.00", jewelry_buy: "72010" }, // 75,800 × 0.95 = 72,010
+} as const;
+
+describe.skipIf(!available)(
+  "ราคาต่อกรัมเงิน/แพลตตินั่ม: ตั้ง · คงไว้ · ล้าง · validation · ด่านพิมพ์ผิด · audit",
+  () => {
+    let t: TestApp;
+    let clock = new Date(`${PG.quote}T03:00:00Z`);
+    /** นาฬิกา = 10:00 น. เวลาไทยของวันนั้น */
+    const onDay = (date: string) => {
+      clock = new Date(`${date}T03:00:00Z`);
+    };
+    const cookies: Record<string, string> = {};
+    const ids: Record<string, string> = {};
+    const manager = () => {
+      const id = ids.manager;
+      if (!id) throw new Error("ไม่มี manager");
+      return id;
+    };
+
+    beforeAll(async () => {
+      t = await startTestApp({ now: () => clock });
+      for (const [who, role] of [
+        ["manager", "manager"],
+        ["staff", "staff"],
+      ] as const) {
+        const email = `pg-${who}@ong.test`;
+        const created = await t.createUser({ email, password: PW, role, branch: "00000" });
+        // ข้อมูลสมมติ: ชื่อขึ้นต้น "ทดสอบ"
+        await t.db
+          .update(user)
+          .set({ name: testName(who) })
+          .where(eq(user.id, created.id));
+        ids[who] = created.id;
+        cookies[who] = await t.login(email, PW);
+      }
+      // ครั้งก่อนของด่านพิมพ์ผิด — ใส่ตรงใน DB (ไม่ผ่าน API จึงไม่ขึ้นกับลำดับเทสต์)
+      await t.db.insert(goldPrice).values([
+        {
+          date: PG.typoSet,
+          barSell: "67900",
+          barBuy: "67700",
+          jewelryBuy: "64315",
+          silverPerG: "45.00",
+          platinumPerG: "1000.00",
+        },
+        { date: PG.typoBlank, barSell: "68000", barBuy: "67800", jewelryBuy: "64410" },
+      ]);
+    });
+    afterAll(async () => {
+      await t?.close();
+    });
+
+    const put = (body: unknown, who = "manager") =>
+      t.request("/api/gold-price/today", { method: "PUT", cookie: cookies[who], body });
+    const quote = (body: unknown) => t.request("/api/gold-price/quote", { cookie: cookies.staff, body });
+    /** status + JSON ที่เงินเป็น string ทั้งก้อน (กฎ 1) */
+    const ok = async (res: Response, where: string): Promise<Record<string, unknown>> => {
+      const text = await res.text();
+      expect(res.status, `${where}: ${text.slice(0, 300)}`).toBe(200);
+      const body = JSON.parse(text) as Record<string, unknown>;
+      expectMoneyAsStrings(body, where);
+      return body;
+    };
+    const today = async (where: string) =>
+      ok(await t.request("/api/gold-price/today", { cookie: cookies.staff }), `GET /today ${where}`);
+    const writes = async () => ({
+      prices: await t.db.select().from(goldPrice).orderBy(goldPrice.id),
+      audits: await t.db.select().from(auditLog).orderBy(auditLog.id),
+    });
+    const centralRow = async (date: string) => {
+      const [row] = await t.db
+        .select()
+        .from(goldPrice)
+        .where(and(isNull(goldPrice.branchId), eq(goldPrice.date, date)));
+      return row;
+    };
+
+    it('POST /quote: ราคาต่อกรัมที่ส่งมาตอบเป็นรูปมาตรฐาน 2 ตำแหน่ง · "" หรือ null = null · ไม่ส่ง = ไม่มีคีย์ · ไม่มีครั้งก่อน = ไม่เตือน · ไม่เขียนอะไร', async () => {
+      onDay(PG.quote);
+      const before = await writes();
+      const cases: [string, Record<string, unknown>, Record<string, unknown>][] = [
+        ["ไม่ส่งราคาต่อกรัม", {}, GOLD.g67850],
+        ["เงิน 45.5", { silver_per_g: "45.5" }, { ...GOLD.g67850, silver_per_g: "45.50" }],
+        [
+          "แพลตตินั่มคั่นหลักพัน + ช่องว่างหัวท้าย",
+          { platinum_per_g: " 1,050.5 " },
+          { ...GOLD.g67850, platinum_per_g: "1050.50" },
+        ],
+        ['ล้างด้วย "" และ null', { silver_per_g: "", platinum_per_g: null }, { ...GOLD.g67850, ...NO_PER_GRAM }],
+        [
+          "ทั้งคู่เป็นเลขเต็ม",
+          { silver_per_g: "45", platinum_per_g: "1000" },
+          { ...GOLD.g67850, silver_per_g: "45.00", platinum_per_g: "1000.00" },
+        ],
+        [
+          "branch_id: null = ราคากลาง",
+          { branch_id: null, silver_per_g: "45.50" },
+          { ...GOLD.g67850, silver_per_g: "45.50" },
+        ],
+      ];
+      for (const [label, extra, expected] of cases) {
+        // toEqual: ไม่มี warning (ไม่มีวันก่อนหน้าเลย) และไม่มีคีย์ราคาต่อกรัมที่ไม่ได้ส่งมา
+        expect(await ok(await quote({ bar_sell: "67850", ...extra }), label), label).toEqual(expected);
+      }
+      expect(await writes()).toEqual(before);
+    });
+
+    it('PUT /today: ตั้ง → ไม่ส่ง = คงค่าเดิมของวันนี้ → null ล้าง → "" ล้าง → ตั้งใหม่ · GET /today ตามทุกขั้น · audit ก่อน/หลังเป็น string หรือ null (R12)', async () => {
+      onDay(PG.life);
+      const steps = [
+        {
+          label: "ตั้งครั้งแรก (create)",
+          body: { bar_sell: "67850", silver_per_g: "45.5", platinum_per_g: "1,050" },
+          gold: GOLD.g67850,
+          silver: "45.50",
+          platinum: "1050.00",
+        },
+        {
+          label: "ไม่ส่งทั้งคู่ = คงค่าเดิม",
+          body: { bar_sell: "67900" },
+          gold: GOLD.g67900,
+          silver: "45.50",
+          platinum: "1050.00",
+        },
+        {
+          label: "เงิน null = ล้าง · แพลตตินั่มไม่ส่ง = คงไว้",
+          body: { bar_sell: "67900", silver_per_g: null },
+          gold: GOLD.g67900,
+          silver: null,
+          platinum: "1050.00",
+        },
+        {
+          label: 'แพลตตินั่ม "" = ล้าง · เงินไม่ส่ง = คง null',
+          body: { bar_sell: "67900", platinum_per_g: "" },
+          gold: GOLD.g67900,
+          silver: null,
+          platinum: null,
+        },
+        {
+          label: "ตั้งใหม่หลังล้าง",
+          body: { bar_sell: "67900", silver_per_g: "45", platinum_per_g: "1000.5" },
+          gold: GOLD.g67900,
+          silver: "45.00",
+          platinum: "1000.50",
+        },
+        {
+          label: 'ล้างทั้งคู่พร้อมกัน ("" และ null)',
+          body: { bar_sell: "67900", silver_per_g: "", platinum_per_g: null },
+          gold: GOLD.g67900,
+          silver: null,
+          platinum: null,
+        },
+      ];
+      let previous: unknown = null;
+      for (const [i, step] of steps.entries()) {
+        const before = await writes();
+        const expected = {
+          date: PG.life,
+          ...step.gold,
+          silver_per_g: step.silver,
+          platinum_per_g: step.platinum,
+          diff: "200.00",
+          source: "central",
+        };
+        expect(await ok(await put(step.body), `PUT ${step.label}`), step.label).toEqual(expected);
+        expect(await today(step.label), step.label).toEqual(expected);
+        expect(await centralRow(PG.life), step.label).toMatchObject({
+          silverPerG: step.silver,
+          platinumPerG: step.platinum,
+        });
+
+        const added = (await writes()).audits.slice(before.audits.length);
+        expect(added, step.label).toMatchObject([
+          { action: i === 0 ? "gold_price.create" : "gold_price.update", tableName: "gold_price", userId: manager() },
+        ]);
+        const after = {
+          bar_sell: step.gold.bar_sell,
+          bar_buy: step.gold.bar_buy,
+          jewelry_buy: `${step.gold.jewelry_buy}.00`,
+          silver_per_g: step.silver,
+          platinum_per_g: step.platinum,
+          set_by: manager(),
+        };
+        expect(added[0]?.diff, step.label).toEqual({
+          date: PG.life,
+          before: previous,
+          after,
+          typo_warning_confirmed: false,
+        });
+        expect(moneyShapeViolations(added[0]?.diff), step.label).toEqual([]);
+        previous = after;
+      }
+    });
+
+    it.each([
+      ["silver_per_g", "0", PER_GRAM_MSG.silverPositive],
+      ["silver_per_g", "0.00", PER_GRAM_MSG.silverPositive],
+      ["silver_per_g", "-1", PER_GRAM_MSG.silverPositive],
+      ["silver_per_g", "abc", PER_GRAM_MSG.silverPositive],
+      ["silver_per_g", "4 5", PER_GRAM_MSG.silverPositive],
+      ["silver_per_g", "45.555", PER_GRAM_MSG.scale],
+      ["silver_per_g", "0.001", PER_GRAM_MSG.scale],
+      ["silver_per_g", "100000", PER_GRAM_MSG.silverHigh],
+      ["silver_per_g", "100,000.00", PER_GRAM_MSG.silverHigh],
+      ["silver_per_g", "1103700123458", PER_GRAM_MSG.silverHigh], // เลขบัตรสมมติที่ Siam ID พิมพ์หลุดเข้าช่องราคา
+      ["platinum_per_g", "0", PER_GRAM_MSG.platinumPositive],
+      ["platinum_per_g", "-1050", PER_GRAM_MSG.platinumPositive],
+      ["platinum_per_g", "abc", PER_GRAM_MSG.platinumPositive],
+      ["platinum_per_g", "1050.505", PER_GRAM_MSG.scale],
+      ["platinum_per_g", "100000", PER_GRAM_MSG.platinumHigh],
+      ["platinum_per_g", "1103700123458", PER_GRAM_MSG.platinumHigh],
+    ] as const)(
+      "%s = %j → 400 ชี้ช่องนั้น ทั้ง quote และ PUT (แม้ยืนยันด่านพิมพ์ผิดแล้ว) · ไม่เขียนอะไร",
+      async (field, value, error) => {
+        onDay(PG.guard);
+        const before = await writes();
+        const body = { bar_sell: "67850", [field]: value };
+        expect(await expectApiError(await quote(body), 400, `quote ${field}=${value}`)).toEqual({ error, field });
+        const res = await put({ ...body, confirm_typo: true });
+        expect(await expectApiError(res, 400, `PUT ${field}=${value}`)).toEqual({ error, field });
+        expect(await writes()).toEqual(before);
+      },
+    );
+
+    it.each(["silver_per_g", "platinum_per_g"] as const)(
+      "%s ที่ไม่ใช่ string (ตัวเลข JSON · boolean · array · object) หรือยาวเกิน 32 ตัว → 400 ชี้ช่องนั้น ทั้ง quote และ PUT · ไม่เขียนอะไร (กฎ 1)",
+      async (field) => {
+        onDay(PG.guard);
+        const before = await writes();
+        const expected = { error: notText(field), field };
+        for (const value of [45, 45.5, 0, true, ["45.50"], { value: "45.50" }, "1".repeat(33)]) {
+          const body = { bar_sell: "67850", [field]: value };
+          const where = `${field}=${JSON.stringify(value)}`;
+          expect(await expectApiError(await quote(body), 400, `quote ${where}`)).toEqual(expected);
+          const res = await put({ ...body, confirm_typo: true });
+          expect(await expectApiError(res, 400, `PUT ${where}`)).toEqual(expected);
+        }
+        expect(await writes()).toEqual(before);
+      },
+    );
+
+    it("หลายช่องผิดพร้อมกัน: ชี้ bar_sell ก่อน แล้วจึงเงิน แล้วจึงแพลตตินั่ม — ลำดับเดียวกันทั้ง quote และ PUT · ไม่เขียนอะไร", async () => {
+      onDay(PG.guard);
+      const before = await writes();
+      const cases: [Record<string, unknown>, { error: string; field: string }][] = [
+        [
+          { bar_sell: "abc", silver_per_g: "abc" },
+          { error: "ราคาทองแท่งขายออกต้องเป็นตัวเลขมากกว่า 0", field: "bar_sell" },
+        ],
+        [{ bar_sell: 67850, silver_per_g: 45 }, PARSE_ERROR],
+        [
+          { bar_sell: "67850", silver_per_g: "0", platinum_per_g: "0" },
+          { error: PER_GRAM_MSG.silverPositive, field: "silver_per_g" },
+        ],
+        [
+          { bar_sell: "67850", silver_per_g: "45.50", platinum_per_g: "0" },
+          { error: PER_GRAM_MSG.platinumPositive, field: "platinum_per_g" },
+        ],
+        [
+          { bar_sell: "67850", silver_per_g: 45, platinum_per_g: 1000 },
+          { error: notText("silver_per_g"), field: "silver_per_g" },
+        ],
+        [
+          { bar_sell: "67850", silver_per_g: "45.50", platinum_per_g: 1000 },
+          { error: notText("platinum_per_g"), field: "platinum_per_g" },
+        ],
+      ];
+      for (const [body, expected] of cases) {
+        const where = JSON.stringify(body);
+        expect(await expectApiError(await quote(body), 400, `quote ${where}`)).toEqual(expected);
+        const res = await put({ ...body, confirm_typo: true });
+        expect(await expectApiError(res, 400, `PUT ${where}`)).toEqual(expected);
+      }
+      expect(await writes()).toEqual(before);
+    });
+
+    it("เพดานราคาต่อกรัม: 99,999.99 และ 0.01 ผ่านทั้ง quote และ PUT (100,000 ไม่ผ่าน — ดูเทสต์ validation) (boundary value)", async () => {
+      onDay(PG.cap);
+      for (const [input, normalised] of [
+        ["99999.99", "99999.99"],
+        ["99,999.99", "99999.99"],
+        ["0.01", "0.01"],
+      ] as const) {
+        for (const field of ["silver_per_g", "platinum_per_g"] as const) {
+          const body = await ok(await quote({ bar_sell: "67900", [field]: input }), `quote ${field}=${input}`);
+          expect(body[field], `quote ${field}=${input}`).toBe(normalised);
+        }
+      }
+      // วันก่อนหน้าอาจมีราคาต่อกรัม (ลำดับเทสต์) — ยืนยันด่านพิมพ์ผิดไว้ เทสต์นี้ตรวจเพดานเท่านั้น
+      const res = await put({
+        bar_sell: "67900",
+        silver_per_g: "99,999.99",
+        platinum_per_g: "99999.99",
+        confirm_typo: true,
+      });
+      expect(await ok(res, "PUT เพดาน")).toMatchObject({
+        date: PG.cap,
+        silver_per_g: "99999.99",
+        platinum_per_g: "99999.99",
+      });
+      expect(await centralRow(PG.cap)).toMatchObject({ silverPerG: "99999.99", platinumPerG: "99999.99" });
+    });
+
+    it("ด่านพิมพ์ผิดราคาต่อกรัม: เทียบวันก่อนหน้าล่าสุดที่มีค่า (ข้ามวันที่เป็น null) · quote = PUT · 409 ชี้ confirm_typo · เกณฑ์ 3% พอดีไม่เตือน · ล้างไม่เตือน · ไม่เขียนอะไร", async () => {
+      onDay(PG.typo);
+      const before = await writes();
+      const reject = async (body: Record<string, unknown>, warning: string) => {
+        const where = JSON.stringify(body);
+        expect(await ok(await quote(body), `quote ${where}`), where).toMatchObject({ warning });
+        expect(await expectApiError(await put(body), 409, `PUT ${where}`)).toEqual({
+          error: warning,
+          field: "confirm_typo",
+          warning,
+        });
+      };
+
+      // วันก่อน (typoBlank) ไม่มีราคาเงิน → ต้องเทียบ 45 ของ typoSet ไม่ใช่ "ไม่มีครั้งก่อน"
+      expect(await ok(await quote({ bar_sell: "68000", silver_per_g: "50.50" }), "quote เงิน")).toEqual({
+        ...GOLD.g68000,
+        silver_per_g: "50.50",
+        warning: WARN.silver,
+      });
+      await reject({ bar_sell: "68000", silver_per_g: "50.50" }, WARN.silver);
+      expect(await ok(await quote({ bar_sell: "68000", platinum_per_g: "1100" }), "quote แพลตตินั่ม")).toEqual({
+        ...GOLD.g68000,
+        platinum_per_g: "1100.00",
+        warning: WARN.platinum,
+      });
+      await reject({ bar_sell: "68000", platinum_per_g: "1100" }, WARN.platinum);
+
+      // ขอบเกณฑ์: ห่าง 3% พอดี (ทั้งขึ้นและลง) ไม่เตือน · เกินไปนิดเดียวเตือน
+      for (const [input, normalised, warning] of [
+        ["46.35", "46.35", null],
+        ["43.65", "43.65", null],
+        ["46", "46.00", null],
+        ["46.36", "46.36", WARN.silverEdge],
+      ] as const) {
+        const body = await ok(await quote({ bar_sell: "68000", silver_per_g: input }), `quote เงิน ${input}`);
+        expect(body, input).toEqual({ ...GOLD.g68000, silver_per_g: normalised, ...(warning ? { warning } : {}) });
+      }
+      await reject({ bar_sell: "68000", silver_per_g: "46.36" }, WARN.silverEdge);
+
+      // ล้างราคาไม่เทียบอะไร — ไม่เตือนแม้ครั้งก่อนมีค่า
+      const cleared = await ok(
+        await quote({ bar_sell: "68000", silver_per_g: null, platinum_per_g: "" }),
+        "quote ล้าง",
+      );
+      expect(cleared).toEqual({ ...GOLD.g68000, ...NO_PER_GRAM });
+
+      expect(await writes()).toEqual(before);
+      expect((await t.request("/api/gold-price/today", { cookie: cookies.staff })).status).toBe(404);
+    });
+
+    it('หลายราคาห่างเกินเกณฑ์พร้อมกัน → 409 เดียว คำเตือนต่อด้วย " · " (ทอง · เงิน · แพลตตินั่ม) · ราคาที่อยู่ในเกณฑ์ไม่มีข้อความ · ไม่เขียนอะไร', async () => {
+      onDay(PG.typo);
+      const before = await writes();
+      const cases: [Record<string, string>, string][] = [
+        [
+          { bar_sell: "76000", silver_per_g: "50.50", platinum_per_g: "1100" },
+          `${WARN.gold} · ${WARN.silver} · ${WARN.platinum}`,
+        ],
+        [{ bar_sell: "76000", silver_per_g: "50.50" }, `${WARN.gold} · ${WARN.silver}`],
+        [{ bar_sell: "76000", platinum_per_g: "1100" }, `${WARN.gold} · ${WARN.platinum}`],
+        // ทองอยู่ในเกณฑ์ (68,000 = วันก่อน) → เริ่มที่เงิน ไม่มีตัวคั่นนำหน้า
+        [{ bar_sell: "68000", silver_per_g: "50.50", platinum_per_g: "1100" }, `${WARN.silver} · ${WARN.platinum}`],
+        // เงินอยู่ในเกณฑ์ (46 ห่าง 2.2%) → ทองอย่างเดียว ไม่มีตัวคั่นห้อยท้าย
+        [{ bar_sell: "76000", silver_per_g: "46" }, WARN.gold],
+      ];
+      for (const [body, warning] of cases) {
+        const where = JSON.stringify(body);
+        expect((await ok(await quote(body), `quote ${where}`)).warning, where).toBe(warning);
+        expect(await expectApiError(await put(body), 409, `PUT ${where}`)).toEqual({
+          error: warning,
+          field: "confirm_typo",
+          warning,
+        });
+      }
+      expect(await writes()).toEqual(before);
+    });
+
+    it("ยืนยันแล้ว (confirm_typo: true) → 200 บันทึกราคาต่อกรัม · GET /today ตรงกัน · audit create มีราคาต่อกรัมเป็น string + typo_warning_confirmed (R12)", async () => {
+      onDay(PG.typo);
+      const before = await writes();
+      const res = await put({ bar_sell: "76000", silver_per_g: "50.50", platinum_per_g: "1100", confirm_typo: true });
+      const expected = {
+        date: PG.typo,
+        ...GOLD.g76000,
+        silver_per_g: "50.50",
+        platinum_per_g: "1100.00",
+        diff: "200.00",
+        source: "central",
+      };
+      expect(await ok(res, "PUT ยืนยัน")).toEqual(expected);
+      expect(await today("หลังยืนยัน")).toEqual(expected);
+
+      const added = (await writes()).audits.slice(before.audits.length);
+      expect(added).toMatchObject([{ action: "gold_price.create", tableName: "gold_price", userId: manager() }]);
+      expect(added[0]?.diff).toEqual({
+        date: PG.typo,
+        before: null,
+        after: {
+          bar_sell: "76000.00",
+          bar_buy: "75800.00",
+          jewelry_buy: "72010.00",
+          silver_per_g: "50.50",
+          platinum_per_g: "1100.00",
+          set_by: manager(),
+        },
+        typo_warning_confirmed: true,
+      });
+      expect(moneyShapeViolations(added[0]?.diff)).toEqual([]);
+    });
+  },
+);

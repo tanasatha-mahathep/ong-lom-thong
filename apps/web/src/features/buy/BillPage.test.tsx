@@ -3,9 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Role } from "@/lib/queries";
 import { GOLD_PRICE, fakeApi, json, makeMe, renderApp } from "@/test/app";
-import { makeBill } from "@/test/bill-fixture";
+import { makeAssessedLine, makeBill } from "@/test/bill-fixture";
 import type { Bill } from "./bill-api";
 import { t } from "./i18n";
+import { toReceiptData } from "./receipt/to-receipt-data";
 
 const BILL = makeBill();
 const PATH = `/api/buy/${BILL.id}`;
@@ -38,6 +39,35 @@ describe("/buy/$id", () => {
     await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(router.state.location.search).toEqual({}));
     expect(screen.getByRole("link", { name: new RegExp(t("bill.newBill")) })).toHaveFocus();
+  });
+
+  it("labels receipt rows with purity and deduction like the PDF (ทอง 96.5% หัก 3%)", async () => {
+    const assessed = makeBill({
+      lines: [makeAssessedLine()],
+      payments: [{ method: "cash", method_label: "เงินสด", bank: null, amount: "41535.00" }],
+      total_weight: "10.000",
+      total_amount: "41535.00",
+      avg_price_per_g: "4153.50",
+    });
+    setup(assessed);
+    const receipt = await screen.findByRole("region", { name: t("bill.receiptLabel") });
+    expect(within(receipt).getByText("ทอง 96.5% หัก 3%")).toBeInTheDocument();
+  });
+
+  it("keeps purity and deduction of the receipt the API built (schema must not strip them)", async () => {
+    const assessed = makeBill({
+      lines: [makeAssessedLine({ deduct_percent: "0", amount: "42820.00", price_per_g: "4282.00" })],
+      payments: [{ method: "cash", method_label: "เงินสด", bank: null, amount: "42820.00" }],
+      total_weight: "10.000",
+      total_amount: "42820.00",
+      avg_price_per_g: "4282.00",
+    });
+    const receipt = { ...toReceiptData(assessed), docNo: "PT-RC6909-0001" };
+    setup({ ...assessed, receipt });
+    const region = await screen.findByRole("region", { name: t("bill.receiptLabel") });
+    expect(within(region).getByText("PT-RC6909-0001")).toBeInTheDocument();
+    // หัก 0% ไม่พิมพ์ "หัก"
+    expect(within(region).getByText("ทอง 96.5%")).toBeInTheDocument();
   });
 
   it("skips auto-print when the receipt data does not add up (nit)", async () => {

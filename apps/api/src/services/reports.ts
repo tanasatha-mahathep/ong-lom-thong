@@ -1,4 +1,4 @@
-import { D, fmtMoney, fmtWeight, maskNationalId } from "@ong/core";
+import { D, type ReceiptLine, fmtMoney, fmtWeight, groupLinesByMetal, maskNationalId } from "@ong/core";
 import { type Db, branch, buyLine, buyReceipt, metal, stockMovement, user } from "@ong/db";
 import { and, asc, eq, exists, gte, inArray, lte, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -70,6 +70,12 @@ export interface PurchaseTotals {
   by_metal: MetalAmount[];
 }
 
+export interface PurchaseItem {
+  label: string;
+  grams: string;
+  amount: string;
+}
+
 /** แถวของรายงาน = หนึ่งบิล — คอลัมน์ตาม finance_report3 ของระบบเดิม + สาขา · เลขบัตร (มาสก์) · ผู้บันทึก */
 export interface PurchaseRow {
   /** ลำดับ */
@@ -85,6 +91,11 @@ export interface PurchaseRow {
   customer: { id: string; name_th: string; national_id_masked: string };
   /** รายการสินค้า — เฉพาะโลหะที่มีในบิล (หลังตัวกรอง) */
   metals: MetalAmount[];
+  /**
+   * รายการตามที่พิมพ์บนใบรับซื้อ (groupLinesByMetal ตัวเดียวกับ PDF) — หนึ่งแถวต่อ (โลหะ · ค่าบริสุทธิ์ · หัก %)
+   * เช่น "ทอง 96.5% หัก 3%" · บิลก่อนมีค่าบริสุทธิ์ = ชื่อโลหะ (UAT 30 ก.ย. 2569: แสดง % ในรายงานยอดซื้อ)
+   */
+  items: PurchaseItem[];
   /** จำนวน(กรัม) */
   total_weight: string;
   /** รวมจำนวนเงิน */
@@ -198,6 +209,27 @@ export async function purchaseReportIn(tx: Tx, scope: BranchRef[], f: PurchaseFi
       ),
     )
     .orderBy(asc(buyReceipt.date), asc(branch.code), asc(buyReceipt.docNo), asc(buyReceipt.id));
+  // แถวสินค้าของทุกบิล (หลังตัวกรองโลหะ) → รายการแบบเดียวกับที่พิมพ์บนใบ
+  const lineRows = await tx
+    .select({
+      receiptId: buyLine.receiptId,
+      metalName: metal.nameTh,
+      weightG: buyLine.weightG,
+      amount: buyLine.amount,
+      purityPercent: buyLine.purityPercent,
+      deductPercent: buyLine.deductPercent,
+    })
+    .from(buyLine)
+    .innerJoin(buyReceipt, eq(buyReceipt.id, buyLine.receiptId))
+    .innerJoin(metal, eq(metal.id, buyLine.metalId))
+    .where(lineWhere)
+    .orderBy(asc(buyLine.receiptId), asc(buyLine.lineNo));
+  const linesOf = new Map<string, ReceiptLine[]>();
+  for (const { receiptId, ...l } of lineRows) {
+    const list = linesOf.get(receiptId);
+    if (list) list.push(l);
+    else linesOf.set(receiptId, [l]);
+  }
   // ต่อบิลต่อโลหะ + ต่อบิล ในคำสั่งเดียว (grouping sets)
   const perBill = await tx
     .select({
@@ -249,6 +281,11 @@ export async function purchaseReportIn(tx: Tx, scope: BranchRef[], f: PurchaseFi
       const s = billSum.get(key(b.id, m.id));
       return s ? [metalAmount(m, s)] : [];
     }),
+    items: groupLinesByMetal(linesOf.get(b.id) ?? []).map((g) => ({
+      label: g.label,
+      grams: g.weightG,
+      amount: g.amount,
+    })),
     total_weight: fmtWeight(D(billSum.get(key(b.id, null))?.grams ?? "0")),
     total_amount: fmtMoney(D(billSum.get(key(b.id, null))?.amount ?? "0")),
     created_by: { id: b.createdBy, name: b.createdByName },
@@ -296,7 +333,8 @@ export function purchaseCsv(r: PurchaseReport): string {
     csvText(branchLabel(x.branch)),
     csvText(x.customer.name_th),
     csvText(x.customer.national_id_masked),
-    csvText(x.metals.map((m) => m.name_th).join(", ")),
+    // ป้ายเดียวกับบนใบรับซื้อ เช่น "ทอง 96.5% หัก 3%, เงิน 92.5%" · บิลเก่า = ชื่อโลหะเหมือนเดิม
+    csvText(x.items.map((m) => m.label).join(", ")),
     x.total_weight,
     x.total_amount,
     csvText(x.created_by.name),

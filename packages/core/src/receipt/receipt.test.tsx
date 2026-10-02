@@ -78,7 +78,7 @@ describe("renderReceiptHtml — ใบรับซื้อของเก่า
     }
   });
 
-  it("ใบจริงพิมพ์ 1 บรรทัดต่อโลหะ: 5.860 กรัม · 3,418.09 · 20,030.00", () => {
+  it("บิลเก่า (ไม่มีค่าบริสุทธิ์) พิมพ์ชื่อโลหะอย่างเดียว 1 บรรทัดต่อโลหะ เหมือนใบจริง: 5.860 กรัม · 3,418.09 · 20,030.00", () => {
     const html = renderReceiptHtml(rc6909());
     expect(count(html, '<td class="c">ทอง</td>')).toBe(1);
     expect(html).toContain(
@@ -129,6 +129,83 @@ describe("renderReceiptHtml — ใบรับซื้อของเก่า
     expect(html).toContain('<td class="r">5.03</td><td class="r">10.05</td>');
     expect(html).toContain("สิบบาทสามสิบห้าสตางค์");
     expect(html).not.toMatch(/0\.3000000|0\.30000000000000004|e[+-]\d/);
+  });
+
+  it("บิลใหม่พิมพ์ % บนใบ: 1 บรรทัดต่อ (โลหะ · ค่าบริสุทธิ์ · หัก %) · หัก 0 ไม่พิมพ์ · ตัวเลขจาก DB ตัดศูนย์ท้าย", () => {
+    // ค่าบริสุทธิ์/หัก % ตามที่ DB คืน numeric(6,3)/(5,2) · ยอดคิดมือจากสูตร (ทองแท่งรับซื้อ 67,650 · เงิน 45/กรัม):
+    // ทอง 96.5% หัก 3%: 10 ก. 41,535 + 2 ก. 8,307 = 49,842 ÷ 12 = 4,153.50 · ทอง 90% 1 ก.: ⌊4,437.84 × 0.9⌋ = 3,994
+    // เงิน 92.5% 271.56 ก.: ⌊41 × 271.56⌋ = 11,133 ÷ 271.56 = 40.996… → 41.00 · รวม 64,969.00
+    const graded = (
+      metalName: string,
+      purityPercent: string,
+      deductPercent: string,
+      weightG: string,
+      amount: string,
+    ) => ({
+      metalName,
+      weightG,
+      amount,
+      purityPercent,
+      deductPercent,
+    });
+    const data = rc6909({
+      lines: [
+        graded("ทอง", "96.500", "3.00", "10.000", "41535.00"),
+        graded("ทอง", "90.000", "0.00", "1.000", "3994.00"),
+        graded("เงิน", "92.500", "0.00", "271.560", "11133.00"),
+        graded("ทอง", "96.500", "3.00", "2.000", "8307.00"),
+      ],
+      detail: null,
+      totalAmount: "64969.00",
+      payments: [{ label: "เงินสด", bank: null, amount: "64969.00" }],
+    });
+    const html = renderReceiptHtml(data);
+    const rows = [
+      '<td class="c">ทอง 96.5% หัก 3%</td><td class="c">12.000</td><td class="c">กรัม</td>' +
+        '<td class="r">4,153.50</td><td class="r">49,842.00</td>',
+      '<td class="c">ทอง 90%</td><td class="c">1.000</td><td class="c">กรัม</td>' +
+        '<td class="r">3,994.00</td><td class="r">3,994.00</td>',
+      '<td class="c">เงิน 92.5%</td><td class="c">271.560</td><td class="c">กรัม</td>' +
+        '<td class="r">41.00</td><td class="r">11,133.00</td>',
+    ];
+    for (const row of rows) expect(html, row).toContain(row);
+    // เรียงตามที่กลุ่มปรากฏครั้งแรก · แถวที่ 4 รวมเข้ากลุ่มแรก ไม่พิมพ์ซ้ำ
+    expect(rows.map((row) => html.indexOf(row))).toStrictEqual(
+      rows.map((row) => html.indexOf(row)).sort((a, b) => a - b),
+    );
+    expect(count(html, '<td class="c">ทอง 96.5% หัก 3%</td>')).toBe(1);
+    expect(count(html, '<td class="r">')).toBe(3 * 2 + 1); // 3 บรรทัดรายการ (ราคาต่อหน่วย · ราคารวม) + แถวชำระ 1
+    expect(html).not.toMatch(/96\.500|3\.00%|หัก 0%/);
+    expect(html).toContain("หกหมื่นสี่พันเก้าร้อยหกสิบเก้าบาทถ้วน");
+    // หน้าเว็บ (<Receipt/>) พิมพ์บรรทัดชุดเดียวกัน
+    const web = renderToStaticMarkup(<Receipt data={data} />);
+    for (const row of rows) expect(web, row).toContain(row);
+  });
+
+  it("ชื่อรายการที่ต่อ % แล้วยัง escape ชื่อโลหะ (XSS ใน PDF/หน้าเว็บ)", () => {
+    const html = renderReceiptHtml(
+      rc6909({
+        lines: [
+          {
+            metalName: "<img src=x onerror=alert(6)>",
+            weightG: "5.860",
+            amount: "20030.00",
+            purityPercent: "96.500",
+            deductPercent: "3.00",
+          },
+        ],
+      }),
+    );
+    expect(html).not.toContain("<img");
+    expect(html).toContain('<td class="c">&lt;img src=x onerror=alert(6)&gt; 96.5% หัก 3%</td>');
+  });
+
+  it("ค่าบริสุทธิ์เสีย → ReceiptDataError ทั้ง PDF และหน้าเว็บ (ไม่พิมพ์ % มั่ว)", () => {
+    const bad = rc6909({
+      lines: [{ metalName: "ทอง", weightG: "5.860", amount: "20030.00", purityPercent: "abc", deductPercent: "0" }],
+    });
+    expect(() => renderReceiptHtml(bad)).toThrow(ReceiptDataError);
+    expect(() => renderToStaticMarkup(<Receipt data={bad} />)).toThrow(/ค่าบริสุทธิ์ไม่ใช่ตัวเลข/);
   });
 
   it("ชื่อว่างใช้ 'ลูกค้าทั่วไป' · ช่องว่างไม่พิมพ์ null/undefined", () => {

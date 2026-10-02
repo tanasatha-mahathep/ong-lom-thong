@@ -25,7 +25,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       await page.keyboard.press("Enter");
 
       // บัญชีหลายสาขามีขั้นเลือกสาขา (โฟกัสอยู่ที่สาขาปัจจุบัน) — Enter ยืนยันได้เลย
-      const home = page.getByRole("heading", { level: 1, name: "หน้าแรก" });
+      const home = page.getByRole("heading", { level: 1, name: "หน้าหลัก" });
       const branchStep = page.getByRole("heading", { level: 1, name: "เลือกสาขาที่ทำงาน" });
       await expect(home.or(branchStep)).toBeVisible();
       if (await branchStep.isVisible()) {

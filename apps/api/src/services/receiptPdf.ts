@@ -41,7 +41,13 @@ export interface BranchHeader {
 export interface ReceiptSource {
   receipt: ReceiptRow;
   branch: BranchHeader;
-  lines: { metalName: string; weightG: string; amount: string }[];
+  lines: {
+    metalName: string;
+    weightG: string;
+    amount: string;
+    purityPercent: string | null;
+    deductPercent: string | null;
+  }[];
   payments: { method: string; bank: string | null; amount: string }[];
 }
 
@@ -107,7 +113,14 @@ export async function loadReceiptSource(db: Queryable, receiptId: string): Promi
     .limit(1);
   if (!row) return null;
   const lines = await db
-    .select({ metalName: metal.nameTh, weightG: buyLine.weightG, amount: buyLine.amount })
+    .select({
+      metalName: metal.nameTh,
+      weightG: buyLine.weightG,
+      amount: buyLine.amount,
+      // พิมพ์ % บนใบ (UAT 30 ก.ย. 2569) — null = บิลก่อนมีช่องนี้ พิมพ์ชื่อโลหะอย่างเดียวเหมือนเดิม
+      purityPercent: buyLine.purityPercent,
+      deductPercent: buyLine.deductPercent,
+    })
     .from(buyLine)
     .innerJoin(metal, eq(metal.id, buyLine.metalId))
     .where(eq(buyLine.receiptId, receiptId))
@@ -148,7 +161,13 @@ export function toReceiptData(
       address: snap.address,
       nationalId: opts.nationalId === "full" ? snap.national_id : maskNationalId(snap.national_id),
     },
-    lines: src.lines.map((l) => ({ metalName: l.metalName, weightG: l.weightG, amount: l.amount })),
+    lines: src.lines.map((l) => ({
+      metalName: l.metalName,
+      weightG: l.weightG,
+      amount: l.amount,
+      purityPercent: l.purityPercent,
+      deductPercent: l.deductPercent,
+    })),
     detail: r.detail,
     totalAmount: r.totalAmount,
     payments: src.payments.map((p) => ({

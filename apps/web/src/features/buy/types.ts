@@ -7,10 +7,17 @@ import { BranchSchema } from "@/lib/queries";
  * เงิน/น้ำหนักเป็นข้อความเสมอ ทั้งขาไปและขากลับ — หน้าเว็บไม่คำนวณเงินเอง (CLAUDE.md กฎ 1–2)
  */
 
+/**
+ * แถวที่พนักงานกรอก — ไม่มีราคา: เซิร์ฟเวอร์คิดจากราคาของวัน × น้ำหนัก × ค่าบริสุทธิ์ แล้วหัก % (UAT 30 ก.ย. 2569)
+ * ทุกช่องเป็นข้อความ (API ปฏิเสธตัวเลข JSON)
+ */
 export interface QuoteLineInput {
   metal_id: string;
   weight_g: string;
-  amount: string;
+  /** ค่าบริสุทธิ์ (%) 1–100 ทศนิยมไม่เกิน 2 ตำแหน่ง */
+  purity_percent: string;
+  /** หัก % เลขเต็ม "0"–"10" */
+  deduct_percent: string;
 }
 
 /** โอนต้องมีธนาคาร · เงินสดห้ามส่งคีย์ bank (API ตอบ error ต่อแถว) */
@@ -39,7 +46,10 @@ export interface SaveBody extends QuoteBody {
 const QuoteErrorSchema = z.object({ field: z.string(), message: z.string() });
 export type QuoteError = z.infer<typeof QuoteErrorSchema>;
 
-/** ผล quoteBuy() — errors ชี้ช่องแบบ "lines.0.amount" · lines มีเฉพาะแถวที่ถูก (จับคู่ด้วย index) */
+/**
+ * ผล quoteBuy() — errors ชี้ช่องแบบ "lines.0.purity_percent" · lines มีเฉพาะแถวที่ถูก (จับคู่ด้วย index)
+ * ราคาทุกตัวของแถวคิดที่เซิร์ฟเวอร์ (assessBuyLine ใน @ong/core) — หน้าเว็บแสดงอย่างเดียว
+ */
 export const QuoteSchema = z.object({
   ok: z.boolean(),
   errors: z.array(QuoteErrorSchema),
@@ -51,7 +61,21 @@ export const QuoteSchema = z.object({
       index: z.number().int().nonnegative(),
       metal_id: z.string(),
       weight_g: decimalString,
+      /** รูปมาตรฐาน 2 ตำแหน่ง "96.50" */
+      purity_percent: decimalString,
+      /** เลขเต็ม "0"–"10" */
+      deduct_percent: decimalString,
+      /** ราคาตั้งต้นของวัน — ทอง/นาก บาทต่อบาททอง (ทองแท่งรับซื้อ) · เงิน/แพลตตินั่ม บาทต่อกรัม */
+      base_price: decimalString,
+      /** ราคาต่อกรัมหลังคิดค่าบริสุทธิ์ ก่อนหัก % */
+      unit_price: decimalString,
+      /** ยอดก่อนหัก % */
+      gross_amount: decimalString,
+      /** เงินที่หัก % */
+      deduct_amount: decimalString,
+      /** ยอดที่จ่ายจริงของแถว */
       amount: decimalString,
+      /** amount ÷ น้ำหนัก (แสดงเท่านั้น) */
       price_per_g: decimalString,
     }),
   ),

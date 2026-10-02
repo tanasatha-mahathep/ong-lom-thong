@@ -237,6 +237,8 @@ function SetBranchPriceForm({ row, onDone }: { row: BranchGoldPrice; onDone: () 
       </p>
       <PriceFormError form={form} />
       <PriceInputField form={form} inputRef={inputRef} label={t("branchDialog.label")} autoFocus />
+      {/* API ปฏิเสธราคาต่อกรัมที่ราคาเฉพาะสาขา — บอกไว้ตรงนี้ ผู้จัดการจะได้ไม่หาช่อง */}
+      <p className="text-sm text-muted-foreground">{t("branchDialog.perGramNote")}</p>
       <QuotePreview form={form} />
       <DialogFooter>
         <DialogClose asChild>

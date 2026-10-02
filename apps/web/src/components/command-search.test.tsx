@@ -70,7 +70,7 @@ async function openPalette() {
   return dialog;
 }
 
-/** query string ของคำขอที่มีคำค้น (ไม่นับการ์ดบนหน้าแรกที่ถามรายการของวันนี้) */
+/** query string ของคำขอที่มีคำค้น (ไม่นับการ์ดบนหน้าหลักที่ถามรายการของวันนี้) */
 const searchRequests = (api: ReturnType<typeof fakeApi>, path: "/api/customers" | "/api/buy") =>
   api
     .callsTo("GET", path)
@@ -83,7 +83,7 @@ const pastDebounce = () => act(() => new Promise((resolve) => setTimeout(resolve
 const FLOW_TIMEOUT = 30_000;
 
 describe("ปุ่มค้นหาใต้ตัวเลือกสาขา", { timeout: FLOW_TIMEOUT }, () => {
-  it("อยู่ถัดจากตัวเลือกสาขาในหัว sidebar · ชื่อ · aria-keyshortcuts · aria-haspopup · ป้าย Ctrl K (ประดับ)", async () => {
+  it("อยู่ถัดจากตัวเลือกสาขาในหัว sidebar · ชื่อ · aria-keyshortcuts · aria-haspopup · ไม่มีป้ายปุ่มลัดบนปุ่ม", async () => {
     setup();
     const sidebar = await screen.findByRole("complementary", { name: "แถบเมนู" });
     const button = within(sidebar).getByRole("button", { name: "ค้นหา…" });
@@ -92,17 +92,8 @@ describe("ปุ่มค้นหาใต้ตัวเลือกสาข�
     expect(branch.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(button).toHaveAttribute("aria-keyshortcuts", "Control+K Meta+K");
     expect(button).toHaveAttribute("aria-haspopup", "dialog");
-    const hint = button.querySelector("kbd");
-    expect(hint).toHaveTextContent("Ctrl K");
-    expect(hint).toHaveAttribute("aria-hidden", "true");
-    // แถบไอคอนตอนย่อ: เหลือไอคอน (ป้ายปุ่มลัดซ่อน)
-    expect(hint).toHaveClass("group-data-[collapsible=icon]:hidden");
-  });
-
-  it("เครื่อง Apple → ป้าย ⌘K", async () => {
-    vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
-    setup();
-    expect((await trigger()).querySelector("kbd")).toHaveTextContent("⌘K");
+    // เจ้าของขอเอาป้ายปุ่มลัดที่เห็นบนปุ่มออก (30 ก.ย.) — ปุ่มลัดยังใช้ได้ ประกาศผ่าน aria-keyshortcuts เท่านั้น
+    expect(button.querySelector("kbd")).not.toBeInTheDocument();
   });
 
   it("กดปุ่ม → เปิดหน้าค้นหา · Esc → ปิดและโฟกัสกลับที่ปุ่ม", async () => {
@@ -118,11 +109,11 @@ describe("ปุ่มค้นหาใต้ตัวเลือกสาข�
     await waitFor(() => expect(button).toHaveFocus());
   });
 
-  it("ย่อเป็นแถบไอคอน → tooltip บอกชื่อและปุ่มลัด", async () => {
+  it("ย่อเป็นแถบไอคอน → tooltip บอกชื่อ", async () => {
     document.cookie = "sidebar_state=false; path=/";
     setup();
     (await trigger()).focus();
-    expect(await screen.findByRole("tooltip", { name: "ค้นหา (Ctrl K)" })).toBeInTheDocument();
+    expect(await screen.findByRole("tooltip", { name: "ค้นหา" })).toBeInTheDocument();
   });
 
   it("มือถือ: กดค้นหาใน sheet เมนู → sheet ปิด หน้าค้นหาเปิด · ปิดแล้วโฟกัสไปปุ่มเมนู", async () => {
@@ -226,7 +217,7 @@ describe("เนื้อหาหน้าค้นหา", { timeout: FLOW_TIM
     const dialog = await openPalette();
 
     expect(optionNames(within(dialog).getByRole("group", { name: "ไปที่หน้า" }))).toEqual([
-      "หน้าแรก",
+      "หน้าหลัก",
       "ซื้อเข้า",
       "ค้นบิล",
       "ลูกค้า",
@@ -244,7 +235,14 @@ describe("เนื้อหาหน้าค้นหา", { timeout: FLOW_TIM
     const dialog = await openPalette();
 
     const pages = optionNames(within(dialog).getByRole("group", { name: "ไปที่หน้า" }));
-    expect(pages).toEqual(["หน้าแรก", "ค้นบิล", "ลูกค้า", "ยอดซื้อ รายงาน", "สต็อก รายงาน", "ส่งบัญชีรายเดือน รายงาน"]);
+    expect(pages).toEqual([
+      "หน้าหลัก",
+      "ค้นบิล",
+      "ลูกค้า",
+      "ยอดซื้อ รายงาน",
+      "สต็อก รายงาน",
+      "ส่งบัญชีรายเดือน รายงาน",
+    ]);
   });
 
   it("1 ตัวอักษร: กรองหน้าในเครื่อง ไม่ถาม API · 2 ตัวอักษร: ถามลูกค้า + บิลของสาขาปัจจุบัน (branch_id)", async () => {
@@ -252,10 +250,14 @@ describe("เนื้อหาหน้าค้นหา", { timeout: FLOW_TIM
     const dialog = await openPalette();
 
     await user.keyboard("ล");
-    expect(optionNames(within(dialog).getByRole("group", { name: "ไปที่หน้า" }))).toEqual(["ค้นบิล", "ลูกค้า"]);
+    expect(optionNames(within(dialog).getByRole("group", { name: "ไปที่หน้า" }))).toEqual([
+      "หน้าหลัก",
+      "ค้นบิล",
+      "ลูกค้า",
+    ]);
     expect(searchBox(dialog)).toHaveAccessibleDescription("พิมพ์อีก 1 ตัวอักษรเพื่อค้นลูกค้าและบิล");
     expect(within(dialog).getByRole("status")).toHaveTextContent(
-      "พบ 2 รายการ — พิมพ์อีก 1 ตัวอักษรเพื่อค้นลูกค้าและบิล",
+      "พบ 3 รายการ — พิมพ์อีก 1 ตัวอักษรเพื่อค้นลูกค้าและบิล",
     );
     await pastDebounce();
     expect(searchRequests(api, "/api/customers")).toEqual([]);
@@ -369,7 +371,7 @@ describe("เลือกผลค้น", { timeout: FLOW_TIMEOUT }, () => {
     const selectedOption = () => within(dialog).getAllByRole("option", { selected: true })[0];
 
     await waitFor(() => expect(box).toHaveAttribute("aria-activedescendant", selectedOption()?.id));
-    expect(selectedOption()).toHaveTextContent("หน้าแรก");
+    expect(selectedOption()).toHaveTextContent("หน้าหลัก");
 
     await user.keyboard("นาย");
     const customer = await within(dialog).findByRole("option", { name: /นายทดสอบ ระบบ/ });
@@ -377,7 +379,7 @@ describe("เลือกผลค้น", { timeout: FLOW_TIMEOUT }, () => {
     await waitFor(() => expect(box).toHaveAttribute("aria-activedescendant", customer.id));
 
     await user.keyboard("{Backspace}{Backspace}{Backspace}");
-    await waitFor(() => expect(selectedOption()).toHaveTextContent("หน้าแรก"));
+    await waitFor(() => expect(selectedOption()).toHaveTextContent("หน้าหลัก"));
     await waitFor(() => expect(box).toHaveAttribute("aria-activedescendant", selectedOption()?.id));
   });
 
@@ -471,10 +473,10 @@ describe("เลือกผลค้น", { timeout: FLOW_TIMEOUT }, () => {
       expect(within(dialog).getByRole("option", { name: "ลูกค้า" })).toHaveAttribute("aria-selected", "true"),
     );
     await user.keyboard("{Home}");
-    const first = within(dialog).getByRole("option", { name: "หน้าแรก" });
+    const first = within(dialog).getByRole("option", { name: "หน้าหลัก" });
     await waitFor(() => expect(first).toHaveAttribute("aria-selected", "true"));
 
-    await user.click(within(dialog).getByRole("option", { name: "หน้าแรก" }));
+    await user.click(within(dialog).getByRole("option", { name: "หน้าหลัก" }));
     await waitFor(() => expect(queryPalette()).not.toBeInTheDocument());
     expect(router.state.location.pathname).toBe("/");
     await waitFor(() => expect(button).toHaveFocus());
@@ -536,7 +538,7 @@ describe("เลือกผลค้น", { timeout: FLOW_TIMEOUT }, () => {
     await openPalette();
     await user.keyboard("{Control>}{Enter}{/Control}");
 
-    // Enter เลือก "หน้าแรก" → ฟอร์มยังไม่บันทึก → ถามยืนยัน · ฟอร์มลูกค้าไม่ถูกส่ง
+    // Enter เลือก "หน้าหลัก" → ฟอร์มยังไม่บันทึก → ถามยืนยัน · ฟอร์มลูกค้าไม่ถูกส่ง
     expect(await screen.findByRole("alertdialog", { name: "ข้อมูลในหน้านี้ยังไม่ได้บันทึก" })).toBeInTheDocument();
     await user.keyboard("{Control>}{Enter}{/Control}");
     await pastDebounce();

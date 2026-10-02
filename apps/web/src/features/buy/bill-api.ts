@@ -22,7 +22,16 @@ const ReceiptSchema = z.object({
   date: z.iso.date(),
   time: z.string(),
   customer: z.object({ nameTh: z.string(), address: z.string().nullable(), nationalId: z.string() }),
-  lines: z.array(z.object({ metalName: z.string(), weightG: decimalString, amount: decimalString })),
+  // ค่าบริสุทธิ์/หัก % พิมพ์ในชื่อรายการ ("ทอง 96.5% หัก 3%") — ต้องอยู่ใน schema ไม่งั้น zod ตัดทิ้ง ใบบนจอจะต่างจาก PDF
+  lines: z.array(
+    z.object({
+      metalName: z.string(),
+      weightG: decimalString,
+      amount: decimalString,
+      purityPercent: decimalString.nullish(),
+      deductPercent: decimalString.nullish(),
+    }),
+  ),
   detail: z.string().nullable(),
   totalAmount: decimalString,
   payments: z.array(z.object({ label: z.string(), bank: z.string().nullable(), amount: decimalString })),
@@ -52,6 +61,15 @@ export const BillSchema = z.object({
       line_no: z.number().int(),
       metal: z.object({ id: z.string(), code: z.string(), name_th: z.string() }),
       weight_g: decimalString,
+      /**
+       * ราคาที่ระบบคิด (UAT 30 ก.ย. 2569) — null ทั้งชุด = บิลก่อนมีสูตรนี้ (ราคาพิมพ์เอง)
+       * บริสุทธิ์ "96.50" · หัก % เลขเต็ม "3" · base = ราคาตั้งต้นของวัน · unit = ราคา/กรัมก่อนหัก · gross = ยอดก่อนหัก
+       */
+      purity_percent: decimalString.nullable(),
+      deduct_percent: decimalString.nullable(),
+      base_price: decimalString.nullable(),
+      unit_price: decimalString.nullable(),
+      gross_amount: decimalString.nullable(),
       amount: decimalString,
       price_per_g: decimalString,
     }),

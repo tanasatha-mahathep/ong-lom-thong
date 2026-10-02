@@ -11,12 +11,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { formatBoardPrice, formatInteger } from "@/lib/format";
+import { formatBoardPrice, formatInteger, formatMoney } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "./i18n";
-import type { PriceForm } from "./use-price-form";
+import { PER_GRAM_FIELDS } from "./queries";
+import type { PerGramPrices, PriceForm } from "./use-price-form";
 
 /** ราคา 3 ค่าของวัน — null = ยังไม่มีราคา (แสดง "–") */
 export interface Prices {
@@ -74,6 +75,46 @@ export function PriceInputField({
   );
 }
 
+/**
+ * ช่องราคาเงิน/แพลตตินั่มต่อกรัม (เฉพาะราคากลาง · ไม่บังคับ) — เติมราคาของวันนี้ไว้ให้ · Enter บันทึกพร้อมราคาทอง
+ * ฟอร์มที่ไม่มีช่องนี้ (ราคาเฉพาะสาขา) ไม่ render อะไร
+ */
+export function PerGramInputs({ form }: { form: PriceForm }) {
+  const { t } = useTranslation("goldPrice");
+  if (form.perGramFields.length === 0) return null;
+  const hintId = `${form.ids.input}-per-gram-hint`;
+  return (
+    <FieldSet className="gap-3">
+      <FieldLegend variant="label">{t("perGram.legend")}</FieldLegend>
+      {/* การ์ดครึ่งจอ (lg) แคบเกินสองช่องคู่กัน — ป้ายตัดบรรทัดไม่เท่ากัน ช่องไม่ตรงแนว */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+        {form.perGramFields.map((f) => (
+          <Field key={f.field} data-invalid={!!f.error}>
+            <FieldLabel htmlFor={f.ids.input}>{t(`perGram.${f.field}`)}</FieldLabel>
+            <Input
+              ref={f.ref}
+              id={f.ids.input}
+              name={f.field}
+              inputMode="decimal"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={t(`perGram.placeholder.${f.field}`)}
+              readOnly={form.saving}
+              value={f.text}
+              onChange={(event) => f.change(event.target.value)}
+              aria-invalid={!!f.error}
+              aria-describedby={[f.error && f.ids.error, hintId].filter(Boolean).join(" ")}
+              className="tabular-nums"
+            />
+            <FieldError id={f.ids.error}>{f.error}</FieldError>
+          </Field>
+        ))}
+      </div>
+      <FieldDescription id={hintId}>{t("perGram.hint")}</FieldDescription>
+    </FieldSet>
+  );
+}
+
 /** ผลจาก POST /gold-price/quote — live region: โปรแกรมอ่านจอประกาศเมื่อคำนวณเสร็จ (aria-busy กันประกาศระหว่างพิมพ์) */
 export function QuotePreview({ form }: { form: PriceForm }) {
   const { t } = useTranslation("goldPrice");
@@ -88,7 +129,7 @@ export function QuotePreview({ form }: { form: PriceForm }) {
           <p className="text-sm text-muted-foreground">{t("preview.idle")}</p>
         ) : (
           <>
-            <PriceList prices={form.preview} muted={form.busy} />
+            <PriceList prices={form.preview} perGram={form.perGramPreview} muted={form.busy} />
             {form.busy ? (
               <p className="flex items-center gap-2 text-sm text-muted-foreground">
                 <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
@@ -111,7 +152,19 @@ export function QuotePreview({ form }: { form: PriceForm }) {
   );
 }
 
-export function PriceList({ prices, muted = false }: { prices: Prices | undefined; muted?: boolean }) {
+/**
+ * ราคาของวันแบบรายการ — ทอง 3 ค่า + (ถ้าส่งมา) ราคาเงิน/แพลตตินั่มต่อกรัม
+ * ราคาต่อกรัม null = "ยังไม่ได้ตั้ง" (ตัวอักษรเล็ก ไม่ใช่ตัวเลข — ไม่ให้อ่านเป็นราคา 0)
+ */
+export function PriceList({
+  prices,
+  perGram,
+  muted = false,
+}: {
+  prices: Prices | undefined;
+  perGram?: PerGramPrices;
+  muted?: boolean;
+}) {
   const { t } = useTranslation("goldPrice");
   return (
     <dl className="grid gap-2">
@@ -130,17 +183,52 @@ export function PriceList({ prices, muted = false }: { prices: Prices | undefine
         value={formatInteger(prices?.jewelry_buy)}
         muted={muted}
       />
+      {perGram &&
+        PER_GRAM_FIELDS.map((field) => {
+          const value = perGram[field];
+          return value === null ? (
+            <PriceRow key={field} label={t(`perGram.${field}`)} value={t("perGram.notSet")} muted notSet />
+          ) : (
+            <PriceRow key={field} label={t(`perGram.${field}`)} value={formatMoney(value)} muted={muted} />
+          );
+        })}
     </dl>
   );
 }
 
-function PriceRow({ label, value, muted }: { label: string; value: string; muted: boolean }) {
+function PriceRow({
+  label,
+  value,
+  muted,
+  notSet = false,
+}: {
+  label: string;
+  value: string;
+  muted: boolean;
+  notSet?: boolean;
+}) {
   return (
     <div className="flex items-baseline justify-between gap-4">
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className={cn("text-xl font-semibold tabular-nums", muted && "text-muted-foreground")}>{value}</dd>
+      <dd
+        className={cn(
+          notSet ? "text-sm" : "text-xl font-semibold tabular-nums",
+          (muted || notSet) && "text-muted-foreground",
+        )}
+      >
+        {value}
+      </dd>
     </div>
   );
+}
+
+/** ราคาต่อกรัมที่ยังไม่ได้ตั้งของวันนี้ → บอกว่ารับซื้อโลหะนั้นไม่ได้ · ตั้งครบแล้ว = ไม่ render */
+export function PerGramMissingNote({ perGram }: { perGram: PerGramPrices }) {
+  const { t } = useTranslation("goldPrice");
+  const missing = PER_GRAM_FIELDS.filter((field) => perGram[field] === null);
+  if (missing.length === 0) return null;
+  const metals = missing.map((field) => t(`perGram.metal.${field}`)).join(t("perGram.and"));
+  return <p className="text-sm text-muted-foreground">{t("perGram.missing", { metals })}</p>;
 }
 
 /**

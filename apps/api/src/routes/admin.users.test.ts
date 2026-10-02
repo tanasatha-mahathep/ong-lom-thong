@@ -104,10 +104,11 @@ describe.skipIf(!available)("ผู้ดูแล: ผู้ใช้ — /api/
     if (out.temporary_password) secrets.add(out.temporary_password);
     return out;
   };
+  // ทอง 96.5% 5.860 ก. ไม่หัก @ ทองแท่งรับซื้อ 67,650: ⌊67650 × 0.0656 × 0.965⌋ = 4,282/ก. → ⌊4282 × 5.86⌋ = 25,092
   const bill = () => ({
     customer_id: customerId,
-    lines: [{ metal_id: goldId, weight_g: "5.860", amount: "20030" }],
-    payments: [{ method: "cash", amount: "20030" }],
+    lines: [{ metal_id: goldId, weight_g: "5.860", purity_percent: "96.5" }],
+    payments: [{ method: "cash", amount: "25092" }],
     idempotency_key: `admin-scope-${String(++keySeq).padStart(8, "0")}`,
   });
 

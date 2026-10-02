@@ -1,4 +1,4 @@
-import { CARD_STATUS_MESSAGE, type CardStatus, type PAYMENT_METHODS } from "@ong/core";
+import { CARD_STATUS_MESSAGE, type CardStatus, DEDUCT_PERCENT_CHOICES, type PAYMENT_METHODS } from "@ong/core";
 import { formatMoney } from "@/lib/format";
 import { addDaysIso, isoToThaiInput, thaiInputToIso } from "@/lib/thai-date";
 import type { CustomerListItem } from "@/features/customers/model";
@@ -13,14 +13,24 @@ import type { Quote, QuoteBody, QuoteError, QuotePaymentInput, SaveBody } from "
 
 export type PaymentMethod = keyof typeof PAYMENT_METHODS;
 
+/**
+ * แถวที่กำลังกรอก: โลหะ → ค่าบริสุทธิ์ (%) → หัก % → ปริมาณ — ไม่มีช่องราคา เซิร์ฟเวอร์คิดราคาให้ (UAT 30 ก.ย. 2569)
+ * ทุกช่องเป็นข้อความตามที่พิมพ์/เลือก ไม่แปลงเป็น number
+ */
 export interface LineEntry {
   metal_id: string;
+  purity_percent: string;
+  /** "0"–"10" จาก dropdown (ค่าเริ่มต้น "0" = ไม่หัก) */
+  deduct_percent: string;
   weight_g: string;
-  amount: string;
 }
 export interface LineRow extends LineEntry {
   key: string;
 }
+
+/** หัก % ที่เลือกได้ — ชุดเดียวกับที่ API ตรวจ (DEDUCT_PERCENT_CHOICES "0"–"10") · ค่าเริ่มต้น = ไม่หัก */
+export const DEDUCT_CHOICES = DEDUCT_PERCENT_CHOICES;
+export const NO_DEDUCT = "0";
 
 export interface PaymentEntry {
   method: PaymentMethod;
@@ -100,7 +110,7 @@ export const initialBuyState: BuyState = {
   searchText: "",
   customer: null,
   customerQuery: "",
-  lineEntry: { metal_id: "", weight_g: "", amount: "" },
+  lineEntry: { metal_id: "", purity_percent: "", deduct_percent: NO_DEDUCT, weight_g: "" },
   lineError: null,
   lines: [],
   detail: "",
@@ -156,6 +166,14 @@ function commitBackdate(b: Backdate, today: string): Backdate {
   };
 }
 
+/** ล้างแถวที่กำลังกรอก (Esc · หลังเพิ่มแถว): ค่าบริสุทธิ์/ปริมาณว่าง · หัก % กลับเป็น 0 · โลหะคงเดิม */
+const clearedEntry = (e: LineEntry): LineEntry => ({
+  ...e,
+  purity_percent: "",
+  deduct_percent: NO_DEDUCT,
+  weight_g: "",
+});
+
 export function buyReducer(state: BuyState, action: BuyAction): BuyState {
   switch (action.type) {
     case "reset":
@@ -204,17 +222,20 @@ export function buyReducer(state: BuyState, action: BuyAction): BuyState {
     case "lineEntryChanged":
       return { ...state, lineEntry: { ...state.lineEntry, ...action.patch }, lineError: null };
     case "lineEntryCleared":
-      return { ...state, lineEntry: { ...state.lineEntry, weight_g: "", amount: "" }, lineError: null };
+      return { ...state, lineEntry: clearedEntry(state.lineEntry), lineError: null };
     case "lineErrorSet":
       return { ...state, lineError: action.error };
     case "lineAdded": {
-      // ช่องที่พิมพ์ต่อระหว่างรอ quote ไม่ถูกล้างทิ้ง
+      // ช่องที่พิมพ์ต่อระหว่างรอ quote ไม่ถูกล้างทิ้ง (โลหะคงไว้เสมอ — แถวถัดไปมักเป็นโลหะเดียวกัน)
+      const e = state.lineEntry;
       const untouched =
-        state.lineEntry.weight_g === action.entry.weight_g && state.lineEntry.amount === action.entry.amount;
+        e.purity_percent === action.entry.purity_percent &&
+        e.deduct_percent === action.entry.deduct_percent &&
+        e.weight_g === action.entry.weight_g;
       return {
         ...state,
         lines: [...state.lines, action.line],
-        lineEntry: untouched ? { ...state.lineEntry, weight_g: "", amount: "" } : state.lineEntry,
+        lineEntry: untouched ? clearedEntry(e) : e,
         lineError: null,
       };
     }
@@ -266,7 +287,12 @@ export function buildQuoteBody(s: BuyState, reason: string = s.backdate.reason):
   const b = s.backdate;
   if (b.enabled && b.date === null) return null;
   const body: QuoteBody = {
-    lines: s.lines.map(({ metal_id, weight_g, amount }) => ({ metal_id, weight_g, amount })),
+    lines: s.lines.map(({ metal_id, weight_g, purity_percent, deduct_percent }) => ({
+      metal_id,
+      weight_g,
+      purity_percent,
+      deduct_percent,
+    })),
     payments: s.payments.map(paymentInput),
   };
   if (s.customer) body.customer_id = s.customer.id;
@@ -307,23 +333,27 @@ export function isDuplicatePayment(payments: readonly PaymentEntry[], method: Pa
   return payments.some((p) => p.method === method && (method === "cash" || p.bank.trim() === bank.trim()));
 }
 
-/** error ของช่องนั้นพอดี เช่น "lines.0.amount" */
+/** error ของช่องนั้นพอดี เช่น "lines.0.weight_g" */
 export const errorFor = (errors: readonly QuoteError[], field: string) => errors.find((e) => e.field === field);
 
 /** error ทุกช่องของแถว i เช่น prefix "lines" → lines.i.* */
 export const rowErrors = (errors: readonly QuoteError[], prefix: "lines" | "payments", index: number) =>
   errors.filter((e) => e.field.startsWith(`${prefix}.${index}.`));
 
-/** ช่องในแถวที่กำลังกรอกที่ API ติ (แถวใหม่ที่ index = จำนวนแถวเดิม) */
+/**
+ * ช่องในแถวที่กำลังกรอกที่ API ติ (แถวใหม่ที่ index = จำนวนแถวเดิม)
+ * ติหลายช่องพร้อมกัน → ช่องแรกตามลำดับ `fields` (= ลำดับที่พนักงานกรอก) ไม่ใช่ลำดับที่เซิร์ฟเวอร์ตรวจ
+ */
 export function entryErrorFrom<F extends string>(
   errors: readonly QuoteError[],
   prefix: "lines" | "payments",
   index: number,
   fields: readonly F[],
 ): EntryError<F> | null {
-  for (const e of rowErrors(errors, prefix, index)) {
-    const field = fields.find((f) => e.field === `${prefix}.${index}.${f}`);
-    if (field) return { field, message: e.message };
+  const row = rowErrors(errors, prefix, index);
+  for (const field of fields) {
+    const e = row.find((x) => x.field === `${prefix}.${index}.${field}`);
+    if (e) return { field, message: e.message };
   }
   return null;
 }
@@ -361,6 +391,7 @@ export function balanceView(
 export type FocusTarget =
   | "idBox"
   | "editCustomer"
+  | "purity"
   | "weight"
   | "detail"
   | "paymentAmount"
@@ -369,9 +400,10 @@ export type FocusTarget =
   | "backdateTime"
   | "backdateReason";
 
+/** error ของรายการสินค้า (ไม่มีแถว · แถวที่เพิ่มแล้วติด) → ช่องแรกของแถวกรอก (ค่าบริสุทธิ์) ที่เริ่มแถวใหม่/แก้ต่อได้ */
 export function focusTargetForField(field: string, hasCustomer: boolean): FocusTarget | null {
   if (field === "customer_id") return hasCustomer ? "editCustomer" : "idBox";
-  if (field === "lines" || field.startsWith("lines.")) return "weight";
+  if (field === "lines" || field.startsWith("lines.")) return "purity";
   if (/^payments\.\d+\.bank$/.test(field)) return "bank";
   if (field === "payments" || field.startsWith("payments.")) return "paymentAmount";
   if (field === "date") return "backdateDate";

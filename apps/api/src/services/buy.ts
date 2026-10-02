@@ -1,6 +1,9 @@
 import {
+  type BuyMetal,
   D,
+  METAL_PRICING,
   PAYMENT_METHODS,
+  PURITY_SCALE,
   type QuoteBuyResult,
   type QuoteError,
   ZERO,
@@ -8,10 +11,12 @@ import {
   businessDate,
   businessTime,
   cardStatus,
+  fmtInt,
   fmtMoney,
   fmtWeight,
   isPaymentMethod,
   maskNationalId,
+  normalizeBuyLine,
   quoteBuy,
 } from "@ong/core";
 import {
@@ -48,12 +53,27 @@ export const BUY_API_MSG = {
   backdateReasonShort: "เหตุผลที่บันทึกย้อนหลังต้องยาวอย่างน้อย 5 ตัวอักษร",
   backdateTime: "บิลย้อนหลังต้องระบุเวลา",
   futureTime: "เวลาต้องไม่เกินเวลาปัจจุบัน",
-  unknownMetal: "ไม่พบประเภทโลหะ",
   keyTaken: "idempotency_key นี้ถูกใช้แล้ว",
   keyReused: "idempotency_key นี้ใช้กับบิลอื่นแล้ว",
   docNoTaken: "เลขที่เอกสารชนกับบิลที่มีอยู่แล้ว — แจ้งผู้ดูแลระบบตรวจตัวนับเลขที่ (doc_sequence)",
   noGoldPriceOn: (isoDate: string) => `ยังไม่ได้ตั้งราคาทองของวันที่ ${beDate(isoDate)}`,
 } as const;
+
+/**
+ * ราคาตั้งต้นของโลหะ ณ วันบิล (ฐานของ assessBuyLine ใน @ong/core)
+ * ทอง/นาก (gold_bar_buy) = ทองแท่งรับซื้อ · เงิน/แพลตตินั่ม (per_gram) = ราคาต่อกรัมที่ร้านตั้งในราคาของวัน
+ */
+const PER_GRAM_PRICE: Readonly<Record<string, keyof Pick<TodayPrice, "silverPerG" | "platinumPerG">>> = {
+  silver: "silverPerG",
+  platinum: "platinumPerG",
+};
+
+function basePriceOf(code: string, price: TodayPrice | null): string | null {
+  if (!price) return null;
+  if (METAL_PRICING[code] === "gold_bar_buy") return price.barBuy;
+  const field = Object.hasOwn(PER_GRAM_PRICE, code) ? PER_GRAM_PRICE[code] : undefined;
+  return field ? price[field] : null;
+}
 
 // บิลย้อนหลัง (คีย์ใบเขียนมือหลังระบบล่ม · spec §11) — เจ้าของกำหนด 28 ก.ย.: ผู้จัดการขึ้นไป · ไม่เกิน 7 วัน · ต้องมีเหตุผล
 const BACKDATE_ROLES: readonly Role[] = ["manager", "admin"];
@@ -108,11 +128,15 @@ const isoDate = (label: string) =>
 const blankAsAbsent = <T extends z.ZodType>(schema: T) =>
   z.preprocess((v) => (v === null || (typeof v === "string" && v.trim() === "") ? undefined : v), schema.optional());
 
+// ราคาไม่ได้ส่งมาแล้ว — ระบบคิดจากราคาของวัน × น้ำหนัก × ค่าบริสุทธิ์ แล้วหัก % (UAT 30 ก.ย. 2569) · ช่องที่ผิดตอบใน quote ต่อแถว
 const LineBody = z.object({
-  // โลหะที่ไม่รู้จักตรวจใน prepareBuy (ตอบเป็น error ของแถว ไม่ใช่ 400)
+  // โลหะที่ไม่รู้จัก/ยังไม่มีราคาของวันตรวจใน quoteBuy (ตอบเป็น error ของแถว ไม่ใช่ 400)
   metal_id: z.string({ error: "กรุณาเลือกประเภทโลหะ" }).max(64, "metal_id ไม่ถูกต้อง"),
   weight_g: decimalText,
-  amount: decimalText,
+  /** ค่าบริสุทธิ์ (%) — ว่าง/ไม่ส่ง = quote แจ้ง "กรุณากรอกค่าบริสุทธิ์" ที่แถว */
+  purity_percent: decimalText.nullish(),
+  /** หัก % เลขเต็ม 0–10 — ไม่ส่ง/ว่าง = 0 */
+  deduct_percent: decimalText.nullish(),
 });
 
 const PaymentBody = z.object({
@@ -173,7 +197,12 @@ export interface PreparedBuy {
  * ส่วนที่ต้องอ่าน DB (สาขา · ราคาทองของวันบิล · ลูกค้า · โลหะ) ทำที่นี่แล้วต่อ error เข้ากับผลของ quoteBuy
  */
 const quoteLines = (body: QuoteBody) =>
-  body.lines.map((l) => ({ metalId: l.metal_id, weightG: l.weight_g, amount: l.amount }));
+  body.lines.map((l) => ({
+    metalId: l.metal_id,
+    weightG: l.weight_g,
+    purityPercent: l.purity_percent ?? "",
+    deductPercent: l.deduct_percent ?? null,
+  }));
 
 export async function prepareBuy(db: Db, viewer: Viewer, body: QuoteBody, now: Date): Promise<PreparedBuy> {
   const where = currentBranch(viewer, await forUser(db, viewer));
@@ -189,7 +218,7 @@ export async function prepareBuy(db: Db, viewer: Viewer, body: QuoteBody, now: D
   const [price, customerRow, metals, [head]] = await Promise.all([
     priceForBranch(db, date, where.id),
     body.customer_id ? findCustomer(db, body.customer_id) : null,
-    db.select({ id: metal.id }).from(metal),
+    db.select({ id: metal.id, code: metal.code, nameTh: metal.nameTh }).from(metal),
     db.select({ taxBranchCode: branch.taxBranchCode }).from(branch).where(eq(branch.id, where.id)),
   ]);
 
@@ -199,20 +228,26 @@ export async function prepareBuy(db: Db, viewer: Viewer, body: QuoteBody, now: D
     // สถานะบัตรคิด ณ วันที่ของบิล — บิลย้อนหลังใช้บัตรที่ยังไม่หมดอายุในวันนั้นได้
     customer: customerRow ? { id: customerRow.id, cardStatus: cardStatus(customerRow.cardExpireText, date) } : null,
     goldPriceSet: price !== null,
+    metals: Object.fromEntries(
+      metals.map((m): [string, BuyMetal] => [
+        m.id,
+        { code: m.code, nameTh: m.nameTh, basePrice: basePriceOf(m.code, price) },
+      ]),
+    ),
   });
 
-  const known = new Set(metals.map((m) => m.id));
   const errors: QuoteError[] = [
     // ไม่มีรหัสสาขาของกรมสรรพากร = ออก PDF เก็บถาวรไม่ได้ตลอดไป (หัวใบถูก snapshot ตอนบันทึก · R15) → ห้ามขายตั้งแต่แรก
     ...(head?.taxBranchCode?.trim() ? [] : [{ field: "branch", message: BUY_API_MSG.noTaxBranchCode }]),
     ...dateErrors(viewer, body, date, today),
-    // ข้อความของ core พูดถึง "วันนี้" — บิลย้อนหลังบอกวันที่ที่ขาดราคาให้ชัด
-    ...quote.errors.map((e) =>
-      e.field === "gold_price" && date !== today ? { ...e, message: BUY_API_MSG.noGoldPriceOn(date) } : e,
-    ),
-    ...body.lines.flatMap((l, i) =>
-      known.has(l.metal_id) ? [] : [{ field: `lines.${i}.metal_id`, message: BUY_API_MSG.unknownMetal }],
-    ),
+    // ข้อความของ core พูดถึง "วันนี้" — บิลย้อนหลังบอกวันที่ที่ขาดราคาให้ชัด (ทอง และเงิน/แพลตตินั่มต่อแถว)
+    ...quote.errors.map((e) => {
+      if (date === today) return e;
+      if (e.field === "gold_price") return { ...e, message: BUY_API_MSG.noGoldPriceOn(date) };
+      return e.message.endsWith("ของวันนี้")
+        ? { ...e, message: `${e.message.slice(0, -"ของวันนี้".length)}ของวันที่ ${beDate(date)}` }
+        : e;
+    }),
   ];
   return { branch: where, today, date, price, customer: customerRow, quote, errors, ok: errors.length === 0 };
 }
@@ -243,6 +278,12 @@ export const quoteJson = (p: PreparedBuy) => ({
     index: l.index,
     metal_id: l.metalId,
     weight_g: l.weightG,
+    purity_percent: l.purityPercent,
+    deduct_percent: l.deductPercent,
+    base_price: l.basePrice,
+    unit_price: l.unitPrice,
+    gross_amount: l.grossAmount,
+    deduct_amount: l.deductAmount,
     amount: l.amount,
     price_per_g: l.pricePerG,
   })),
@@ -316,7 +357,12 @@ async function findReplay(db: Db, viewer: Viewer, body: SaveBody, now: Date): Pr
   if (row.by !== viewer.userId) throw new BuyError(BUY_API_MSG.keyTaken, "idempotency_key", 409);
   const [lines, payments] = await Promise.all([
     db
-      .select({ metalId: buyLine.metalId, weightG: buyLine.weightG, amount: buyLine.amount })
+      .select({
+        metalId: buyLine.metalId,
+        weightG: buyLine.weightG,
+        purityPercent: buyLine.purityPercent,
+        deductPercent: buyLine.deductPercent,
+      })
       .from(buyLine)
       .where(eq(buyLine.receiptId, row.id))
       .orderBy(asc(buyLine.lineNo)),
@@ -333,39 +379,53 @@ async function findReplay(db: Db, viewer: Viewer, body: SaveBody, now: Date): Pr
 
 /** เวลาใน DB "10:00:00" → "10:00" */
 const hhmm = (t: string) => t.slice(0, 5);
-const lineKey = (metalId: string, weight: string, amount: string) =>
-  `${metalId.toLowerCase()}|${fmtWeight(D(weight))}|${fmtMoney(D(amount))}`;
+/** แถวในรูปมาตรฐาน (normalizeBuyLine) → กุญแจเทียบ · ราคาไม่อยู่ในกุญแจ: คิดจากราคาของวัน ไม่ใช่สิ่งที่ผู้ใช้ส่ง */
+const lineKey = (l: { metalId: string; weightG: string; purityPercent: string; deductPercent: string }) =>
+  `${l.metalId.toLowerCase()}|${l.weightG}|${l.purityPercent}|${l.deductPercent}`;
+type StoredLine = { metalId: string; weightG: string; purityPercent: string | null; deductPercent: string | null };
+/** แถวที่บันทึกแล้ว → กุญแจรูปเดียวกัน · บิลก่อนมีค่าบริสุทธิ์ (null) = ไม่มีทางตรงกับ body ใหม่ */
+const storedLineKey = (l: StoredLine) => {
+  if (l.purityPercent === null || l.deductPercent === null) return `${l.metalId}|legacy`;
+  const n = normalizeBuyLine({
+    metalId: l.metalId,
+    weightG: fmtWeight(D(l.weightG)),
+    purityPercent: D(l.purityPercent).toFixed(),
+    deductPercent: D(l.deductPercent).toFixed(),
+  });
+  return n ? lineKey(n) : `${l.metalId}|invalid`;
+};
 const paymentKey = (method: string, bank: string | null, amount: string) =>
   `${method}|${bank ?? ""}|${fmtMoney(D(amount))}`;
 const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((v, i) => v === b[i]);
 
 /**
- * เนื้อบิลเดียวกันหรือไม่ — ลูกค้า · แถวตามลำดับ (โลหะ · น้ำหนัก 3 ตำแหน่ง · ราคา 2 ตำแหน่ง)
+ * เนื้อบิลเดียวกันหรือไม่ — ลูกค้า · แถวตามลำดับ (โลหะ · น้ำหนัก 3 ตำแหน่ง · ค่าบริสุทธิ์ · หัก %)
  * · ชำระแบบไม่สนลำดับ (วิธี · ธนาคาร · จำนวน) · รายละเอียด · ใบกำกับเต็มรูป · วันที่ (ถ้าส่งมา)
- * · เวลา เฉพาะบิลย้อนหลัง (บิลวันนี้จอเติมเวลาใหม่ได้) — ตัวเลขทำเป็นรูปมาตรฐานด้วย quoteBuy ตัวเดียวกับตอนบันทึก
+ * · เวลา เฉพาะบิลย้อนหลัง (บิลวันนี้จอเติมเวลาใหม่ได้) — ตัวเลขทำเป็นรูปมาตรฐานด้วยตัวแยกเดียวกับ quoteBuy
  */
 function sameBill(
   body: SaveBody,
   today: string,
   row: { customerId: string; date: string; time: string; detail: string | null; fullTax: boolean },
-  lines: { metalId: string; weightG: string; amount: string }[],
+  lines: StoredLine[],
   payments: { method: string; bank: string | null; amount: string }[],
 ): boolean {
+  // ชำระ: ใช้ quoteBuy ทำรูปมาตรฐาน (แถวชำระไม่ขึ้นกับราคาของวัน) · แถวสินค้า: normalizeBuyLine ตัวแยกเดียวกัน
   const q = quoteBuy({
-    lines: quoteLines(body),
+    lines: [],
     payments: body.payments.map((p) => ({ method: p.method, bank: p.bank, amount: p.amount })),
     customer: null,
     goldPriceSet: true,
+    metals: {},
   });
-  // แถวที่ผิดรูป/ซ้ำถูกข้ามใน quoteBuy — จำนวนไม่เท่ากับที่ส่งมา = ไม่ใช่บิลเดิม
-  if (q.lines.length !== body.lines.length || q.payments.length !== body.payments.length) return false;
+  const bodyLines = quoteLines(body).map(normalizeBuyLine);
+  // แถวที่ผิดรูป/ซ้ำถูกข้าม — จำนวนไม่เท่ากับที่ส่งมา = ไม่ใช่บิลเดิม
+  const validLines = bodyLines.filter((l) => l !== null);
+  if (validLines.length !== body.lines.length || q.payments.length !== body.payments.length) return false;
   const backdated = body.date !== undefined && body.date < today;
   return (
     row.customerId === body.customer_id?.toLowerCase() &&
-    sameList(
-      q.lines.map((l) => lineKey(l.metalId, l.weightG, l.amount)),
-      lines.map((l) => lineKey(l.metalId, l.weightG, l.amount)),
-    ) &&
+    sameList(validLines.map(lineKey), lines.map(storedLineKey)) &&
     sameList(
       q.payments.map((p) => paymentKey(p.method, p.bank, p.amount)).sort(),
       payments.map((p) => paymentKey(p.method, p.bank, p.amount)).sort(),
@@ -430,6 +490,11 @@ async function insertBuy(
         weightG: l.weightG,
         amount: l.amount,
         pricePerG: l.pricePerG,
+        purityPercent: l.purityPercent,
+        deductPercent: l.deductPercent,
+        basePrice: l.basePrice,
+        assessedPricePerG: l.unitPrice,
+        assessmentAmount: l.grossAmount,
       })),
     );
     await tx
@@ -685,6 +750,11 @@ export async function getBuy(db: Db, readable: BranchRef[], id: string) {
         weightG: buyLine.weightG,
         amount: buyLine.amount,
         pricePerG: buyLine.pricePerG,
+        purityPercent: buyLine.purityPercent,
+        deductPercent: buyLine.deductPercent,
+        basePrice: buyLine.basePrice,
+        assessedPricePerG: buyLine.assessedPricePerG,
+        assessmentAmount: buyLine.assessmentAmount,
         metalId: metal.id,
         metalCode: metal.code,
         metalName: metal.nameTh,
@@ -728,6 +798,13 @@ export async function getBuy(db: Db, readable: BranchRef[], id: string) {
       line_no: l.lineNo,
       metal: { id: l.metalId, code: l.metalCode, name_th: l.metalName },
       weight_g: l.weightG,
+      // ราคาที่ระบบคิด (UAT 30 ก.ย. 2569) — null ทั้งชุด = บิลก่อนมีสูตรนี้ (ราคาพิมพ์เอง)
+      // รูปเดียวกับคำตอบของ quote: บริสุทธิ์ 2 ตำแหน่ง "96.50" · หัก % เลขเต็ม "3" (DB เก็บ numeric(6,3) / (5,2))
+      purity_percent: l.purityPercent === null ? null : D(l.purityPercent).toFixed(PURITY_SCALE),
+      deduct_percent: l.deductPercent === null ? null : fmtInt(D(l.deductPercent)),
+      base_price: l.basePrice,
+      unit_price: l.assessedPricePerG,
+      gross_amount: l.assessmentAmount,
       amount: l.amount,
       price_per_g: l.pricePerG,
     })),

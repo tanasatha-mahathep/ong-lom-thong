@@ -1,17 +1,44 @@
 import { D, type GoldPriceSetting, deriveGoldPrice, fmtInt, fmtMoney, parseDecimal, typoWarning } from "@ong/core";
 import { type Db, auditLog, goldPrice, goldPriceSetting } from "@ong/db";
-import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type { BranchRef } from "../lib/scope";
 import type { Executor } from "./adminCommon";
 import type { referenceAudit } from "./goldReference";
 
-export class GoldPriceInputError extends Error {}
+/** ช่องที่ผิด — route ตอบ 400 ชี้ช่องนี้ */
+export type GoldPriceField = "bar_sell" | "silver_per_g" | "platinum_per_g";
+
+export class GoldPriceInputError extends Error {
+  constructor(
+    message: string,
+    readonly field: GoldPriceField = "bar_sell",
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * ราคารับซื้อต่อกรัมที่ร้านตั้งเอง (ฐานสูตรเงิน/แพลตตินั่ม · METAL_PRICING ใน @ong/core) — ตั้งที่ราคากลางเท่านั้น ทุกสาขาใช้ร่วม
+ * undefined = ไม่ส่งมา (คงค่าเดิมของวันนั้น) · null = ล้าง (วันนั้นรับซื้อโลหะนี้ไม่ได้) · string = ตั้งค่าใหม่
+ */
+export interface PerGramInput {
+  silverPerG?: string | null;
+  platinumPerG?: string | null;
+}
+
+const PER_GRAM = [
+  { key: "silverPerG", field: "silver_per_g", name: "เงิน" },
+  { key: "platinumPerG", field: "platinum_per_g", name: "แพลตตินั่ม" },
+] as const;
 
 export interface GoldQuote {
   barSell: string;
   barBuy: string;
   jewelryBuy: string;
-  /** ด่านกันพิมพ์ผิด — ห่างจากราคาครั้งก่อน (ราคากลาง หรือราคาที่สาขาใช้จริง) เกินเกณฑ์ */
+  /** ราคาต่อกรัมรูปมาตรฐาน 2 ตำแหน่ง — undefined = ไม่ได้ส่งมา (คงค่าเดิม) */
+  silverPerG?: string | null;
+  platinumPerG?: string | null;
+  /** ด่านกันพิมพ์ผิด — ห่างจากราคาครั้งก่อน (ราคากลาง หรือราคาที่สาขาใช้จริง) เกินเกณฑ์ · หลายราคาต่อด้วย " · " */
   warning: string | null;
 }
 
@@ -26,6 +53,9 @@ type GoldPriceRow = typeof goldPrice.$inferSelect;
  */
 export const MAX_BAR_SELL = "999999.99";
 
+/** เพดานราคาต่อกรัม — เงิน ~40 · แพลตตินั่ม ~1,000 บาท/กรัม เผื่อไว้มาก แต่กันเลขหลุดช่องไม่ให้ล้น numeric(14,2) */
+export const MAX_PER_G = "99999.99";
+
 export async function loadGoldSetting(db: Db): Promise<GoldSettingRow> {
   const [s] = await db.select().from(goldPriceSetting).where(eq(goldPriceSetting.id, 1)).limit(1);
   if (!s) throw new Error("gold_price_setting ยังไม่ได้ seed");
@@ -37,23 +67,43 @@ export async function loadGoldSetting(db: Db): Promise<GoldSettingRow> {
  * - ราคากลาง (branchId = null): ราคากลางของวันนั้น
  * - ราคาเฉพาะสาขา: ราคาที่สาขาใช้จริงวันนั้น (แถวของสาขาก่อน ไม่มีจึงราคากลาง — กติกาเดียวกับ priceForBranch)
  */
-async function previousBarSell(db: Db, date: string, branchId: string | null): Promise<string | null> {
+/** คอลัมน์ราคาที่ด่านกันพิมพ์ผิดเทียบได้ */
+type GuardedColumn = typeof goldPrice.barSell | typeof goldPrice.silverPerG | typeof goldPrice.platinumPerG;
+
+async function previousValue(
+  db: Db,
+  date: string,
+  branchId: string | null,
+  column: GuardedColumn,
+): Promise<string | null> {
   const scope = branchId
     ? or(eq(goldPrice.branchId, branchId), isNull(goldPrice.branchId))
     : isNull(goldPrice.branchId);
   const [row] = await db
-    .select({ barSell: goldPrice.barSell })
+    .select({ value: column })
     .from(goldPrice)
-    .where(and(scope, lt(goldPrice.date, date)))
+    // ราคาต่อกรัมว่างได้ (วันที่ไม่ได้ตั้ง) — เทียบกับวันล่าสุดที่ตั้งไว้จริง
+    .where(and(scope, lt(goldPrice.date, date), isNotNull(column)))
     // วันเดียวกันมีทั้งสองแถว → แถวของสาขามาก่อน (false < true)
     .orderBy(desc(goldPrice.date), sql`${goldPrice.branchId} is null`)
     .limit(1);
-  return row?.barSell ?? null;
+  return row?.value ?? null;
+}
+
+/** ราคาต่อกรัมที่ส่งมา → รูปมาตรฐาน · undefined = ไม่ส่ง · null/"" = ล้าง */
+function perGramPrice(input: string | null | undefined, field: GoldPriceField, name: string) {
+  if (input === undefined) return undefined;
+  if (input === null || input.trim() === "") return null;
+  const v = parseDecimal(input);
+  if (!v || v.lte(0)) throw new GoldPriceInputError(`ราคา${name}ต่อกรัมต้องเป็นตัวเลขมากกว่า 0`, field);
+  if (v.decimalPlaces() > 2) throw new GoldPriceInputError("ราคาทศนิยมไม่เกิน 2 ตำแหน่ง", field);
+  if (v.gt(MAX_PER_G)) throw new GoldPriceInputError(`ราคา${name}ต่อกรัมสูงผิดปกติ — ตรวจตัวเลขอีกครั้ง`, field);
+  return v;
 }
 
 /**
  * ฟังก์ชันเดียวที่ quote และการบันทึกราคา (กลาง/เฉพาะสาขา) ใช้ (R8 · CLAUDE.md กฎ 2)
- * ร้านกรอกแค่ทองแท่งขายออก → derive รับซื้อ + รูปพรรณจากค่าตั้งใน DB
+ * ร้านกรอกแค่ทองแท่งขายออก → derive รับซื้อ + รูปพรรณจากค่าตั้งใน DB · ราคาต่อกรัมของเงิน/แพลตตินั่ม (ถ้าส่งมา) ตรวจรูปแล้วเก็บตรงตัว
  * branchId = null → เตือนเทียบราคากลางครั้งก่อน · มีสาขา → เทียบราคาที่สาขานั้นใช้จริงครั้งก่อน
  */
 export async function quoteGoldPrice(
@@ -61,21 +111,34 @@ export async function quoteGoldPrice(
   barSellInput: string,
   date: string,
   branchId: string | null = null,
+  perGram: PerGramInput = {},
 ): Promise<GoldQuote> {
   const sell = parseDecimal(barSellInput);
   if (!sell || sell.lte(0)) throw new GoldPriceInputError("ราคาทองแท่งขายออกต้องเป็นตัวเลขมากกว่า 0");
   if (sell.gt(MAX_BAR_SELL)) throw new GoldPriceInputError("ราคาทองสูงผิดปกติ — ตรวจตัวเลขอีกครั้ง");
   if (sell.decimalPlaces() > 2) throw new GoldPriceInputError("ราคาทศนิยมไม่เกิน 2 ตำแหน่ง");
+  const metals = PER_GRAM.map((m) => ({ ...m, value: perGramPrice(perGram[m.key], m.field, m.name) }));
   const setting = await loadGoldSetting(db);
   const q = deriveGoldPrice(sell, setting);
   if (q.barBuy.lte(0)) throw new GoldPriceInputError("ราคาต่ำกว่าส่วนต่างรับซื้อ");
-  const previous = await previousBarSell(db, date, branchId);
-  return {
+  const warnings = [
+    typoWarning(await previousValue(db, date, branchId, goldPrice.barSell), q.barSell, setting.typoGuardPercent),
+  ];
+  const quote: GoldQuote = {
     barSell: fmtMoney(q.barSell),
     barBuy: fmtMoney(q.barBuy),
     jewelryBuy: fmtInt(q.jewelryBuy),
-    warning: typoWarning(previous, q.barSell, setting.typoGuardPercent),
+    warning: null,
   };
+  for (const m of metals) {
+    if (m.value === undefined) continue;
+    quote[m.key] = m.value === null ? null : fmtMoney(m.value);
+    if (m.value === null) continue;
+    const previous = await previousValue(db, date, branchId, goldPrice[m.key]);
+    warnings.push(typoWarning(previous, m.value, setting.typoGuardPercent, `ราคา${m.name}`));
+  }
+  quote.warning = warnings.filter((w) => w !== null).join(" · ") || null;
+  return quote;
 }
 
 export interface TodayPrice {
@@ -86,15 +149,21 @@ export interface TodayPrice {
   jewelryBuy: string;
   /** "branch" = ราคาเฉพาะสาขา · "central" = ราคากลางทุกสาขา */
   source: "branch" | "central";
+  /** ราคารับซื้อต่อกรัมของวัน — ของสาขาถ้ามี ไม่มีจึงราคากลาง · null = ยังไม่ได้ตั้ง (รับซื้อโลหะนั้นไม่ได้) */
+  silverPerG: string | null;
+  platinumPerG: string | null;
 }
 
-const toTodayPrice = (row: GoldPriceRow): TodayPrice => ({
+/** row = แถวที่ใช้ (สาขาก่อน) · central = แถวราคากลางของวันเดียวกัน — ราคาต่อกรัมตกไปใช้ราคากลางทีละช่อง */
+const toTodayPrice = (row: GoldPriceRow, central: GoldPriceRow | undefined): TodayPrice => ({
   id: row.id,
   date: row.date,
   barSell: row.barSell,
   barBuy: row.barBuy,
   jewelryBuy: fmtInt(D(row.jewelryBuy)),
   source: row.branchId ? "branch" : "central",
+  silverPerG: row.silverPerG ?? central?.silverPerG ?? null,
+  platinumPerG: row.platinumPerG ?? central?.platinumPerG ?? null,
 });
 
 /** ราคาของวันสำหรับสาขา — ราคาเฉพาะสาขามาก่อน ไม่มีจึงใช้ราคากลาง · ไม่มีทั้งคู่ = null (R7) */
@@ -106,8 +175,9 @@ export async function priceForBranch(db: Db, date: string, branchId: string | nu
     .select()
     .from(goldPrice)
     .where(and(eq(goldPrice.date, date), scope));
-  const row = rows.find((r) => r.branchId !== null) ?? rows.find((r) => r.branchId === null);
-  return row ? toTodayPrice(row) : null;
+  const central = rows.find((r) => r.branchId === null);
+  const row = rows.find((r) => r.branchId !== null) ?? central;
+  return row ? toTodayPrice(row, central) : null;
 }
 
 /** ราคาของวันของหลายสาขาในคำสั่งเดียว — กติกาเดียวกับ priceForBranch · เรียงตามรายการสาขาที่ส่งมา */
@@ -136,7 +206,7 @@ export async function pricesForBranches(
   const own = new Map(rows.filter((r) => r.branchId !== null).map((r) => [r.branchId, r]));
   return branches.map((b) => {
     const row = own.get(b.id) ?? central;
-    return { branch: b, price: row ? toTodayPrice(row) : null };
+    return { branch: b, price: row ? toTodayPrice(row, central) : null };
   });
 }
 
@@ -145,7 +215,19 @@ const auditValues = (r: GoldPriceRow) => ({
   bar_sell: r.barSell,
   bar_buy: r.barBuy,
   jewelry_buy: r.jewelryBuy,
+  silver_per_g: r.silverPerG,
+  platinum_per_g: r.platinumPerG,
   set_by: r.setBy,
+});
+
+/** ช่องที่ upsert — ราคาต่อกรัมที่ไม่ได้ส่งมา (undefined) ไม่อยู่ในชุด → แถวเดิมคงค่าเดิม · แถวใหม่ = null */
+const upsertValues = (quote: GoldQuote, userId: string) => ({
+  barSell: quote.barSell,
+  barBuy: quote.barBuy,
+  jewelryBuy: quote.jewelryBuy,
+  setBy: userId,
+  ...(quote.silverPerG === undefined ? {} : { silverPerG: quote.silverPerG }),
+  ...(quote.platinumPerG === undefined ? {} : { platinumPerG: quote.platinumPerG }),
 });
 
 /**
@@ -184,7 +266,7 @@ export async function setCentralPrice(
       .from(goldPrice)
       .where(and(isNull(goldPrice.branchId), eq(goldPrice.date, date)))
       .for("update");
-    const values = { barSell: quote.barSell, barBuy: quote.barBuy, jewelryBuy: quote.jewelryBuy, setBy: userId };
+    const values = upsertValues(quote, userId);
     const [row] = await tx
       .insert(goldPrice)
       .values({ branchId: null, date, ...values })
@@ -228,7 +310,7 @@ export async function setBranchPrice(
       .from(goldPrice)
       .where(and(eq(goldPrice.branchId, target.id), eq(goldPrice.date, date)))
       .for("update");
-    const values = { barSell: quote.barSell, barBuy: quote.barBuy, jewelryBuy: quote.jewelryBuy, setBy: userId };
+    const values = upsertValues(quote, userId);
     const [row] = await tx
       .insert(goldPrice)
       .values({ branchId: target.id, date, ...values })

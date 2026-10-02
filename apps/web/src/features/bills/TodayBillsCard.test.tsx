@@ -34,7 +34,7 @@ function openHome({
 
 const findCard = () => screen.findByRole("region", { name: t("today.title") }, FIRST_LOAD);
 
-describe("หน้าแรก — บิลซื้อเข้าวันนี้", { timeout: 30_000 }, () => {
+describe("หน้าหลัก — บิลซื้อเข้าวันนี้", { timeout: 30_000 }, () => {
   it("ใช้คำขอเดียวกับการ์ดยอดซื้อวันนี้ · แถวแสดงเวลา ยอด และลิงก์ไปหน้าบิล · ไม่แสดงยอดรวมซ้ำ", async () => {
     const api = openHome({});
     const card = await findCard();

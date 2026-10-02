@@ -23,6 +23,7 @@ import {
   type LineRow,
   MAX_LINES,
   MAX_PAYMENTS,
+  NO_DEDUCT,
   type PaymentEntry,
   type PaymentEntryField,
   type PaymentMethod,
@@ -48,7 +49,8 @@ import { useBuyHotkeys } from "./use-buy-hotkeys";
 
 const EMPTY_QUOTE_BODY: QuoteBody = { lines: [], payments: [] };
 const NO_ERRORS: readonly QuoteError[] = [];
-const LINE_FIELDS: readonly LineEntryField[] = ["metal_id", "weight_g", "amount"];
+/** ลำดับเดียวกับที่พนักงานกรอก — error หลายช่องพร้อมกันชี้ช่องแรกที่ต้องแก้ */
+const LINE_FIELDS: readonly LineEntryField[] = ["metal_id", "purity_percent", "deduct_percent", "weight_g"];
 const PAYMENT_FIELDS: readonly PaymentEntryField[] = ["method", "bank", "amount"];
 /** พิมพ์เหตุผลย้อนหลังหยุดแล้วค่อยถาม API (ช่องเดียวในบิลที่เป็นข้อความอิสระและอยู่ใน quote) */
 const REASON_DEBOUNCE_MS = 300;
@@ -69,8 +71,9 @@ export type FocusName =
   | "newCustomer"
   | "editCustomer"
   | "metal"
+  | "purity"
+  | "deduct"
   | "weight"
-  | "amount"
   | "detail"
   | "paymentMethod"
   | "bank"
@@ -90,14 +93,19 @@ function useFocusRegistry() {
   return { nodes, register };
 }
 
-const LINE_FOCUS: Record<LineEntryField, FocusName> = { metal_id: "metal", weight_g: "weight", amount: "amount" };
+const LINE_FOCUS: Record<LineEntryField, FocusName> = {
+  metal_id: "metal",
+  purity_percent: "purity",
+  deduct_percent: "deduct",
+  weight_g: "weight",
+};
 const PAYMENT_FOCUS: Record<PaymentEntryField, FocusName> = {
   method: "paymentMethod",
   bank: "bank",
   amount: "paymentAmount",
 };
 
-/** 400 ที่ชี้ช่องของแถวที่กำลังเพิ่ม เช่น "lines.3.weight_g" (ตัวเลขยาวเกิน) → ช่องในแถวกรอก */
+/** 400 ที่ชี้ช่องของแถวที่กำลังเพิ่ม เช่น "lines.3.purity_percent" (ข้อความยาวเกิน) → ช่องในแถวกรอก */
 function entryErrorOf<F extends string>(
   e: unknown,
   prefix: "lines" | "payments",
@@ -185,10 +193,15 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
     return errorFor(errors, field)?.message;
   }
 
-  /** ช่องกรอกแถวที่พิมพ์ไว้แต่ยังไม่ได้กด Enter เพิ่มเข้ารายการ — บันทึกไปตอนนี้จะทำข้อความนั้นหายเงียบ ๆ */
-  function unsavedEntryTarget(): "weight" | "paymentAmount" | null {
+  /**
+   * ช่องกรอกแถวที่พิมพ์ไว้แต่ยังไม่ได้กด Enter เพิ่มเข้ารายการ — บันทึกไปตอนนี้จะทำข้อความนั้นหายเงียบ ๆ
+   * พาไปช่องที่ยังขาด (ค่าบริสุทธิ์ก่อน) · ครบแล้วไปช่องปริมาณ ที่ Enter = เพิ่มแถว
+   * หัก % อย่างเดียว (ยังไม่ได้พิมพ์อะไร) ไม่นับ — เป็นตัวเลือกที่มีค่าเริ่มต้น ไม่ใช่ข้อความที่จะหาย
+   */
+  function unsavedEntryTarget(): "purity" | "weight" | "paymentAmount" | null {
     const le = state.lineEntry;
-    if (le.weight_g.trim() !== "" || le.amount.trim() !== "") return "weight";
+    const purity = le.purity_percent.trim() !== "";
+    if (purity || le.weight_g.trim() !== "") return purity ? "weight" : "purity";
     const pe = state.paymentEntry;
     if (pe.bank.trim() !== "" || pe.amount.trim() !== "") return "paymentAmount";
     return null;
@@ -229,7 +242,12 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
     const el = name ? nodes.current.get(name) : undefined;
     if (!el) return;
     if (el.getAttribute("role") === "radiogroup") {
-      el.querySelector<HTMLElement>('[role="radio"][data-state="checked"], [role="radio"]')?.focus();
+      // ตัวที่เลือกอยู่ก่อน — querySelector กับ selector list คืนตัวแรกตามลำดับ DOM (ทอง) ไม่ใช่ตามลำดับ selector
+      // โฟกัสผิดตัว = radio onFocus เลือกโลหะนั้นแทน (โลหะเปลี่ยนเงียบ ๆ และ error ใต้กลุ่มหาย)
+      const radio =
+        el.querySelector<HTMLElement>('[role="radio"][data-state="checked"]') ??
+        el.querySelector<HTMLElement>('[role="radio"]');
+      radio?.focus();
       return;
     }
     el.focus();
@@ -269,7 +287,8 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
 
   // ---------- ลูกค้า ----------
 
-  const nextAfterPick = (c: CustomerListItem): FocusName => (c.card_status === "ok" ? "weight" : "editCustomer");
+  /** บัตรใช้ได้ → ช่องแรกที่ต้องพิมพ์ของแถวสินค้า (ค่าบริสุทธิ์ — โลหะเลือกทองไว้ให้แล้ว) */
+  const nextAfterPick = (c: CustomerListItem): FocusName => (c.card_status === "ok" ? "purity" : "editCustomer");
 
   /** เลขบัตร 13 หลัก (Siam ID หรือพิมพ์เอง) → ค้นแล้วเลือกให้เอง · คืนการย้ายโฟกัสหลังจบ burst */
   async function findByNationalId(digits: string, refetch = false): Promise<(() => void) | null> {
@@ -353,17 +372,26 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
     act({ type: "lineErrorSet", error }, LINE_FOCUS[error.field]);
   }
 
-  /** เพิ่มแถวเมื่อ API ตรวจแถวใหม่ผ่าน (quote ของบิลที่มีแถวนั้น) — ผลค้างใน cache จึงเห็นราคา/กรัมทันที */
+  /**
+   * เพิ่มแถวเมื่อ API ตรวจแถวใหม่ผ่าน (quote ของบิลที่มีแถวนั้น) — ผลค้างใน cache จึงเห็นราคาที่ระบบคิดทันที
+   * ตรวจในเครื่องแค่ "ว่าง" · รูปแบบ/ช่วงของค่าบริสุทธิ์ น้ำหนัก และราคาของวัน ให้ API ตอบ (ข้อความชุดเดียวกับตอนบันทึก)
+   */
   async function addLine() {
     if (busy.current.line || blockOnBackdate()) return;
     const entry = state.lineEntry;
+    const purity = normalizeDecimalInput(entry.purity_percent);
     const weight = normalizeDecimalInput(entry.weight_g);
-    const amount = normalizeDecimalInput(entry.amount);
+    if (!purity) return lineError({ field: "purity_percent", message: t("lines.missingPurity") });
     if (!weight) return lineError({ field: "weight_g", message: t("lines.missingWeight") });
-    if (!amount) return lineError({ field: "amount", message: t("lines.missingAmount") });
-    if (state.lines.length >= MAX_LINES) return lineError({ field: "amount", message: t("lines.limit") });
+    if (state.lines.length >= MAX_LINES) return lineError({ field: "weight_g", message: t("lines.limit") });
     const index = state.lines.length;
-    const line: LineRow = { key: randomKey(), metal_id: metalId, weight_g: weight, amount };
+    const line: LineRow = {
+      key: randomKey(),
+      metal_id: metalId,
+      purity_percent: purity,
+      deduct_percent: entry.deduct_percent || NO_DEDUCT,
+      weight_g: weight,
+    };
     const next = buildQuoteBody({ ...state, lines: [...state.lines, line] }, reason);
     busy.current.line = true;
     try {
@@ -372,9 +400,9 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
         const error = entryErrorFrom(q.errors, "lines", index, LINE_FIELDS);
         if (error) return lineError(error);
       }
-      act({ type: "lineAdded", line, entry }, "weight");
+      act({ type: "lineAdded", line, entry }, "purity");
     } catch (e) {
-      lineError(entryErrorOf(e, "lines", index, LINE_FIELDS, "amount"));
+      lineError(entryErrorOf(e, "lines", index, LINE_FIELDS, "weight_g"));
     } finally {
       busy.current.line = false;
     }
@@ -584,7 +612,7 @@ export function useBuyController(me: Me, metals: readonly Metal[]) {
       pickCustomer,
       changeCustomer,
       setLineEntry: (patch: Partial<LineEntry>) => act({ type: "lineEntryChanged", patch }),
-      clearLineEntry: () => act({ type: "lineEntryCleared" }, "weight"),
+      clearLineEntry: () => act({ type: "lineEntryCleared" }, "purity"),
       addLine,
       removeLine: (key: string) => act({ type: "lineRemoved", key }),
       typeDetail: (text: string) => act({ type: "detailTyped", text }),

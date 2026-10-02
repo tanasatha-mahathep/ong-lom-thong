@@ -102,7 +102,7 @@ function BranchLabel({ me }: { me: Me }) {
 }
 
 /**
- * หัว sidebar แบบ TeamSwitcher ของ sidebar-07 — สาขาเดียว = หัวนิ่ง (ลิงก์หน้าแรก)
+ * หัว sidebar แบบ TeamSwitcher ของ sidebar-07 — สาขาเดียว = หัวนิ่ง (ลิงก์หน้าหลัก)
  * หลายสาขา = เมนูเลือกสาขา (ติ๊กสาขาปัจจุบัน · Alt+n · ผู้ดูแลมี "จัดการสาขา")
  */
 export function BranchSwitcher({ me, onSelect }: { me: Me; onSelect: (branch: Branch) => void }) {
