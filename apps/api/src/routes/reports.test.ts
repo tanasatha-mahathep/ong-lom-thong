@@ -3,7 +3,9 @@ import { branch, buyLine, buyReceipt, customer, metal, payment, stockMovement } 
 import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PURCHASE_CSV_HEADER } from "../services/reports";
+import { expectMoneyAsStrings } from "../test/assertions";
 import { type TestApp, databaseAvailable, startTestApp } from "../test/harness";
+import { syntheticNationalId, testName } from "../test/synthetic";
 
 const available = await databaseAvailable();
 const PW = "correct-horse-battery";
@@ -41,9 +43,15 @@ interface Row {
   branch: { id: string; code: string; name: string };
   customer: { id: string; name_th: string; national_id_masked: string };
   metals: MetalAmount[];
+  items: Item[];
   total_weight: string;
   total_amount: string;
   created_by: { id: string; name: string };
+}
+interface Item {
+  label: string;
+  grams: string;
+  amount: string;
 }
 interface StockMetal {
   metal_code: string;
@@ -64,7 +72,23 @@ interface PurchaseRes {
   total: Totals;
 }
 
-type Line = [metal: string, weight: string, amount: string];
+/**
+ * ราคาที่ระบบคิดของแถว (assessBuyLine · UAT 30 ก.ย. 2569) ตามที่คอลัมน์ numeric เก็บ
+ * ไม่ส่ง = บิลก่อนมีค่าบริสุทธิ์ (ราคาพิมพ์เอง) → ทั้ง 5 คอลัมน์เป็น null
+ */
+interface Assessed {
+  /** purity_percent numeric(6,3) เช่น "96.500" */
+  purity: string;
+  /** deduct_percent numeric(5,2) เช่น "3.00" */
+  deduct: string;
+  /** base_price — ทอง/นาก = ทองแท่งรับซื้อ (บาทต่อบาททอง) · เงิน/แพลตตินั่ม = บาทต่อกรัม */
+  base: string;
+  /** assessed_price_per_g */
+  unit: string;
+  /** assessment_amount (ก่อนหัก %) */
+  gross: string;
+}
+type Line = [metal: string, weight: string, amount: string, assessed?: Assessed];
 interface BillSpec {
   code: string;
   date: string;
@@ -76,6 +100,105 @@ interface BillSpec {
   voided?: boolean;
   /** ชื่อใน snapshot ต่างจากทะเบียนลูกค้า (ลูกค้าถูกแก้ชื่อทีหลัง) */
   snapshotName?: string;
+}
+interface Fixture {
+  t: TestApp;
+  metals: Record<string, string>;
+  userIds: Record<string, string>;
+  nationalIds: Record<BillSpec["cust"], string>;
+}
+
+/** บิลหนึ่งใบแบบที่ POST /buy บันทึก: หัวบิล + แถว + ชำระ + สต็อก ในทรานแซกชันเดียว */
+async function insertBill(fx: Fixture, s: BillSpec, idempotencyKey: string): Promise<string> {
+  const { t, metals, userIds } = fx;
+  const weight = s.lines.reduce((sum, [, w]) => sum.plus(D(w)), ZERO);
+  const amount = s.lines.reduce((sum, [, , a]) => sum.plus(D(a)), ZERO);
+  const nationalId = fx.nationalIds[s.cust];
+  const branchId = t.branches[s.code] ?? "";
+  return t.db.transaction(async (tx) => {
+    const [c] = await tx.select().from(customer).where(eq(customer.nationalId, nationalId));
+    if (!c) throw new Error("fixture customer missing");
+    const [r] = await tx
+      .insert(buyReceipt)
+      .values({
+        branchId,
+        docNo: s.docNo,
+        date: s.date,
+        time: "10:00",
+        customerId: c.id,
+        customerSnapshot: {
+          national_id: c.nationalId,
+          name_th: s.snapshotName ?? c.nameTh,
+          name_en: null,
+          birthday_text: null,
+          religion: null,
+          address: null,
+          card_issue_text: null,
+          card_expire_text: c.cardExpireText,
+          mobile: null,
+          phone2: null,
+          photo_key: null,
+        },
+        goldPriceSnapshot: "67850",
+        totalWeight: fmtWeight(weight),
+        totalAmount: fmtMoney(amount),
+        createdBy: userIds[s.by] ?? "",
+        idempotencyKey,
+        ...(s.voided
+          ? { status: "void" as const, voidedBy: userIds.mgr0, voidedAt: NOW, voidReason: "ทดสอบยกเลิก" }
+          : {}),
+      })
+      .returning({ id: buyReceipt.id });
+    if (!r) throw new Error("insert failed");
+    // แทรกแถวกลับด้าน — "ลำดับที่ปรากฏครั้งแรก" ของ items ต้องมาจาก line_no ไม่ใช่ลำดับที่ Postgres เก็บไว้
+    await tx.insert(buyLine).values(
+      s.lines
+        .map(([m, w, a, x], i) => ({
+          receiptId: r.id,
+          lineNo: i + 1,
+          metalId: metals[m] ?? "",
+          weightG: w,
+          amount: a,
+          pricePerG: fmtMoney(pricePerGram(D(a), D(w))),
+          purityPercent: x?.purity ?? null,
+          deductPercent: x?.deduct ?? null,
+          basePrice: x?.base ?? null,
+          assessedPricePerG: x?.unit ?? null,
+          assessmentAmount: x?.gross ?? null,
+        }))
+        .reverse(),
+    );
+    await tx.insert(payment).values({ receiptId: r.id, method: "cash", amount: fmtMoney(amount) });
+    const moves = s.lines.map(([m, w]) => ({ branchId, metalId: metals[m] ?? "", sourceReceiptId: r.id, grams: w }));
+    await tx.insert(stockMovement).values(moves.map((mv) => ({ ...mv, date: s.date })));
+    if (s.voided) {
+      await tx
+        .insert(stockMovement)
+        .values(moves.map((mv) => ({ ...mv, date: s.date, grams: fmtWeight(D(mv.grams).negated()) })));
+    }
+    return r.id;
+  });
+}
+
+const sumOf = (values: string[]) => values.reduce((s, v) => s.plus(D(v)), ZERO);
+const gram = (code: string, grams: string, amount: string): MetalAmount => ({
+  metal_code: code,
+  name_th: { gold: "ทอง", nak: "นาก", silver: "เงิน", platinum: "แพลตตินั่ม" }[code] ?? "",
+  grams,
+  amount,
+});
+const item = (label: string, grams: string, amount: string): Item => ({ label, grams, amount });
+/** CSV เป็น byte — Response.text() ตัด BOM ทิ้ง จึงต้องดู byte จริง */
+const csvOf = async (res: Response) => {
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  return { bytes, text: new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes) };
+};
+/** items มาจากแถวรายการชุดเดียวกับยอดของบิล (หลังตัวกรองโลหะ) — Σ กรัม · Σ บาท ต้องเท่ายอดของแถวพอดี */
+function expectItemsAddUp(rows: Row[]) {
+  for (const x of rows) {
+    expect(fmtWeight(sumOf(x.items.map((i) => i.grams))), `${x.doc_no} grams`).toBe(x.total_weight);
+    expect(fmtMoney(sumOf(x.items.map((i) => i.amount))), `${x.doc_no} amount`).toBe(x.total_amount);
+  }
 }
 
 describe.skipIf(!available)("รายงาน (M3.6 · finance_report3 · stock_show) — /api/reports", () => {
@@ -93,68 +216,12 @@ describe.skipIf(!available)("รายงาน (M3.6 · finance_report3 · stoc
     name: code === "00000" ? HQ : code === "00001" ? "สาขา 2" : "สาขา 3",
   });
 
-  /** บิลหนึ่งใบแบบที่ POST /buy บันทึก: หัวบิล + แถว + ชำระ + สต็อก ในทรานแซกชันเดียว */
-  async function addBill(s: BillSpec): Promise<string> {
-    const weight = s.lines.reduce((sum, [, w]) => sum.plus(D(w)), ZERO);
-    const amount = s.lines.reduce((sum, [, , a]) => sum.plus(D(a)), ZERO);
-    const nationalId = { A: ID_A, B: ID_B, C: ID_C }[s.cust];
-    const branchId = t.branches[s.code] ?? "";
-    return t.db.transaction(async (tx) => {
-      const [c] = await tx.select().from(customer).where(eq(customer.nationalId, nationalId));
-      if (!c) throw new Error("fixture customer missing");
-      const [r] = await tx
-        .insert(buyReceipt)
-        .values({
-          branchId,
-          docNo: s.docNo,
-          date: s.date,
-          time: "10:00",
-          customerId: c.id,
-          customerSnapshot: {
-            national_id: c.nationalId,
-            name_th: s.snapshotName ?? c.nameTh,
-            name_en: null,
-            birthday_text: null,
-            religion: null,
-            address: null,
-            card_issue_text: null,
-            card_expire_text: c.cardExpireText,
-            mobile: null,
-            phone2: null,
-            photo_key: null,
-          },
-          goldPriceSnapshot: "67850",
-          totalWeight: fmtWeight(weight),
-          totalAmount: fmtMoney(amount),
-          createdBy: userIds[s.by] ?? "",
-          idempotencyKey: `report-fixture-${String(++keySeq).padStart(6, "0")}`,
-          ...(s.voided
-            ? { status: "void" as const, voidedBy: userIds.mgr0, voidedAt: NOW, voidReason: "ทดสอบยกเลิก" }
-            : {}),
-        })
-        .returning({ id: buyReceipt.id });
-      if (!r) throw new Error("insert failed");
-      await tx.insert(buyLine).values(
-        s.lines.map(([m, w, a], i) => ({
-          receiptId: r.id,
-          lineNo: i + 1,
-          metalId: metals[m] ?? "",
-          weightG: w,
-          amount: a,
-          pricePerG: fmtMoney(pricePerGram(D(a), D(w))),
-        })),
-      );
-      await tx.insert(payment).values({ receiptId: r.id, method: "cash", amount: fmtMoney(amount) });
-      const moves = s.lines.map(([m, w]) => ({ branchId, metalId: metals[m] ?? "", sourceReceiptId: r.id, grams: w }));
-      await tx.insert(stockMovement).values(moves.map((mv) => ({ ...mv, date: s.date })));
-      if (s.voided) {
-        await tx
-          .insert(stockMovement)
-          .values(moves.map((mv) => ({ ...mv, date: s.date, grams: fmtWeight(D(mv.grams).negated()) })));
-      }
-      return r.id;
-    });
-  }
+  const addBill = (s: BillSpec) =>
+    insertBill(
+      { t, metals, userIds, nationalIds: { A: ID_A, B: ID_B, C: ID_C } },
+      s,
+      `report-fixture-${String(++keySeq).padStart(6, "0")}`,
+    );
 
   beforeAll(async () => {
     t = await startTestApp({ now: () => NOW });
@@ -266,18 +333,6 @@ describe.skipIf(!available)("รายงาน (M3.6 · finance_report3 · stoc
     expect(res.status).toBe(200);
     return (await res.json()) as PurchaseRes;
   };
-  const gram = (code: string, grams: string, amount: string) => ({
-    metal_code: code,
-    name_th: { gold: "ทอง", nak: "นาก", silver: "เงิน", platinum: "แพลตตินั่ม" }[code] ?? "",
-    grams,
-    amount,
-  });
-  const sumOf = (values: string[]) => values.reduce((s, v) => s.plus(D(v)), ZERO);
-  /** CSV เป็น byte — Response.text() ตัด BOM ทิ้ง จึงต้องดู byte จริง */
-  const csvOf = async (res: Response) => {
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    return { bytes, text: new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes) };
-  };
 
   describe("รายงานยอดซื้อ /purchase", () => {
     it("ต้อง login · staff = 403 · manager ที่ไม่มีสาขา = 403 (fail-closed)", async () => {
@@ -288,10 +343,14 @@ describe.skipIf(!available)("รายงาน (M3.6 · finance_report3 · stoc
       for (const who of ["mgr0", "acct", "admin"]) expect((await get("/purchase", who)).status).toBe(200);
     });
 
-    it("รูปคำตอบ: แถวละบิล (ลำดับ · วันที่ · เลขที่ · ชื่อ · เลขบัตรมาสก์ · โลหะ · กรัม · บาท · ผู้บันทึก) + ต่อสาขา + รวม", async () => {
+    it("รูปคำตอบ: แถวละบิล (ลำดับ · วันที่ · เลขที่ · ชื่อ · เลขบัตรมาสก์ · โลหะ · รายการ · กรัม · บาท · ผู้บันทึก) + ต่อสาขา + รวม", async () => {
       const res = await get("/purchase", "mgr0");
       expect(res.headers.get("cache-control")).toBe("no-store");
-      expect(await res.json()).toEqual({
+      const body: unknown = await res.json();
+      expectMoneyAsStrings(body, "GET /reports/purchase");
+      expect(JSON.stringify(body)).not.toMatch(/\d{13}/);
+      // บิลก่อนมีค่าบริสุทธิ์ (purity_percent = null): items = ชื่อโลหะ หนึ่งรายการต่อโลหะ เหมือนใบที่พิมพ์ไว้แล้ว
+      expect(body).toEqual({
         date_from: "2026-10-01",
         date_to: "2026-10-05",
         metal: null,
@@ -305,6 +364,7 @@ describe.skipIf(!available)("รายงาน (M3.6 · finance_report3 · stoc
             branch: ref("00000"),
             customer: { id: custIds.A, name_th: "นายทดสอบ ซื้อทอง", national_id_masked: "1 XXXX XXXXX 45 8" },
             metals: [gram("gold", "5.860", "20030.00")],
+            items: [item("ทอง", "5.860", "20030.00")],
             total_weight: "5.860",
             total_amount: "20030.00",
             created_by: { id: userIds.staff0, name: "staff0" },
@@ -318,6 +378,7 @@ describe.skipIf(!available)("รายงาน (M3.6 · finance_report3 · stoc
             branch: ref("00000"),
             customer: { id: custIds.B, name_th: "นางสาวบี ทดสอบ", national_id_masked: "3 XXXX XXXXX 65 7" },
             metals: [gram("gold", "10.000", "30000.00"), gram("silver", "100.000", "1500.00")],
+            items: [item("ทอง", "10.000", "30000.00"), item("เงิน", "100.000", "1500.00")],
             total_weight: "110.000",
             total_amount: "31500.00",
             created_by: { id: userIds.staff0, name: "staff0" },
@@ -372,6 +433,15 @@ describe.skipIf(!available)("รายงาน (M3.6 · finance_report3 · stoc
         ],
       });
 
+      // บิลเก่าทั้งหมด: items = ชื่อโลหะ ลำดับตาม line_no · Σ items = ยอดของแถว
+      expect(r.rows.map((x) => x.items.map((i) => i.label))).toEqual([
+        ["ทอง"],
+        ["นาก"],
+        ["ทอง", "เงิน"],
+        ["ทอง"],
+        ["แพลตตินั่ม", "ทอง"],
+      ]);
+      expectItemsAddUp(r.rows);
       // Σ แถว (decimal.js) = รวมทั้งสิ้น
       expect(fmtWeight(sumOf(r.rows.map((x) => x.total_weight)))).toBe(r.total.total_weight);
       expect(fmtMoney(sumOf(r.rows.map((x) => x.total_amount)))).toBe(r.total.total_amount);
@@ -442,6 +512,10 @@ describe.skipIf(!available)("รายงาน (M3.6 · finance_report3 · stoc
         ["RC6910-0002", "00001", "0.500", "1500.25"],
       ]);
       expect(r.rows[1]?.metals).toEqual([gram("gold", "10.000", "30000.00")]);
+      // items ก็กรองตามโลหะด้วย — เงินของ RC6910-0002 · แพลตตินั่มของ 00001/RC6910-0002 ไม่ติดมา
+      expect(r.rows[1]?.items).toEqual([item("ทอง", "10.000", "30000.00")]);
+      expect(r.rows[3]?.items).toEqual([item("ทอง", "0.500", "1500.25")]);
+      expectItemsAddUp(r.rows);
       expect(r.total).toEqual({
         count: "4",
         total_weight: "24.137",
@@ -741,5 +815,290 @@ describe.skipIf(!available)("รายงาน (M3.6 · finance_report3 · stoc
         "",
       ]);
     });
+  });
+});
+
+/**
+ * รายการตามใบรับซื้อ (UAT 30 ก.ย. 2569) — rows[].items = groupLinesByMetal ตัวเดียวกับ PDF:
+ * หนึ่งรายการต่อ (โลหะ · ค่าบริสุทธิ์ · หัก %) เรียงตามที่ปรากฏครั้งแรกในบิล · ป้าย "ทอง 96.5% หัก 3%" (หัก 0 ไม่พิมพ์)
+ * แถวเก่า (purity null) = ชื่อโลหะ · database แยกของตัวเอง — ตัวเลขของชุดบนไม่เปลี่ยน
+ */
+describe.skipIf(!available)("รายงานยอดซื้อ — รายการตามใบรับซื้อ (ค่าบริสุทธิ์ · หัก %)", () => {
+  let t: TestApp;
+  const cookies: Record<string, string> = {};
+  const userIds: Record<string, string> = {};
+  const bills: Record<string, string> = {};
+  let metals: Record<string, string> = {};
+  let keySeq = 0;
+  // ลูกค้าสมมติ — เลขบัตรจากตัวช่วย synthetic (หลัก 2–3 = 99 ไม่ชนเลขของคนจริง) · ชื่อขึ้นต้น "ทดสอบ"
+  const IDS = { A: syntheticNationalId(9101), B: syntheticNationalId(9102), C: syntheticNationalId(9103) };
+  const NAMES = { A: testName("ผู้ขาย ก"), B: testName("ผู้ขาย ข"), C: testName("ผู้ขาย ค") };
+  /** รูปมาสก์ของ R13: หลักแรก + 3 หลักท้าย */
+  const masked = (id: string) => `${id.slice(0, 1)} XXXX XXXXX ${id.slice(10, 12)} ${id.slice(12)}`;
+
+  // ราคาคิดมือตามสูตร assessBuyLine ในสัญญา API — ทองแท่งรับซื้อ 67,650 · เงิน 45.00/ก. · แพลตตินั่ม 900.00/ก.
+  // ราคา/กรัม = ⌊ฐาน (× 0.0656 ถ้าทอง/นาก) × บริสุทธิ์ ÷ 100⌋ · ยอด = ⌊ราคา/กรัม × กรัม⌋ · สุทธิ = ⌊ยอด × (100 − หัก) ÷ 100⌋
+  /** ทอง 96.5%: ⌊67650 × 0.0656 × 0.965⌋ = ⌊4282.5156⌋ */
+  const G965 = { base: "67650.00", purity: "96.500", unit: "4282.00" };
+  /** เงิน 92.5%: ⌊45 × 0.925⌋ = ⌊41.625⌋ */
+  const S925 = { base: "45.00", purity: "92.500", unit: "41.00" };
+
+  const addBill = (s: BillSpec) =>
+    insertBill({ t, metals, userIds, nationalIds: IDS }, s, `purity-fixture-${String(++keySeq).padStart(6, "0")}`);
+  const get = async (path: string, who: string) => t.request(`/api/reports${path}`, { cookie: cookies[who] });
+  const purchase = async (qs: string, who = "acct") => {
+    const res = await get(`/purchase${qs ? `?${qs}` : ""}`, who);
+    expect(res.status).toBe(200);
+    return (await res.json()) as PurchaseRes;
+  };
+  const labels = (r: PurchaseRes) => r.rows.map((x) => [x.id, x.items.map((i) => i.label)]);
+
+  beforeAll(async () => {
+    t = await startTestApp({ now: () => NOW });
+    const accounts = [
+      { who: "staff0", branch: "00000" },
+      { who: "staff1", branch: "00001" },
+      { who: "mgr0", role: "manager" as const, branch: "00000" },
+      { who: "mgr1", role: "manager" as const, branch: "00001" },
+      { who: "acct", role: "accounting" as const, branch: "00000", viewAll: true },
+    ];
+    for (const a of accounts) {
+      const created = await t.createUser({ email: `${a.who}@ong.test`, password: PW, ...a });
+      userIds[a.who] = created.id;
+      cookies[a.who] = await t.login(`${a.who}@ong.test`, PW);
+    }
+    metals = Object.fromEntries((await t.db.select().from(metal)).map((m) => [m.code, m.id]));
+    await t.db
+      .insert(customer)
+      .values(
+        (["A", "B", "C"] as const).map((k) => ({ nationalId: IDS[k], nameTh: NAMES[k], cardExpireText: "31/12/2574" })),
+      );
+
+    // 00000 — บรรทัด 1 + 3 = ทอง 96.5% หัก 3 (รวมเป็นรายการเดียว) · เงินบรรทัด 2 มาก่อนทอง 96.5% ไม่หัก (บรรทัด 4)
+    bills.p1 = await addBill({
+      code: "00000",
+      date: "2026-10-01",
+      docNo: "RC6910-0001",
+      cust: "A",
+      lines: [
+        ["gold", "10.000", "41535.00", { ...G965, deduct: "3.00", gross: "42820.00" }], // anchor ของสัญญา
+        ["silver", "271.560", "11133.00", { ...S925, deduct: "0.00", gross: "11133.00" }],
+        ["gold", "5.000", "20767.00", { ...G965, deduct: "3.00", gross: "21410.00" }],
+        ["gold", "2.345", "10041.00", { ...G965, deduct: "0.00", gross: "10041.00" }],
+        // ⌊4437.84 × 0.90⌋ = 3994 · ⌊3994 × 3.21⌋ = 12820 · ⌊12820 × 0.95⌋ = 12179
+        [
+          "gold",
+          "3.210",
+          "12179.00",
+          { base: "67650.00", purity: "90.000", unit: "3994.00", deduct: "5.00", gross: "12820.00" },
+        ],
+      ],
+      by: "staff0",
+    });
+    // 00000 — แถวเก่า (ไม่มีค่าบริสุทธิ์) ปนกับแถวใหม่ในบิลเดียว · ตัดศูนย์ท้าย 100.000 · หัก 10.00 · 99.990
+    bills.p2 = await addBill({
+      code: "00000",
+      date: "2026-10-02",
+      docNo: "RC6910-0002",
+      cust: "B",
+      lines: [
+        ["gold", "1.000", "3000.00"],
+        ["gold", "4.000", "16614.00", { ...G965, deduct: "3.00", gross: "17128.00" }],
+        ["gold", "0.500", "1500.25"],
+        [
+          "gold",
+          "2.000",
+          "7986.00",
+          { base: "67650.00", purity: "100.000", unit: "4437.00", deduct: "10.00", gross: "8874.00" },
+        ],
+        [
+          "gold",
+          "1.000",
+          "4437.00",
+          { base: "67650.00", purity: "99.990", unit: "4437.00", deduct: "0.00", gross: "4437.00" },
+        ],
+      ],
+      by: "staff0",
+    });
+    // 00001 — เงิน 92.5% หัก 2 · แพลตตินั่ม 95% (⌊900 × 0.95⌋ = 855 · ⌊855 × 1.5⌋ = 1282)
+    bills.p3 = await addBill({
+      code: "00001",
+      date: "2026-10-03",
+      docNo: "RC6910-0001",
+      cust: "C",
+      lines: [
+        ["silver", "100.000", "4018.00", { ...S925, deduct: "2.00", gross: "4100.00" }],
+        [
+          "platinum",
+          "1.500",
+          "1282.00",
+          { base: "900.00", purity: "95.000", unit: "855.00", deduct: "0.00", gross: "1282.00" },
+        ],
+      ],
+      by: "staff1",
+    });
+    // 00000 — ยกเลิกแล้ว: นาก 75% หัก 1 ต้องไม่โผล่ที่ไหนเลย (⌊4437.84 × 0.75⌋ = 3328 · ⌊3328 × 0.99⌋ = 3294)
+    bills.p4 = await addBill({
+      code: "00000",
+      date: "2026-10-04",
+      docNo: "RC6910-0003",
+      cust: "A",
+      lines: [
+        [
+          "nak",
+          "1.000",
+          "3294.00",
+          { base: "67650.00", purity: "75.000", unit: "3328.00", deduct: "1.00", gross: "3328.00" },
+        ],
+      ],
+      by: "staff0",
+      voided: true,
+    });
+  });
+  afterAll(async () => {
+    await t?.close();
+  });
+
+  it("items: หนึ่งรายการต่อ (โลหะ · บริสุทธิ์ · หัก %) · ชิ้นที่ % เดียวกันรวมกัน · เรียงตามที่ปรากฏครั้งแรก · Σ = ยอดบิล", async () => {
+    const res = await get("/purchase", "acct");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as PurchaseRes;
+    expectMoneyAsStrings(body, "GET /reports/purchase (ค่าบริสุทธิ์)");
+    expect(body.rows.map((x) => [x.id, x.items])).toEqual([
+      [
+        bills.p1,
+        [
+          // บรรทัด 1 + 3: 10.000 + 5.000 ก. · 41,535 + 20,767 บาท
+          item("ทอง 96.5% หัก 3%", "15.000", "62302.00"),
+          // เรียงตามที่ปรากฏ ไม่ใช่จัดกลุ่มตามโลหะ — เงิน (บรรทัด 2) มาก่อนทอง 96.5% ไม่หัก (บรรทัด 4)
+          item("เงิน 92.5%", "271.560", "11133.00"),
+          // หัก 0 = ไม่พิมพ์ "หัก" และเป็นคนละรายการกับหัก 3
+          item("ทอง 96.5%", "2.345", "10041.00"),
+          item("ทอง 90% หัก 5%", "3.210", "12179.00"),
+        ],
+      ],
+      [
+        bills.p2,
+        [
+          // แถวเก่าบรรทัด 1 + 3 = ชื่อโลหะ รวมกันเอง ไม่ปนกับแถวที่มีค่าบริสุทธิ์
+          item("ทอง", "1.500", "4500.25"),
+          item("ทอง 96.5% หัก 3%", "4.000", "16614.00"),
+          // ตัดศูนย์ท้าย: 100.000 → 100 · หัก 10.00 → 10 (ไม่ใช่ 1) · 99.990 → 99.99
+          item("ทอง 100% หัก 10%", "2.000", "7986.00"),
+          item("ทอง 99.99%", "1.000", "4437.00"),
+        ],
+      ],
+      [bills.p3, [item("เงิน 92.5% หัก 2%", "100.000", "4018.00"), item("แพลตตินั่ม 95%", "1.500", "1282.00")]],
+    ]);
+    expect(body.rows.map((x) => [x.doc_no, x.branch.code, x.total_weight, x.total_amount])).toEqual([
+      ["RC6910-0001", "00000", "292.115", "95655.00"],
+      ["RC6910-0002", "00000", "8.500", "33537.25"],
+      ["RC6910-0001", "00001", "101.500", "5300.00"],
+    ]);
+    // metals ยังรวมต่อโลหะเหมือนเดิม (items เป็นอีกมุมมองของแถวชุดเดียวกัน)
+    expect(body.rows[0]?.metals).toEqual([gram("gold", "20.555", "84522.00"), gram("silver", "271.560", "11133.00")]);
+    expectItemsAddUp(body.rows);
+    expect(body.total).toEqual({
+      count: "3",
+      total_weight: "402.115",
+      total_amount: "134492.25",
+      by_metal: [
+        gram("gold", "29.055", "118059.25"),
+        gram("nak", "0.000", "0.00"),
+        gram("silver", "371.560", "15151.00"),
+        gram("platinum", "1.500", "1282.00"),
+      ],
+    });
+    // บิลยกเลิก (นาก 75% หัก 1%) ไม่อยู่ในรายงาน · เลขบัตรเต็มไม่หลุด
+    const text = JSON.stringify(body);
+    expect(text).not.toContain("นาก 75%");
+    expect(text).not.toMatch(/\d{13}/);
+  });
+
+  it("กรองโลหะ: items เหลือเฉพาะรายการของโลหะนั้น — รายการอื่นของบิลเดียวกันไม่ติดมา · ลำดับเดิม", async () => {
+    const silver = await purchase("metal=silver");
+    expect(silver.rows.map((x) => [x.id, x.items, x.total_weight, x.total_amount])).toEqual([
+      [bills.p1, [item("เงิน 92.5%", "271.560", "11133.00")], "271.560", "11133.00"],
+      [bills.p3, [item("เงิน 92.5% หัก 2%", "100.000", "4018.00")], "100.000", "4018.00"],
+    ]);
+    expect(silver.total).toMatchObject({ count: "2", total_weight: "371.560", total_amount: "15151.00" });
+
+    const gold = await purchase("metal=gold");
+    expect(labels(gold)).toEqual([
+      [bills.p1, ["ทอง 96.5% หัก 3%", "ทอง 96.5%", "ทอง 90% หัก 5%"]],
+      [bills.p2, ["ทอง", "ทอง 96.5% หัก 3%", "ทอง 100% หัก 10%", "ทอง 99.99%"]],
+    ]);
+    expect(gold.rows[0]?.items[0]).toEqual(item("ทอง 96.5% หัก 3%", "15.000", "62302.00"));
+    expect(gold.rows.map((x) => [x.total_weight, x.total_amount])).toEqual([
+      ["20.555", "84522.00"],
+      ["8.500", "33537.25"],
+    ]);
+    expectItemsAddUp(gold.rows);
+
+    expect((await purchase("metal=platinum")).rows.map((x) => [x.id, x.items])).toEqual([
+      [bills.p3, [item("แพลตตินั่ม 95%", "1.500", "1282.00")]],
+    ]);
+    // นากมีแค่ในบิลที่ยกเลิก → ไม่มีแถว
+    expect((await purchase("metal=nak")).rows).toEqual([]);
+
+    // CSV ที่กรองแล้ว: ช่องเดียวไม่มี , จึงไม่ใส่ "…"
+    const csv = (await csvOf(await get("/purchase?format=csv&metal=silver", "acct"))).text.slice(1).split("\r\n");
+    expect(csv.slice(1, 3)).toEqual([
+      `1,2026-10-01,10:00,RC6910-0001,00000 ${HQ},${NAMES.A},${masked(IDS.A)},เงิน 92.5%,271.560,11133.00,staff0`,
+      `2,2026-10-03,10:00,RC6910-0001,00001 สาขา 2,${NAMES.C},${masked(IDS.C)},เงิน 92.5% หัก 2%,100.000,4018.00,staff1`,
+    ]);
+  });
+
+  it('CSV: รายการสินค้า = ป้ายตามใบรับซื้อคั่นด้วย ", " (ช่องมี , จึงอยู่ใน "…") · แถวสรุปยังเป็นต่อโลหะ', async () => {
+    const res = await get("/purchase?format=csv", "acct");
+    expect(res.status).toBe(200);
+    const lines = (await csvOf(res)).text.slice(1).split("\r\n");
+    expect(lines.slice(0, 4)).toEqual([
+      PURCHASE_CSV_HEADER.join(","),
+      `1,2026-10-01,10:00,RC6910-0001,00000 ${HQ},${NAMES.A},${masked(IDS.A)},"ทอง 96.5% หัก 3%, เงิน 92.5%, ทอง 96.5%, ทอง 90% หัก 5%",292.115,95655.00,staff0`,
+      `2,2026-10-02,10:00,RC6910-0002,00000 ${HQ},${NAMES.B},${masked(IDS.B)},"ทอง, ทอง 96.5% หัก 3%, ทอง 100% หัก 10%, ทอง 99.99%",8.500,33537.25,staff0`,
+      `3,2026-10-03,10:00,RC6910-0001,00001 สาขา 2,${NAMES.C},${masked(IDS.C)},"เงิน 92.5% หัก 2%, แพลตตินั่ม 95%",101.500,5300.00,staff1`,
+    ]);
+    // 3 บิล + 3 สาขา × (4 โลหะ + ทุกประเภท) + รวมทั้งสิ้น (4 โลหะ + ทุกประเภท)
+    expect(lines).toHaveLength(1 + 3 + 3 * 5 + 5 + 1);
+    expect(lines.slice(-6, -1)).toEqual([
+      "รวมทั้งสิ้น,,,,ทุกสาขา,,,ทอง,29.055,118059.25,",
+      "รวมทั้งสิ้น,,,,ทุกสาขา,,,นาก,0.000,0.00,",
+      "รวมทั้งสิ้น,,,,ทุกสาขา,,,เงิน,371.560,15151.00,",
+      "รวมทั้งสิ้น,,,,ทุกสาขา,,,แพลตตินั่ม,1.500,1282.00,",
+      "รวมทั้งสิ้น,,,,ทุกสาขา,,,ทุกประเภท (3 ใบ),402.115,134492.25,",
+    ]);
+    expect(lines.join("\n")).not.toContain("นาก 75%");
+  });
+
+  it("scoping: manager เห็นรายการของสาขาตัวเองเท่านั้น · branch_id สาขาอื่น = ว่าง — ป้ายของสาขาอื่นไม่หลุดทั้ง JSON และ CSV", async () => {
+    const hqLabels = ["ทอง 96.5% หัก 3%", "ทอง 96.5%", "ทอง 90% หัก 5%", "ทอง 100% หัก 10%", "ทอง 99.99%"];
+
+    const own1 = await purchase("", "mgr1");
+    expect(own1.rows.map((x) => [x.id, x.items])).toEqual([
+      [bills.p3, [item("เงิน 92.5% หัก 2%", "100.000", "4018.00"), item("แพลตตินั่ม 95%", "1.500", "1282.00")]],
+    ]);
+    const text1 = JSON.stringify(own1);
+    for (const l of hqLabels) expect(text1).not.toContain(l);
+    expect(text1).not.toContain('"label":"เงิน 92.5%"'); // ของ 00000 (ไม่หัก) — ไม่ใช่ "เงิน 92.5% หัก 2%" ของตัวเอง
+    const csv1 = (await csvOf(await get("/purchase?format=csv", "mgr1"))).text;
+    expect(csv1).toContain(',"เงิน 92.5% หัก 2%, แพลตตินั่ม 95%",101.500,5300.00,staff1\r\n');
+    for (const l of ["96.5%", "90%", "100%", "99.99%"]) expect(csv1).not.toContain(l);
+
+    const own0 = await purchase("", "mgr0");
+    expect(labels(own0)).toEqual([
+      [bills.p1, ["ทอง 96.5% หัก 3%", "เงิน 92.5%", "ทอง 96.5%", "ทอง 90% หัก 5%"]],
+      [bills.p2, ["ทอง", "ทอง 96.5% หัก 3%", "ทอง 100% หัก 10%", "ทอง 99.99%"]],
+    ]);
+    for (const l of ["แพลตตินั่ม 95%", "หัก 2%"]) expect(JSON.stringify(own0)).not.toContain(l);
+
+    // สาขาอื่น / ไม่มีจริง / ผิดรูป = ว่าง ไม่ใช่ทุกสาขา — ทั้ง JSON และ CSV ไม่มีป้ายของ 00000 เลย
+    for (const qs of [`branch_id=${t.branches["00000"]}`, `branch_id=${NO_BRANCH}`, "branch_id=not-a-uuid"]) {
+      const other = await purchase(qs, "mgr1");
+      expect(other.rows).toEqual([]);
+      expect(other.total).toMatchObject({ count: "0", total_weight: "0.000", total_amount: "0.00" });
+      const csv = (await csvOf(await get(`/purchase?format=csv&${qs}`, "mgr1"))).text;
+      expect(csv).not.toContain("%");
+    }
   });
 });

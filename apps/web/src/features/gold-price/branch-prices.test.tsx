@@ -128,6 +128,9 @@ describe("ราคาเฉพาะสาขา — ตั้งราคา",
     const input = within(dialog).getByLabelText("ราคาทองแท่งขายออกของสาขานี้ (บาท)");
     await waitFor(() => expect(input).toHaveFocus());
     expect(dialog).toHaveTextContent("ราคาที่ใช้อยู่ตอนนี้: ทองแท่งขายออก 67,850 บาท (ราคากลาง)");
+    // ราคาต่อกรัมตั้งที่ราคาเฉพาะสาขาไม่ได้ (API ตอบ 400) — ไม่มีช่อง บอกไว้แทน · ไม่ส่งคีย์ราคาต่อกรัม (ดู putBodies ด้านล่าง)
+    expect(dialog).toHaveTextContent("ราคาเงินและแพลตตินั่มต่อกรัมตั้งได้ที่ราคากลางเท่านั้น");
+    expect(within(dialog).queryByLabelText("ราคาเงิน (บาท/กรัม)")).not.toBeInTheDocument();
 
     await user.keyboard("70850.");
     const preview = within(within(dialog).getByRole("region", { name: "ราคาที่จะบันทึก" })).getByRole("status");

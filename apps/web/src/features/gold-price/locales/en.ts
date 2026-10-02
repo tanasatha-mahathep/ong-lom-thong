@@ -2,7 +2,8 @@ import type th from "./th";
 
 /** namespace `goldPrice` — today's gold price page (English · same keys as th.ts) */
 export default {
-  description: "Enter the gold bar selling price once each morning; the buying prices are calculated for you",
+  description:
+    "Enter the gold bar selling price each morning; the buying prices are calculated for you · silver/platinum prices per gram are set on the central price",
   managersOnly: {
     title: "Only managers and administrators can set the gold price",
     body: "If the price is wrong or not set, tell your branch manager",
@@ -23,6 +24,18 @@ export default {
   },
   barSellLabel: "Gold bar selling price (baht)",
   barSellHint: "Type a number, e.g. 67850, then press Enter to save",
+  perGram: {
+    legend: "Silver and platinum buying prices",
+    silver_per_g: "Silver price (baht/g)",
+    platinum_per_g: "Platinum price (baht/g)",
+    placeholder: { silver_per_g: "e.g. 45.50", platinum_per_g: "e.g. 1000" },
+    hint: "Optional · price per gram at 100% purity, used by every branch · leave blank = that metal cannot be bought today",
+    notSet: "Not set",
+    metal: { silver_per_g: "silver", platinum_per_g: "platinum" },
+    and: " and ",
+    missing:
+      "Today's {{metals}} price has not been set — {{metals}} cannot be bought until a manager sets it on the central price",
+  },
   save: "Save price",
   typo: {
     title: "Confirm today's gold price",
@@ -99,6 +112,8 @@ export default {
     current: "Current price: gold bar sell {{price}} baht ({{source}})",
     currentNone: "This branch has no price for today yet",
     label: "Gold bar selling price for this branch (baht)",
+    perGramNote:
+      "Silver and platinum prices per gram can only be set on the central price — every branch always uses it",
     cancel: "Cancel",
     save: "Save branch price",
     saved: "Branch price set for {{branch}}",

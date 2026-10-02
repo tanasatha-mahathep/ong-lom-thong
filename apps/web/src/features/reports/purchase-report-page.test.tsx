@@ -15,6 +15,7 @@ const METALS = [
 ];
 const gold = (grams: string, amount: string) => ({ metal_code: "gold", name_th: "ทองคำ", grams, amount });
 const silver = (grams: string, amount: string) => ({ metal_code: "silver", name_th: "เงิน", grams, amount });
+const item = (label: string, grams: string, amount: string) => ({ label, grams, amount });
 
 const ROWS = [
   {
@@ -26,6 +27,8 @@ const ROWS = [
     branch: BRANCH_HQ,
     customer: { id: "c-1", name_th: "สมชาย ทดสอบ", national_id_masked: "1 XXXX XXXXX 12 3" },
     metals: [gold("5.860", "20030.00")],
+    // บิลก่อนมีค่าบริสุทธิ์ — ป้ายเป็นชื่อโลหะ
+    items: [item("ทองคำ", "5.860", "20030.00")],
     total_weight: "5.860",
     total_amount: "20030.00",
     created_by: { id: "u-1", name: "พนักงาน ทดสอบ" },
@@ -39,6 +42,12 @@ const ROWS = [
     branch: BRANCH_2,
     customer: { id: "c-2", name_th: "สมหญิง ทดสอบ", national_id_masked: "3 XXXX XXXXX 45 6" },
     metals: [gold("1.000", "3500.00"), silver("100.000", "2500.00")],
+    // ป้ายแบบบนใบรับซื้อ (โลหะ · ค่าบริสุทธิ์ · หัก %) — ทองสองชิ้นที่ % ต่างกันแยกบรรทัด
+    items: [
+      item("ทองคำ 96.5% หัก 3%", "0.600", "2100.00"),
+      item("ทองคำ 90%", "0.400", "1400.00"),
+      item("เงิน 92.5%", "100.000", "2500.00"),
+    ],
     total_weight: "101.000",
     total_amount: "6000.00",
     created_by: { id: "u-2", name: "ผู้จัดการ ทดสอบ" },
@@ -344,7 +353,7 @@ describe("รายงานยอดซื้อ — ตัวเลขจา�
     expect(within(byMetal).getByRole("row", { name: /รวมทุกประเภท/ })).toHaveTextContent("98,765,432,109,876.54");
   });
 
-  it("รายการบิล: เลขที่ใบเป็นลิงก์ไปหน้าบิล · เลขบัตรมาสก์ · น้ำหนัก/เงินต่อโลหะ · ผู้บันทึก", async () => {
+  it("รายการบิล: เลขที่ใบเป็นลิงก์ไปหน้าบิล · เลขบัตรมาสก์ · รายการแบบบนใบรับซื้อ · ผู้บันทึก", async () => {
     await open("/reports/purchase");
 
     const rows = await screen.findByRole("table", { name: "รายการบิลซื้อเข้าในช่วงวันที่" });
@@ -354,8 +363,18 @@ describe("รายงานยอดซื้อ — ตัวเลขจา�
     expect(second).toHaveTextContent("สาขา 2");
     expect(second).toHaveTextContent("สมหญิง ทดสอบ");
     expect(second).toHaveTextContent("3 XXXX XXXXX 45 6");
-    expect(second).toHaveTextContent("ทองคำ 1.000 ก. · 3,500.00 บาท");
-    expect(second).toHaveTextContent("เงิน 100.000 ก. · 2,500.00 บาท");
+    // คอลัมน์รายการมาจาก rows[].items (ป้ายเดียวกับ PDF) ไม่ใช่ยอดรวมต่อโลหะ
+    const items = within(second)
+      .getAllByRole("listitem")
+      .map((li) => li.textContent);
+    expect(items).toEqual([
+      "ทองคำ 96.5% หัก 3% 0.600 ก. · 2,100.00 บาท",
+      "ทองคำ 90% 0.400 ก. · 1,400.00 บาท",
+      "เงิน 92.5% 100.000 ก. · 2,500.00 บาท",
+    ]);
+    expect(second).not.toHaveTextContent("ทองคำ 1.000 ก.");
+    const first = within(rows).getByRole("row", { name: /RC6909-0001/ });
+    expect(first).toHaveTextContent("ทองคำ 5.860 ก. · 20,030.00 บาท");
     expect(within(second).getByRole("cell", { name: "101.000" })).toHaveClass("tabular-nums");
     expect(within(second).getByRole("cell", { name: "6,000.00" })).toBeInTheDocument();
     expect(second).toHaveTextContent("ผู้จัดการ ทดสอบ");

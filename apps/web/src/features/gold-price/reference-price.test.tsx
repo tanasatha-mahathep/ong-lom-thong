@@ -37,7 +37,7 @@ function setup(role: Role, routes: Parameters<typeof fakeApi>[0] = {}) {
 
 const referenceRegion = () => screen.findByRole("region", { name: "ราคาสมาคม (อ้างอิง)" });
 
-describe("ราคาสมาคม (อ้างอิง) — หน้าแรก", () => {
+describe("ราคาสมาคม (อ้างอิง) — หน้าหลัก", () => {
   it("แสดงราคา 4 ค่า + ครั้งที่ + เวลาประกาศ + ที่มา แยกจากกระดานราคาของร้าน", async () => {
     setup("staff");
     renderApp("/");
@@ -54,8 +54,70 @@ describe("ราคาสมาคม (อ้างอิง) — หน้า�
     const board = screen.getByRole("region", { name: "ราคาทองวันนี้" });
     expect(board).toHaveTextContent("67,850");
     expect(within(region).queryByText("67,850")).not.toBeInTheDocument();
-    // หน้าแรกไม่มีปุ่มเติมค่า
+    // หน้าหลักไม่มีปุ่มเติมค่า
     expect(within(region).queryByRole("button")).not.toBeInTheDocument();
+  });
+
+  it("การ์ด 4 ใบตามลำดับของเจ้าของร้าน — ป้ายกับตัวเลขของค่าเดียวกันอยู่ในการ์ดเดียวกัน", async () => {
+    setup("staff");
+    renderApp("/");
+    const region = await referenceRegion();
+    const terms = await within(region).findAllByRole("term");
+    const pairs = terms.map((term) => {
+      const card = term.closest<HTMLElement>("[data-slot=card]");
+      return [term.textContent, card && within(card).getByRole("definition").textContent];
+    });
+    expect(pairs).toEqual([
+      ["ทองคำแท่ง รับซื้อ", "68,050บาท"],
+      ["ทองคำแท่ง ขายออก", "68,250บาท"],
+      ["ทองรูปพรรณ รับซื้อ", "66,683.52บาท"],
+      ["ทองรูปพรรณ ขายออก", "69,050บาท"],
+    ]);
+    expect(within(region).getAllByRole("definition")).toHaveLength(4);
+    // jsdom ไม่คำนวณ layout — สัญญาของ class: การ์ดต่อแถวตามความกว้างของกรอบเอง (container query) ไม่ใช่ของจอ
+    // กรอบนี้อยู่ในการ์ดครึ่งจอของหน้าตั้งราคาด้วย (sm:grid-cols-4 แบบเดิมล้นการ์ดที่จอ 1024–1280 px)
+    expect(region).toHaveClass("@container/reference");
+    const columns = [...(region.querySelector("dl")?.classList ?? [])].filter((c) => c.includes("grid-cols-"));
+    expect(columns).not.toEqual([]);
+    expect(columns.filter((c) => !c.includes("/reference:"))).toEqual([]);
+  });
+
+  it("ทั้ง 4 ค่าจัดรูปแบบกระดานเดียวกัน — บาทเต็มไม่มี .00 (รวมทองรูปพรรณรับซื้อ) · มีสตางค์แสดงครบ ไม่ปัดทิ้ง", async () => {
+    setup("staff", {
+      "GET /api/gold-price/reference": () =>
+        json({ ...REFERENCE, ornament_buy: "66683.00", ornament_sell: "69050.50" }),
+    });
+    renderApp("/");
+    const region = await referenceRegion();
+    const values = (await within(region).findAllByRole("definition")).map((value) => value.textContent);
+    expect(values).toEqual(["68,050บาท", "68,250บาท", "66,683บาท", "69,050.50บาท"]);
+  });
+
+  it("ระหว่างดึง → aria-busy + ประกาศว่ากำลังดึง · โครงการ์ดใน grid เดียวกับตอนมีข้อมูล (การ์ดไม่กระโดด)", async () => {
+    let answer: (response: Response) => void = () => undefined;
+    const api = setup("staff", {
+      "GET /api/gold-price/reference": () =>
+        new Promise<Response>((resolve) => {
+          answer = resolve;
+        }),
+    });
+    renderApp("/");
+    const region = await referenceRegion();
+    await waitFor(() => expect(api.callsTo("GET", "/api/gold-price/reference")).toHaveLength(1));
+    expect(region).toHaveAttribute("aria-busy", "true");
+    expect(within(region).getByText("กำลังดึงราคาสมาคม…")).toBeInTheDocument();
+    expect(within(region).queryByRole("term")).not.toBeInTheDocument();
+    // บรรทัดประกาศ + การ์ด 4 ใบ
+    const placeholders = region.querySelectorAll("[data-slot=skeleton]");
+    expect(placeholders).toHaveLength(5);
+    const loadingGrid = placeholders[1]?.parentElement?.className;
+
+    answer(json(REFERENCE));
+    await waitFor(() => expect(region).toHaveAttribute("aria-busy", "false"));
+    expect(within(region).getAllByRole("definition")).toHaveLength(4);
+    expect(region.querySelector("dl")?.className).toBe(loadingGrid);
+    expect(region.querySelector("[data-slot=skeleton]")).not.toBeInTheDocument();
+    expect(within(region).queryByText("กำลังดึงราคาสมาคม…")).not.toBeInTheDocument();
   });
 
   it("stale → คำเตือนว่าอาจไม่ใช่ประกาศล่าสุด", async () => {
@@ -63,6 +125,10 @@ describe("ราคาสมาคม (อ้างอิง) — หน้า�
     renderApp("/");
     const region = await referenceRegion();
     await waitFor(() => expect(region).toHaveTextContent("อาจไม่ใช่ประกาศล่าสุดของวันนี้"));
+    // คำเตือนมาก่อนตัวเลข — จอแคบการ์ดเรียงลงมา 4 ใบ คำเตือนท้ายกรอบจะเลื่อนไม่ถึง
+    const warning = within(region).getByText(/อาจไม่ใช่ประกาศล่าสุดของวันนี้/);
+    const firstValue = within(region).getByText("ทองคำแท่ง รับซื้อ");
+    expect(warning.compareDocumentPosition(firstValue) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   });
 
   it("503 → 'ดึงราคาอ้างอิงไม่ได้' ไม่มีตัวเลขราคา · กระดานร้านยังแสดงปกติ", async () => {
@@ -242,5 +308,15 @@ describe("ราคาสมาคม (อ้างอิง) — /settings/gold
       { bar_sell: "68250.00", from_reference: PREFILL },
       { bar_sell: "68250.00", confirm_typo: true, from_reference: PREFILL },
     ]);
+  });
+
+  it("การ์ด 4 ใบเหมือนหน้าหลัก · ปุ่มเติมค่า (action) อยู่ในกรอบเดียวกัน ใต้การ์ด", async () => {
+    await open();
+    const region = await referenceRegion();
+    const button = await within(region).findByRole("button", { name: "ใช้ราคาสมาคมเป็นค่าเริ่มต้น" });
+    const values = within(region).getAllByRole("definition");
+    expect(values.map((value) => value.textContent)).toEqual(["68,050บาท", "68,250บาท", "66,683.52บาท", "69,050บาท"]);
+    const cards = region.querySelector("dl");
+    expect(cards && cards.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   });
 });

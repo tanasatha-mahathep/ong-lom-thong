@@ -26,7 +26,7 @@ function openHome(role: Role, routes: Parameters<typeof fakeApi>[0] = {}) {
   return api;
 }
 
-describe("หน้าแรก — กระดานราคาวันนี้", () => {
+describe("หน้าหลัก — กระดานราคาวันนี้", () => {
   it("ราคาทองแท่งแสดงเป็นบาทเต็มแบบกระดานของระบบเดิม", async () => {
     openHome("staff");
     const board = await screen.findByRole("region", { name: "ราคาทองวันนี้" });
@@ -79,7 +79,7 @@ describe("หน้าแรก — กระดานราคาวันน�
   });
 });
 
-describe("หน้าแรก — ปุ่มใหญ่", () => {
+describe("หน้าหลัก — ปุ่มใหญ่", () => {
   it.each<Role>(["staff", "manager", "admin"])("%s มีปุ่มซื้อเข้าและลูกค้าใหม่", async (role) => {
     openHome(role);
     const actions = await screen.findByRole("region", { name: "ทางลัด" });
@@ -97,7 +97,7 @@ describe("หน้าแรก — ปุ่มใหญ่", () => {
   });
 });
 
-describe("หน้าแรก — ยอดซื้อวันนี้", () => {
+describe("หน้าหลัก — ยอดซื้อวันนี้", () => {
   it("ถามยอดของวันตามเวลาไทยในสาขาปัจจุบัน แล้วแสดง totals ของเซิร์ฟเวอร์ตรงทุกหลัก", async () => {
     const api = openHome("staff", {
       [`GET ${TODAY_BUYS}`]: () =>

@@ -41,7 +41,7 @@ export function cleanQuery(text: string): string {
   return text.replace(UNUSABLE_CHARS, "").trim();
 }
 
-/** search ของหน้า → ตัวกรองของ API · หน้า 1 ไม่ใส่ page (key เดียวกับการ์ดบนหน้าแรก) */
+/** search ของหน้า → ตัวกรองของ API · หน้า 1 ไม่ใส่ page (key เดียวกับการ์ดบนหน้าหลัก) */
 export function toListParams(search: BillsSearch): BuyListParams {
   const params: BuyListParams = {};
   if (search.from) params.date_from = search.from;

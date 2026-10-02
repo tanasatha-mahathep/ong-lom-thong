@@ -44,8 +44,9 @@ function setup({ role = "staff", me, customers = [CUSTOMER_OK, CUSTOMER_EXPIRED]
 }
 
 const idBox = () => screen.getByLabelText(t("customer.idLabel"));
+const purity = () => screen.getByLabelText(t("lines.purity"));
+const deduct = () => screen.getByLabelText<HTMLSelectElement>(t("lines.deduct"));
 const weight = () => screen.getByLabelText(t("lines.weight"));
-const amount = () => screen.getByLabelText(t("lines.amount"));
 const payAmount = () => screen.getByLabelText(t("payments.amount"));
 const saveButton = () => screen.getByRole("button", { name: /^บันทึก/ });
 const linesTable = () => screen.getByRole("table", { name: t("lines.table") });
@@ -58,9 +59,31 @@ async function insertCard(user: ReturnType<typeof userEvent.setup>, nationalId: 
   await user.keyboard(nationalId);
 }
 
-async function addLine(user: ReturnType<typeof userEvent.setup>, w: string, a: string) {
-  await user.click(weight());
-  await user.keyboard(`${w}{Enter}${a}{Enter}`);
+/** ข้อความในแต่ละช่องของแถวในตารางรายการ (ไม่รวมปุ่มลบ) */
+const rowCells = (row: HTMLElement) =>
+  within(row)
+    .getAllByRole("cell")
+    .map((cell) => cell.textContent)
+    .slice(0, -1);
+/** แถวข้อมูลของตารางรายการ (ไม่รวมหัวตารางและแถวรวม) */
+const dataRows = () =>
+  within(linesTable())
+    .getAllByRole("row")
+    .filter((row) => row.closest("tbody") !== null);
+
+/**
+ * กรอกแถวด้วยคีย์บอร์ด: ค่าบริสุทธิ์ Enter → หัก % (เลือก) Enter → ปริมาณ Enter
+ * ค่าเริ่มต้น ทอง 100% 10 ก. ไม่หัก = 44,370.00 ที่ทองแท่งรับซื้อ 67,650 (⌊67650 × 0.0656⌋ × 10)
+ */
+async function addLine(
+  user: ReturnType<typeof userEvent.setup>,
+  { p = "100", d = "0", w = "10" }: { p?: string; d?: string; w?: string } = {},
+) {
+  await user.click(purity());
+  await user.keyboard(`${p}{Enter}`);
+  if (d !== "0") await user.selectOptions(deduct(), d);
+  deduct().focus();
+  await user.keyboard(`{Enter}${w}{Enter}`);
 }
 
 /** promise ที่คุมเวลาตอบเอง — ใช้จำลองช่วงที่ POST /api/buy ยัง pending จริง (fieldset ปิดค้างอยู่จริง ไม่ใช่ผ่านไปเร็วจนไม่มีใครเห็น) */
@@ -73,21 +96,47 @@ function defer<T>() {
 }
 
 describe("/buy", () => {
-  it("walks the counter flow by keyboard: card → lines → full payment → Ctrl+Enter", async () => {
+  it("walks the counter flow by keyboard: card → purity → deduct → weight → full payment → Ctrl+Enter", async () => {
     const { api, user, router } = setup();
     await insertCard(user, CUSTOMER_OK.national_id);
-    await waitFor(() => expect(weight()).toHaveFocus());
+    await waitFor(() => expect(purity()).toHaveFocus());
     expect(screen.getByText(CUSTOMER_OK.name_th)).toBeInTheDocument();
     expect(screen.getByText("1 XXXX XXXXX 01 0")).toBeInTheDocument();
+    // ไม่มีช่องราคาให้พิมพ์แล้ว — เซิร์ฟเวอร์คิดให้
+    expect(screen.queryByLabelText("ราคาจริงที่รับซื้อ (บาท)")).not.toBeInTheDocument();
+    expect(deduct()).toHaveValue("0");
 
-    await user.keyboard("5.86{Enter}");
-    expect(amount()).toHaveFocus();
-    await user.keyboard("20030{Enter}");
-    // แถวใหม่ได้ราคา/กรัมจาก API · ช่องกรอกว่าง โฟกัสกลับที่ปริมาณ · โลหะเดิมยังเลือกอยู่
-    expect(await within(linesTable()).findAllByText("3,418.09")).toHaveLength(2); // ราคาต่อหน่วย + เฉลี่ย/กรัม
-    expect(weight()).toHaveValue("");
+    await user.keyboard("96.5{Enter}");
+    expect(deduct()).toHaveFocus();
+    await user.selectOptions(deduct(), "3");
+    deduct().focus();
+    await user.keyboard("{Enter}");
     expect(weight()).toHaveFocus();
+    await user.keyboard("10{Enter}");
+
+    // ทุกตัวเลขของแถวมาจาก quote: ⌊67650 × 0.0656 × 96.5%⌋ = 4,282/ก. → 42,820 → หัก 3% 1,285 → 41,535
+    await waitFor(() => expect(dataRows()).toHaveLength(1));
+    expect(rowCells(dataRows()[0] as HTMLElement)).toEqual([
+      "1",
+      "ทอง",
+      "96.5%",
+      "3%",
+      "10.000",
+      "4,282.00",
+      "42,820.00",
+      "1,285.00",
+      "41,535.00",
+    ]);
+    // ช่องกรอกว่าง หัก % กลับเป็น 0 · โฟกัสกลับที่ค่าบริสุทธิ์ · โลหะเดิมยังเลือกอยู่
+    expect(purity()).toHaveValue("");
+    expect(weight()).toHaveValue("");
+    expect(deduct()).toHaveValue("0");
+    expect(purity()).toHaveFocus();
     expect(screen.getByRole("radio", { name: "ทอง" })).toBeChecked();
+
+    // Enter ในแถวว่าง (มีรายการแล้ว) = จบรายการ ไปช่องรายละเอียด
+    await user.keyboard("{Enter}");
+    expect(screen.getByLabelText(t("lines.detail"))).toHaveFocus();
 
     await user.click(screen.getByRole("button", { name: t("payments.payFull") }));
     expect(await screen.findByText(t("payments.balanced"))).toBeInTheDocument();
@@ -98,21 +147,96 @@ describe("/buy", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe(`/buy/${SAVED.id}`));
     expect(saves(api)).toHaveLength(1);
     const body = saves(api)[0]?.body as SaveBody;
+    // แถวไม่มีราคา — ส่งแค่โลหะ · ปริมาณ · ค่าบริสุทธิ์ · หัก % เป็นข้อความ
     expect(body).toEqual({
       customer_id: CUSTOMER_OK.id,
-      lines: [{ metal_id: "m-gold", weight_g: "5.86", amount: "20030" }],
-      payments: [{ method: "cash", amount: "20030.00" }],
+      lines: [{ metal_id: "m-gold", weight_g: "10", purity_percent: "96.5", deduct_percent: "3" }],
+      payments: [{ method: "cash", amount: "41535.00" }],
       full_tax: false,
       idempotency_key: expect.stringMatching(/^[A-Za-z0-9_-]{16,128}$/) as string,
     });
   });
 
-  it("lands on the weight field after a card read, with nothing typed into other fields", async () => {
+  it("shows the server's price per row with the footer totals, for several metals", async () => {
+    const { user } = setup();
+    await insertCard(user, CUSTOMER_OK.national_id);
+    await waitFor(() => expect(purity()).toHaveFocus());
+    await addLine(user);
+    await waitFor(() => expect(dataRows()).toHaveLength(1));
+
+    // เงิน: ราคาต่อกรัมที่ร้านตั้ง 45 × 92.5% = ⌊41.625⌋ = 41 → 271.56 ก. = 11,133.00
+    await user.click(screen.getByRole("radio", { name: "เงิน" }));
+    await user.keyboard("{Enter}");
+    expect(purity()).toHaveFocus();
+    await user.keyboard("92.5{Enter}{Enter}271.56{Enter}");
+    await waitFor(() => expect(dataRows()).toHaveLength(2));
+    expect(rowCells(dataRows()[1] as HTMLElement)).toEqual([
+      "2",
+      "เงิน",
+      "92.5%",
+      "0%",
+      "271.560",
+      "41.00",
+      "11,133.00",
+      "0.00",
+      "11,133.00",
+    ]);
+    const footer = within(linesTable()).getAllByRole("row").at(-1) as HTMLElement;
+    expect(footer).toHaveTextContent("281.560");
+    expect(footer).toHaveTextContent("55,503.00");
+  });
+
+  it("points at the metal when its price for the day is not set", async () => {
+    const { user } = setup();
+    await insertCard(user, CUSTOMER_OK.national_id);
+    await waitFor(() => expect(purity()).toHaveFocus());
+    // แพลตตินั่มยังไม่ได้ตั้งราคาต่อกรัมของวันนี้ (GOLD_PRICE.platinum_per_g = null)
+    await user.click(screen.getByRole("radio", { name: "แพลตตินั่ม" }));
+    await addLine(user, { p: "95" });
+
+    const message = "ยังไม่ได้ตั้งราคาแพลตตินั่มของวันนี้";
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    const platinum = screen.getByRole("radio", { name: "แพลตตินั่ม" });
+    // โฟกัสตัวที่เลือกอยู่ (ไม่ใช่ตัวแรกของกลุ่ม — ไม่งั้นโลหะเปลี่ยนเป็นทองเองและ error หาย)
+    expect(platinum).toHaveFocus();
+    expect(platinum).toBeChecked();
+    expect(platinum.closest('[role="radiogroup"]')).toHaveAccessibleDescription(message);
+    expect(within(linesTable()).getByText(t("lines.empty"))).toBeInTheDocument();
+    // ค่าที่กรอกยังอยู่ — ตั้งราคาแล้วกด Enter ใหม่ได้
+    expect(purity()).toHaveValue("95");
+  });
+
+  it("puts a server error on the deduct dropdown and focuses it", async () => {
+    const message = "หัก % ต้องเป็นเลขจำนวนเต็ม 0–10";
+    const { user } = setup({
+      quote: (body) => {
+        const q = fakeQuote(body, [CUSTOMER_OK]);
+        const i = body.lines.length - 1;
+        return json({
+          ...q,
+          ok: false,
+          lines: q.lines.filter((l) => l.index !== i),
+          errors: [...q.errors, { field: `lines.${i}.deduct_percent`, message }],
+        });
+      },
+    });
+    await insertCard(user, CUSTOMER_OK.national_id);
+    await waitFor(() => expect(purity()).toHaveFocus());
+    await addLine(user, { p: "96.5", d: "3" });
+
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(deduct()).toHaveFocus();
+    expect(deduct()).toHaveAttribute("aria-invalid", "true");
+    expect(deduct()).toHaveAccessibleDescription(message);
+  });
+
+  it("lands on the purity field after a card read, with nothing typed into other fields", async () => {
     const { user } = setup();
     await insertCard(user, CUSTOMER_OK.national_id);
     // ปุ่มที่ Siam ID ส่งตามมาระหว่าง burst ถูกกลืน — ทดสอบด้วยนาฬิกาปลอมใน use-siam-id-capture.test.tsx
     // (เทสต์ทั้งแอปพิมพ์ช้าบนเครื่องที่งานเยอะ จังหวะ 800 ms จึงเชื่อไม่ได้)
-    await waitFor(() => expect(weight()).toHaveFocus());
+    await waitFor(() => expect(purity()).toHaveFocus());
+    expect(purity()).toHaveValue("");
     expect(weight()).toHaveValue("");
     expect(screen.getByLabelText(t("customer.searchLabel"))).toHaveValue("");
     expect(screen.getByText(CUSTOMER_OK.name_th)).toBeInTheDocument();
@@ -122,18 +246,23 @@ describe("/buy", () => {
     const { user } = setup();
     await waitFor(() => expect(idBox()).toHaveFocus());
     const names: string[] = [];
-    for (let i = 0; i < 11; i++) {
+    for (let i = 0; i < 12; i++) {
       await user.tab();
       const el = document.activeElement as HTMLElement;
-      const label = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el.labels?.[0] : null;
+      const label =
+        el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement
+          ? el.labels?.[0]
+          : null;
       names.push((el.getAttribute("role") === "radio" ? el.closest("label") : (label ?? el))?.textContent ?? "");
     }
+    // แถวสินค้า: โลหะ → ค่าบริสุทธิ์ → หัก % → ปริมาณ (ปุ่มเพิ่มรายการเป็นของเมาส์ ไม่อยู่ในลำดับ Tab)
     expect(names).toEqual([
       t("customer.searchLabel"),
       `${t("customer.newCustomer")}${t("customer.opensInNewTab")}`,
       "ทอง",
+      t("lines.purity"),
+      t("lines.deduct"),
       t("lines.weight"),
-      t("lines.amount"),
       t("lines.detail"),
       "เงินสด",
       t("payments.amount"),
@@ -146,31 +275,47 @@ describe("/buy", () => {
   it("does not add a line the API rejects, and shows why under the field", async () => {
     const { user } = setup();
     await insertCard(user, CUSTOMER_OK.national_id);
-    await waitFor(() => expect(weight()).toHaveFocus());
+    await waitFor(() => expect(purity()).toHaveFocus());
 
-    await user.keyboard("5,860{Enter}20030{Enter}");
+    // ค่าบริสุทธิ์ว่าง: Enter แจ้งที่ช่องทันที ไม่ข้ามไปช่องถัดไป
+    await user.keyboard("{Enter}");
+    expect(await screen.findByText(t("lines.missingPurity"))).toBeInTheDocument();
+    expect(purity()).toHaveFocus();
+    expect(purity()).toHaveAccessibleDescription(expect.stringContaining(t("lines.missingPurity")));
+
+    await user.keyboard("96.5{Enter}{Enter}5,860{Enter}");
     expect(await screen.findByText("น้ำหนักห้ามใส่จุลภาค — เช่น 5.860 หรือ 1250.500")).toBeInTheDocument();
     expect(weight()).toHaveAttribute("aria-invalid", "true");
     expect(weight()).toHaveFocus();
 
-    await user.clear(weight());
-    await user.keyboard("5.86{Enter}1234567890123{Enter}");
-    expect(await screen.findByText("ราคาเกิน 99,999,999.99 บาท — ตรวจตัวเลขอีกครั้ง")).toBeInTheDocument();
+    // ค่าบริสุทธิ์นอกช่วง — ข้อความของเซิร์ฟเวอร์ใต้ช่องค่าบริสุทธิ์ (ช่องแรกที่ผิดตามลำดับที่กรอก ก่อนน้ำหนัก)
+    await user.clear(purity());
+    await user.type(purity(), "150");
+    await user.click(weight());
+    await user.keyboard("{Enter}");
+    const invalidPurity = "ค่าบริสุทธิ์ต้องเป็นตัวเลข 1–100 ทศนิยมไม่เกิน 2 ตำแหน่ง เช่น 96.5";
+    expect(await screen.findByText(invalidPurity)).toBeInTheDocument();
+    expect(purity()).toHaveFocus();
+    expect(purity()).toHaveAttribute("aria-invalid", "true");
     expect(within(linesTable()).getByText(t("lines.empty"))).toBeInTheDocument();
 
-    // Esc ล้างเฉพาะแถวที่กำลังกรอก
+    // Esc ล้างเฉพาะแถวที่กำลังกรอก — หัก % กลับเป็น 0 · โลหะคงเดิม
+    await user.selectOptions(deduct(), "5");
+    purity().focus();
     await user.keyboard("{Escape}");
+    expect(purity()).toHaveValue("");
     expect(weight()).toHaveValue("");
-    expect(amount()).toHaveValue("");
-    expect(weight()).toHaveFocus();
+    expect(deduct()).toHaveValue("0");
+    expect(purity()).toHaveFocus();
+    expect(screen.getByRole("radio", { name: "ทอง" })).toBeChecked();
   });
 
   it("checks payments before adding them: bank for transfers, duplicates and overpaying", async () => {
     const { api, user } = setup();
     await insertCard(user, CUSTOMER_OK.national_id);
-    await waitFor(() => expect(weight()).toHaveFocus());
-    await addLine(user, "5.86", "20030");
-    await within(linesTable()).findAllByText("3,418.09");
+    await waitFor(() => expect(purity()).toHaveFocus());
+    await addLine(user);
+    await within(linesTable()).findAllByText("44,370.00");
 
     expect(screen.queryByLabelText(t("payments.bank"))).not.toBeInTheDocument();
     await user.click(screen.getByRole("radio", { name: "โอนเงิน" }));
@@ -181,15 +326,15 @@ describe("/buy", () => {
 
     await user.click(screen.getByRole("radio", { name: "เงินสด" }));
     await user.click(payAmount());
-    await user.keyboard("30000{Enter}");
+    await user.keyboard("50000{Enter}");
     expect(await screen.findByText(t("payments.overpaid"))).toBeInTheDocument();
     expect(screen.getByText(t("payments.empty"))).toBeInTheDocument();
 
     await user.clear(payAmount());
-    await user.keyboard("20000{Enter}");
-    expect(await screen.findByText(t("payments.balanceDue", { amount: "30.00" }))).toBeInTheDocument();
+    await user.keyboard("44000{Enter}");
+    expect(await screen.findByText(t("payments.balanceDue", { amount: "370.00" }))).toBeInTheDocument();
     const before = quotes(api).length;
-    await user.keyboard("30{Enter}");
+    await user.keyboard("370{Enter}");
     expect(await screen.findByText(t("payments.duplicate"))).toBeInTheDocument();
     expect(quotes(api)).toHaveLength(before);
   });
@@ -244,8 +389,8 @@ describe("/buy", () => {
       },
     });
     await insertCard(user, CUSTOMER_OK.national_id);
-    await waitFor(() => expect(weight()).toHaveFocus());
-    await addLine(user, "5.86", "20030");
+    await waitFor(() => expect(purity()).toHaveFocus());
+    await addLine(user);
     await user.click(await screen.findByRole("button", { name: t("payments.payFull") }));
     await screen.findByText(t("payments.balanced"));
 
@@ -275,8 +420,8 @@ describe("/buy", () => {
       },
     });
     await insertCard(user, CUSTOMER_OK.national_id);
-    await waitFor(() => expect(weight()).toHaveFocus());
-    await addLine(user, "5.86", "20030");
+    await waitFor(() => expect(purity()).toHaveFocus());
+    await addLine(user);
     await user.click(await screen.findByRole("button", { name: t("payments.payFull") }));
     await screen.findByText(t("payments.balanced"));
 
@@ -356,8 +501,8 @@ describe("/buy", () => {
       );
 
       await user.keyboard(CUSTOMER_OK.national_id);
-      await waitFor(() => expect(weight()).toHaveFocus());
-      await user.keyboard("5.86{Enter}20030{Enter}");
+      await waitFor(() => expect(purity()).toHaveFocus());
+      await user.keyboard("100{Enter}{Enter}10{Enter}");
       await user.click(await screen.findByRole("button", { name: t("payments.payFull") }));
       await screen.findByText(t("payments.balanced"));
       await user.keyboard("{Control>}{Enter}{/Control}");
@@ -410,23 +555,32 @@ describe("/buy", () => {
   it("blocks save while a typed line or payment entry has not been added yet (S1)", async () => {
     const { api, user } = setup();
     await insertCard(user, CUSTOMER_OK.national_id);
-    await waitFor(() => expect(weight()).toHaveFocus());
-    await addLine(user, "5.86", "20030");
+    await waitFor(() => expect(purity()).toHaveFocus());
+    await addLine(user);
     await user.click(await screen.findByRole("button", { name: t("payments.payFull") }));
     await screen.findByText(t("payments.balanced"));
     expect(saveButton()).toHaveAttribute("aria-disabled", "false");
 
-    // พิมพ์ปริมาณของแถวใหม่ไว้แต่ยังไม่ได้กด Enter เพิ่มเข้ารายการ
+    // พิมพ์ปริมาณของแถวใหม่ไว้แต่ยังไม่ได้กด Enter เพิ่มเข้ารายการ — พาไปช่องที่ยังขาด (ค่าบริสุทธิ์)
     await user.click(weight());
     await user.keyboard("1");
     expect(saveButton()).toHaveAttribute("aria-disabled", "true");
     expect(saveButton()).toHaveAccessibleDescription(t("save.unsavedEntry"));
     const before = saves(api).length;
     await user.keyboard("{Control>}{Enter}{/Control}");
+    expect(purity()).toHaveFocus();
+    expect(saves(api)).toHaveLength(before);
+
+    // ค่าบริสุทธิ์ครบแล้ว → พาไปช่องปริมาณ ที่ Enter = เพิ่มแถว
+    await user.keyboard("90");
+    await user.keyboard("{Control>}{Enter}{/Control}");
     expect(weight()).toHaveFocus();
     expect(saves(api)).toHaveLength(before);
 
+    // หัก % อย่างเดียว (ไม่มีข้อความที่จะหาย) ไม่นับเป็นแถวค้าง
     await user.clear(weight());
+    await user.clear(purity());
+    await user.selectOptions(deduct(), "2");
     expect(saveButton()).toHaveAttribute("aria-disabled", "false");
 
     // ช่องชำระเงินก็เช่นกัน
@@ -442,8 +596,8 @@ describe("/buy", () => {
     const pending = defer<Response>();
     const { user } = setup({ save: () => pending.promise });
     await insertCard(user, CUSTOMER_OK.national_id);
-    await waitFor(() => expect(weight()).toHaveFocus());
-    await addLine(user, "5.86", "20030");
+    await waitFor(() => expect(purity()).toHaveFocus());
+    await addLine(user);
     await user.click(await screen.findByRole("button", { name: t("payments.payFull") }));
     await screen.findByText(t("payments.balanced"));
 
@@ -452,7 +606,7 @@ describe("/buy", () => {
     await user.click(save);
     // ปุ่มบันทึกมีโฟกัสจากการคลิกอยู่แล้ว — ย้ายโฟกัสออกไปนอก fieldset ก่อน (เมนูข้างที่ไม่ได้อยู่ใต้ fieldset ที่ปิด)
     // แล้วค่อยลองย้ายกลับมาที่ปุ่ม เพื่อพิสูจน์ว่า .focus() ตรง ๆ ระหว่างรอคำตอบใช้ไม่ได้จริง (ไม่ใช่แค่ปุ่มยังมีโฟกัสเดิมค้างอยู่)
-    const homeLink = screen.getByRole("link", { name: "หน้าแรก" });
+    const homeLink = screen.getByRole("link", { name: "หน้าหลัก" });
     homeLink.focus();
     expect(homeLink).toHaveFocus();
     save.focus();
@@ -467,8 +621,8 @@ describe("/buy", () => {
     const pending = defer<Response>();
     const { user } = setup({ save: () => pending.promise });
     await insertCard(user, CUSTOMER_OK.national_id);
-    await waitFor(() => expect(weight()).toHaveFocus());
-    await addLine(user, "5.86", "20030");
+    await waitFor(() => expect(purity()).toHaveFocus());
+    await addLine(user);
     await user.click(await screen.findByRole("button", { name: t("payments.payFull") }));
     await screen.findByText(t("payments.balanced"));
 
@@ -478,7 +632,11 @@ describe("/buy", () => {
     expect(payAmount()).not.toHaveFocus();
 
     const q = fakeQuote(
-      { customer_id: CUSTOMER_OK.id, lines: [{ metal_id: "m-gold", weight_g: "5.86", amount: "20030" }], payments: [] },
+      {
+        customer_id: CUSTOMER_OK.id,
+        lines: [{ metal_id: "m-gold", weight_g: "10", purity_percent: "100", deduct_percent: "0" }],
+        payments: [],
+      },
       [CUSTOMER_OK],
     );
     pending.resolve(json({ error: "ยอดชำระไม่ตรงกับยอดบิล", field: "payments", ...q }, 409));
@@ -488,16 +646,16 @@ describe("/buy", () => {
   it("removes a line or payment row with the keyboard, not just the mouse (S3)", async () => {
     const { user } = setup();
     await insertCard(user, CUSTOMER_OK.national_id);
-    await waitFor(() => expect(weight()).toHaveFocus());
-    await addLine(user, "5.86", "20030");
-    await within(linesTable()).findAllByText("3,418.09");
+    await waitFor(() => expect(purity()).toHaveFocus());
+    await addLine(user);
+    await within(linesTable()).findAllByText("44,370.00");
     const removeLine = screen.getByRole("button", { name: t("lines.remove", { n: 1 }) });
     removeLine.focus();
     expect(removeLine).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(within(linesTable()).getByText(t("lines.empty"))).toBeInTheDocument();
 
-    await addLine(user, "5.86", "20030");
+    await addLine(user);
     await user.click(await screen.findByRole("button", { name: t("payments.payFull") }));
     await screen.findByText(t("payments.balanced"));
     const removePayment = screen.getByRole("button", { name: t("payments.remove", { n: 1 }) });
@@ -516,8 +674,8 @@ describe("/buy", () => {
       },
     });
     await insertCard(user, CUSTOMER_OK.national_id);
-    await waitFor(() => expect(weight()).toHaveFocus());
-    await addLine(user, "5.86", "20030");
+    await waitFor(() => expect(purity()).toHaveFocus());
+    await addLine(user);
     await user.click(payAmount());
     await user.keyboard("100{Enter}");
     expect(await screen.findByText("100.50")).toBeInTheDocument();

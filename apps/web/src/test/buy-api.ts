@@ -1,6 +1,6 @@
-import { type CardStatus, maskNationalId, quoteBuy } from "@ong/core";
+import { type BuyMetal, type CardStatus, maskNationalId, quoteBuy } from "@ong/core";
 import type { QuoteBody } from "@/features/buy/types";
-import { BRANCH_HQ, json } from "./app";
+import { BRANCH_HQ, GOLD_PRICE, json } from "./app";
 
 /**
  * API ปลอมของหน้าซื้อเข้า — quote ใช้ quoteBuy() ตัวเดียวกับเซิร์ฟเวอร์ (ฝั่งเทสต์เท่านั้น แอปไม่ import สูตรนี้)
@@ -44,25 +44,64 @@ export const listItem = (c: FakeCustomer) => ({
   card_status: c.card_status,
 });
 
-/** ผล POST /api/buy/quote แบบเดียวกับ services/buy.ts (quoteJson) */
-export function fakeQuote(body: QuoteBody, customers: readonly FakeCustomer[], goldPriceSet = true) {
+/** ราคาของวันที่ quote ปลอมใช้ — ค่าเริ่มต้น = GOLD_PRICE (ทองแท่งรับซื้อ 67,650 · เงิน 45/ก. · แพลตตินั่มยังไม่ตั้ง) */
+export interface FakeDayPrice {
+  bar_buy: string;
+  silver_per_g: string | null;
+  platinum_per_g: string | null;
+}
+
+/** ราคาตั้งต้นของแต่ละโลหะ แบบ basePriceOf ใน services/buy.ts — ทอง/นาก = ทองแท่งรับซื้อ · เงิน/แพลตตินั่ม = ต่อกรัม */
+function metalsWithPrices(price: FakeDayPrice | null): Record<string, BuyMetal> {
+  const base: Record<string, string | null> = {
+    gold: price?.bar_buy ?? null,
+    nak: price?.bar_buy ?? null,
+    silver: price?.silver_per_g ?? null,
+    platinum: price?.platinum_per_g ?? null,
+  };
+  return Object.fromEntries(
+    METALS.map((m) => [m.id, { code: m.code, nameTh: m.name_th, basePrice: base[m.code] ?? null }]),
+  );
+}
+
+/**
+ * ผล POST /api/buy/quote แบบเดียวกับ services/buy.ts (quoteJson) — `price` null = ยังไม่ได้ตั้งราคาทองของวัน
+ * (ข้อความ "…ของวันนี้" เหมือนบิลวันนี้ · บิลย้อนหลังของจริงเปลี่ยนเป็นวันที่ของบิล)
+ */
+export function fakeQuote(
+  body: QuoteBody,
+  customers: readonly FakeCustomer[],
+  price: FakeDayPrice | null = GOLD_PRICE,
+) {
   const buyer = customers.find((c) => c.id === body.customer_id);
   const q = quoteBuy({
-    lines: body.lines.map((l) => ({ metalId: l.metal_id, weightG: l.weight_g, amount: l.amount })),
+    lines: body.lines.map((l) => ({
+      metalId: l.metal_id,
+      weightG: l.weight_g,
+      purityPercent: l.purity_percent,
+      deductPercent: l.deduct_percent,
+    })),
     payments: body.payments.map((p) => ({ method: p.method, bank: "bank" in p ? p.bank : null, amount: p.amount })),
     customer: buyer ? { id: buyer.id, cardStatus: buyer.card_status } : null,
-    goldPriceSet,
+    goldPriceSet: price !== null,
+    metals: metalsWithPrices(price),
   });
   return {
     ok: q.ok,
     errors: q.errors,
     date: body.date ?? TODAY,
     branch: BRANCH_HQ,
-    gold_price_snapshot: goldPriceSet ? "67850.00" : null,
+    gold_price_snapshot: price ? "67850.00" : null,
     lines: q.lines.map((l) => ({
       index: l.index,
       metal_id: l.metalId,
       weight_g: l.weightG,
+      purity_percent: l.purityPercent,
+      deduct_percent: l.deductPercent,
+      base_price: l.basePrice,
+      unit_price: l.unitPrice,
+      gross_amount: l.grossAmount,
+      deduct_amount: l.deductAmount,
       amount: l.amount,
       price_per_g: l.pricePerG,
     })),

@@ -64,6 +64,8 @@ const GOLD_PRICE = {
   bar_sell: "67850.00",
   bar_buy: "67650.00",
   jewelry_buy: "64268",
+  silver_per_g: "45.00",
+  platinum_per_g: null,
   diff: "200.00",
   source: "central",
 };

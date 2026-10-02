@@ -66,7 +66,7 @@ describe("ธีม (สว่าง · มืด · ตามระบบ)", ()
   it("ค่าเริ่มต้นตามระบบ · เลือกแล้วใส่ .dark ที่ <html> และจำไว้ใน localStorage", async () => {
     stubSystemDark(false);
     setup();
-    expect(await screen.findByRole("heading", { level: 1, name: "หน้าแรก" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "หน้าหลัก" })).toBeInTheDocument();
     expect(document.documentElement).not.toHaveClass("dark");
 
     await chooseTheme("มืด");
@@ -82,7 +82,7 @@ describe("ธีม (สว่าง · มืด · ตามระบบ)", ()
     stubSystemDark(true);
     localStorage.setItem("ong.theme", "light");
     setup();
-    expect(await screen.findByRole("heading", { level: 1, name: "หน้าแรก" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "หน้าหลัก" })).toBeInTheDocument();
     expect(document.documentElement).not.toHaveClass("dark");
 
     const user = userEvent.setup();
@@ -153,7 +153,7 @@ describe("ภาษา (ไทย · English) จากเมนูผู้ใ�
     expect(screen.getByRole("menuitemradio", { name: "English" })).toHaveAttribute("lang", "en");
     await user.click(screen.getByRole("menuitemradio", { name: "English" }));
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Dashboard" })).toBeInTheDocument();
     expect(localStorage.getItem("ong.lang")).toBe("en");
     expect(document.documentElement.lang).toBe("en");
     // ชื่อตำแหน่ง (role) แปลด้วย · ชื่อคนไม่แปล

@@ -62,7 +62,7 @@ async function openSwitcher(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("ตัวเลือกสาขาที่หัว sidebar", () => {
-  it("มีสาขาเดียว → หัวนิ่ง (ลิงก์หน้าแรก) ไม่มีเมนูเลือกสาขา", async () => {
+  it("มีสาขาเดียว → หัวนิ่ง (ลิงก์หน้าหลัก) ไม่มีเมนูเลือกสาขา", async () => {
     setup({ role: "staff", branches: [BRANCH_HQ] });
     const header = await screen.findByRole("link", { name: /^สาขาปัจจุบัน/ });
 

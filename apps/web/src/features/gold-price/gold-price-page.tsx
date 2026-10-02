@@ -22,7 +22,15 @@ import { canSetGoldPrice } from "@/lib/nav";
 import { goldPriceTodayQueryOptions, goldReferenceQueryOptions, useMe } from "@/lib/queries";
 import { BranchPricesCard } from "./branch-prices";
 import { useTranslation } from "./i18n";
-import { PriceFormError, PriceInputField, PriceList, QuotePreview, TypoConfirmDialog } from "./price-form";
+import {
+  PerGramInputs,
+  PerGramMissingNote,
+  PriceFormError,
+  PriceInputField,
+  PriceList,
+  QuotePreview,
+  TypoConfirmDialog,
+} from "./price-form";
 import { saveGoldPrice } from "./queries";
 import { ReferencePricePanel } from "./reference-price";
 import { usePriceForm } from "./use-price-form";
@@ -38,7 +46,7 @@ export function GoldPricePage() {
   return (
     <>
       <PageHeader description={t("description")} />
-      <div className="grid items-start gap-4 md:gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 items-start gap-4 md:gap-6 lg:grid-cols-2">
         {manager ? <SetPriceCard /> : <ManagersOnlyNotice />}
         <TodayPriceCard />
         {manager && <BranchPricesCard className="lg:col-span-2" />}
@@ -61,6 +69,7 @@ function ManagersOnlyNotice() {
 
 /**
  * ราคากลางของวัน: พิมพ์ → quote สดจากเซิร์ฟเวอร์ → Enter บันทึก
+ * ราคาเงิน/แพลตตินั่มต่อกรัม (ไม่บังคับ) ตั้งได้ที่นี่ที่เดียว — เติมราคาของวันนี้ไว้ให้ · ส่งเฉพาะช่องที่เปลี่ยน
  * ด่านกันพิมพ์ผิด (409) → AlertDialog โฟกัสที่ "กลับไปแก้ไข" ก่อน — Enter ซ้ำโดยไม่ได้อ่านจึงไม่ผ่านด่าน
  * ราคาสมาคม (อ้างอิง): ปุ่มเติมค่าเริ่มต้น (ไม่บันทึก) · วันนี้ยังไม่มีราคา → เติมให้เองครั้งเดียว (ยกเว้นประกาศเก่า)
  * — ระบบไม่ตั้งราคาร้านเอง ผู้จัดการต้องกดบันทึก
@@ -76,12 +85,19 @@ function SetPriceCard() {
   const form = usePriceForm({
     inputRef,
     currentReference: reference ?? null,
+    // ราคาต่อกรัมของวันนี้ — สาขาไม่มีของตัวเอง (API ตั้งได้ที่ราคากลางเท่านั้น) ค่าที่ GET /today ตอบจึงเป็นราคากลาง
+    perGram: {
+      current:
+        todayPrice === undefined
+          ? undefined
+          : { silver_per_g: todayPrice?.silver_per_g ?? null, platinum_per_g: todayPrice?.platinum_per_g ?? null },
+    },
     save: saveGoldPrice,
     onSaved: async (saved) => {
       toast.success(t("saved"), {
         description: t("savedDescription", { price: formatBoardPrice(saved.bar_sell) }),
       });
-      // หัวหน้า · หน้าแรก · การ์ดราคาวันนี้ · ตารางราคาเฉพาะสาขา อ่านใหม่ (key ร่วม ["gold-price","today"])
+      // หัวหน้า · หน้าหลัก · การ์ดราคาวันนี้ · ตารางราคาเฉพาะสาขา อ่านใหม่ (key ร่วม ["gold-price","today"])
       // สาขาที่มีราคาเฉพาะสาขาไม่เปลี่ยนตามราคากลาง — ตารางแสดงที่มาของแต่ละสาขาหลังอ่านใหม่
       await queryClient.invalidateQueries({ queryKey: goldPriceTodayQueryOptions.queryKey });
     },
@@ -97,55 +113,63 @@ function SetPriceCard() {
   }, [todayPrice, reference, text, prefill]);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>
-          <h2 id={titleId}>{t("central.title")}</h2>
-        </CardTitle>
-        <CardDescription>{t("central.description", { date: formatThaiDate(today, "long") })}</CardDescription>
-      </CardHeader>
-      <form noValidate onSubmit={form.submit} aria-labelledby={titleId} className="grid gap-6">
-        <CardContent className="grid gap-6">
-          <PriceFormError form={form} />
-          <ReferencePricePanel
-            action={(ref) =>
-              // ประกาศเก่า (ไม่ใช่ของวันนี้ / ดึงรอบล่าสุดไม่สำเร็จ) — ไม่ให้เติม ต้องกรอกเองจากประกาศล่าสุด
-              ref.stale ? (
-                <p className="text-sm text-muted-foreground">{t("reference.staleNoPrefill")}</p>
-              ) : (
-                <Button type="button" variant="outline" className="justify-self-start" onClick={() => prefill(ref)}>
-                  <ClipboardPaste aria-hidden="true" />
-                  {t("reference.use")}
-                </Button>
-              )
-            }
-          />
-          <PriceInputField form={form} inputRef={inputRef} label={t("barSellLabel")} autoFocus />
-          {/* live region อยู่ก่อนเสมอ — ข้อความที่เพิ่มเข้ามาภายหลังจึงถูกประกาศ */}
-          <div role="status">
-            {form.referenceChanged && !form.fromReference ? (
-              <p className="rounded-md border border-warning-border bg-warning px-3 py-2 text-sm text-warning-foreground">
-                {t("reference.changed")}
-              </p>
-            ) : (
-              form.fromReference && (
+    <>
+      {/* เต็มความกว้าง (lg:col-span-2) แทนที่จะอยู่ในการ์ดครึ่งจอ — การ์ด 4 ใบก่อนหน้านี้ดันช่องกรอกราคาลงไปไกล
+          (~1000px จนต้องเลื่อนจอ) ขณะที่การ์ด "ราคาที่สาขานี้ใช้เปิดบิลวันนี้" ข้าง ๆ สูงแค่ ~140px ย้ายออกมา
+          ให้แถวถัดไปเป็นฟอร์ม (สั้นลงมาก) คู่กับการ์ดนั้นแทน ส่วนกรอบเองก็ได้ขึ้น 4 คอลัมน์เหมือนหน้าหลักด้วย */}
+      <ReferencePricePanel
+        className="lg:col-span-2"
+        headingLevel={2}
+        action={(ref) =>
+          // ประกาศเก่า (ไม่ใช่ของวันนี้ / ดึงรอบล่าสุดไม่สำเร็จ) — ไม่ให้เติม ต้องกรอกเองจากประกาศล่าสุด
+          ref.stale ? (
+            <p className="text-sm text-muted-foreground">{t("reference.staleNoPrefill")}</p>
+          ) : (
+            <Button type="button" variant="outline" className="justify-self-start" onClick={() => prefill(ref)}>
+              <ClipboardPaste aria-hidden="true" />
+              {t("reference.use")}
+            </Button>
+          )
+        }
+      />
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            <h2 id={titleId}>{t("central.title")}</h2>
+          </CardTitle>
+          <CardDescription>{t("central.description", { date: formatThaiDate(today, "long") })}</CardDescription>
+        </CardHeader>
+        <form noValidate onSubmit={form.submit} aria-labelledby={titleId} className="grid gap-6">
+          <CardContent className="grid gap-6">
+            <PriceFormError form={form} />
+            <PriceInputField form={form} inputRef={inputRef} label={t("barSellLabel")} autoFocus />
+            <PerGramInputs form={form} />
+            {/* live region อยู่ก่อนเสมอ — ข้อความที่เพิ่มเข้ามาภายหลังจึงถูกประกาศ */}
+            <div role="status">
+              {form.referenceChanged && !form.fromReference ? (
                 <p className="rounded-md border border-warning-border bg-warning px-3 py-2 text-sm text-warning-foreground">
-                  {t("reference.prefilled")}
+                  {t("reference.changed")}
                 </p>
-              )
-            )}
-          </div>
-          <QuotePreview form={form} />
-        </CardContent>
-        <CardFooter>
-          <Button type="submit" disabled={form.saving}>
-            {form.saving && <LoaderCircle className="animate-spin" aria-hidden="true" />}
-            {form.saving ? t("saving", { ns: "common" }) : t("save")}
-          </Button>
-        </CardFooter>
-      </form>
-      <TypoConfirmDialog form={form} title={t("typo.title")} />
-    </Card>
+              ) : (
+                form.fromReference && (
+                  <p className="rounded-md border border-warning-border bg-warning px-3 py-2 text-sm text-warning-foreground">
+                    {t("reference.prefilled")}
+                  </p>
+                )
+              )}
+            </div>
+            <QuotePreview form={form} />
+          </CardContent>
+          <CardFooter>
+            <Button type="submit" disabled={form.saving}>
+              {form.saving && <LoaderCircle className="animate-spin" aria-hidden="true" />}
+              {form.saving ? t("saving", { ns: "common" }) : t("save")}
+            </Button>
+          </CardFooter>
+        </form>
+        <TypoConfirmDialog form={form} title={t("typo.title")} />
+      </Card>
+    </>
   );
 }
 
@@ -192,7 +216,11 @@ function TodayPriceCard() {
             )
           ) : price ? (
             <>
-              <PriceList prices={price} />
+              <PriceList
+                prices={price}
+                perGram={{ silver_per_g: price.silver_per_g, platinum_per_g: price.platinum_per_g }}
+              />
+              <PerGramMissingNote perGram={price} />
               {price.source === "branch" && (
                 <p className="text-sm text-muted-foreground">{t("todayCard.branchOverride")}</p>
               )}

@@ -3,25 +3,37 @@ import { z } from "zod";
 import { ApiError, apiFetch, decimalString } from "@/lib/api";
 import { BranchSchema, GoldPriceTodaySchema } from "@/lib/queries";
 
+/**
+ * ราคารับซื้อต่อกรัมของเงิน/แพลตตินั่ม (UAT 30 ก.ย. 2569) — ตั้งที่ราคากลางเท่านั้น ทุกสาขาใช้ร่วม
+ * ไม่มีคีย์ = คงค่าเดิมของวันนี้ · null = ล้าง (วันนี้รับซื้อโลหะนั้นไม่ได้) · ข้อความตัวเลข = ตั้งใหม่
+ */
+export const PER_GRAM_FIELDS = ["silver_per_g", "platinum_per_g"] as const;
+export type PerGramField = (typeof PER_GRAM_FIELDS)[number];
+export type PerGramBody = Partial<Record<PerGramField, string | null>>;
+
 const GoldPriceQuoteSchema = z.object({
   bar_sell: decimalString,
   bar_buy: decimalString,
   jewelry_buy: decimalString,
-  /** ด่านกันพิมพ์ผิด — ราคาห่างจากราคาที่ใช้ครั้งก่อนเกินเกณฑ์ (ข้อความจากเซิร์ฟเวอร์) */
+  /** มีเฉพาะราคาต่อกรัมที่ส่งไป — รูปมาตรฐาน "45.50" · null = จะล้าง */
+  silver_per_g: decimalString.nullable().optional(),
+  platinum_per_g: decimalString.nullable().optional(),
+  /** ด่านกันพิมพ์ผิด — ราคาห่างจากราคาที่ใช้ครั้งก่อนเกินเกณฑ์ (ข้อความจากเซิร์ฟเวอร์ · หลายราคาต่อกันด้วย " · ") */
   warning: z.string().optional(),
 });
+export type GoldPriceQuote = z.infer<typeof GoldPriceQuoteSchema>;
 
 /**
  * live preview — POST /api/gold-price/quote ใช้ quoteGoldPrice() ตัวเดียวกับตอนบันทึก (CLAUDE.md กฎ 2 · R8)
  * browser ไม่คำนวณราคาเอง · key = ข้อความที่จะส่ง · ข้อความว่างไม่ถาม
  * `branchId` = กำลังตั้งราคาเฉพาะสาขา — คำเตือนเทียบราคาที่สาขานั้นใช้ครั้งก่อน เหมือนตอนบันทึก
  */
-export const goldPriceQuoteQueryOptions = (barSell: string, branchId?: string) =>
+export const goldPriceQuoteQueryOptions = (barSell: string, branchId?: string, perGram: PerGramBody = {}) =>
   queryOptions({
-    queryKey: ["gold-price", "quote", barSell, branchId ?? null],
+    queryKey: ["gold-price", "quote", barSell, branchId ?? null, perGram],
     queryFn: ({ signal }) =>
       apiFetch("/api/gold-price/quote", {
-        json: branchId ? { bar_sell: barSell, branch_id: branchId } : { bar_sell: barSell },
+        json: { bar_sell: barSell, ...(branchId ? { branch_id: branchId } : {}), ...perGram },
         signal,
         schema: GoldPriceQuoteSchema,
       }),
@@ -34,7 +46,7 @@ export interface ReferencePrefill {
   round: number | null;
 }
 
-export interface SaveGoldPriceBody {
+export interface SaveGoldPriceBody extends PerGramBody {
   bar_sell: string;
   /** ยืนยันราคาที่ด่านกันพิมพ์ผิดเตือนไว้ (ส่งหลังได้ 409) */
   confirm_typo?: boolean;
@@ -96,5 +108,15 @@ export function typoWarningOf(error: unknown): string | null {
 
 /** 400 ที่ชี้ช่อง bar_sell → ข้อความใต้ช่องราคา · error อื่น = null */
 export function barSellErrorOf(error: unknown): string | null {
-  return error instanceof ApiError && error.status === 400 && error.field === "bar_sell" ? error.error : null;
+  return fieldErrorOf(error, "bar_sell");
+}
+
+/** 400 ที่ชี้ช่องนั้นพอดี (bar_sell · silver_per_g · platinum_per_g) → ข้อความไทยของเซิร์ฟเวอร์ · อื่น ๆ = null */
+export function fieldErrorOf(error: unknown, field: "bar_sell" | PerGramField): string | null {
+  return error instanceof ApiError && error.status === 400 && error.field === field ? error.error : null;
+}
+
+/** 400 ที่ชี้ช่องราคาต่อกรัมช่องใดช่องหนึ่ง → ชื่อช่อง · อื่น ๆ = null */
+export function perGramFieldOf(error: unknown): PerGramField | null {
+  return PER_GRAM_FIELDS.find((field) => fieldErrorOf(error, field) !== null) ?? null;
 }

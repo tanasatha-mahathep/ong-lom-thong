@@ -19,8 +19,17 @@ export interface ReceiptData {
    * หน้าเว็บ (<Receipt/> ใน browser) ต้องส่งเลขที่มาสก์แล้ว (national_id_masked ของ GET /buy/{id}) ห้ามส่งเลขเต็มเข้า browser
    */
   customer: { nameTh: string; address: string | null; nationalId: string };
-  /** แถวตามที่บันทึก — ใบพิมพ์รวมเป็น 1 บรรทัดต่อโลหะ (groupLinesByMetal) */
-  lines: { metalName: string; weightG: string; amount: string }[];
+  /**
+   * แถวตามที่บันทึก — ใบพิมพ์รวมเป็น 1 บรรทัดต่อ (โลหะ · ค่าบริสุทธิ์ · หัก %) (groupLinesByMetal)
+   * purity/deduct null = บิลก่อนมีช่องนี้ → พิมพ์ชื่อโลหะอย่างเดียว
+   */
+  lines: {
+    metalName: string;
+    weightG: string;
+    amount: string;
+    purityPercent?: string | null;
+    deductPercent?: string | null;
+  }[];
   detail: string | null;
   totalAmount: string;
   payments: { label: string; bank: string | null; amount: string }[];

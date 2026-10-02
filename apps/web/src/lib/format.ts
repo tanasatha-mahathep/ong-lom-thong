@@ -25,6 +25,13 @@ const numberFormat = (fractionDigits: number) =>
 const MONEY = numberFormat(2);
 const WEIGHT = numberFormat(3);
 const INTEGER = numberFormat(0);
+/** เปอร์เซ็นต์ (ค่าบริสุทธิ์ · หัก %) — API ส่ง 2 ตำแหน่งอยู่แล้ว แสดงแบบตัดศูนย์ท้ายเหมือนบนใบรับซื้อ */
+const PERCENT = new Intl.NumberFormat("th-TH", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 2,
+  roundingMode: "halfExpand",
+  signDisplay: "negative",
+});
 
 /** ค่าที่ไม่ใช่ข้อความทศนิยมคืนตามเดิม — เห็นบั๊กบนจอดีกว่าแสดงตัวเลขผิด */
 function formatDecimal(format: Intl.NumberFormat, value: string | null | undefined): string {
@@ -40,6 +47,9 @@ export const formatWeight = (value: string | null | undefined) => formatDecimal(
 
 /** จำนวนเต็ม เช่น ราคาทองรูปพรรณ: "64268" → "64,268" */
 export const formatInteger = (value: string | null | undefined) => formatDecimal(INTEGER, value);
+
+/** ตัวเลขเปอร์เซ็นต์ (ไม่มีเครื่องหมาย %): "96.50" → "96.5" · "100.00" → "100" · "3" → "3" */
+export const formatPercent = (value: string | null | undefined) => formatDecimal(PERCENT, value);
 
 /** ไม่มีสตางค์ — "67850" · "67850.00" */
 const WHOLE = /^-?\d+(\.0+)?$/;

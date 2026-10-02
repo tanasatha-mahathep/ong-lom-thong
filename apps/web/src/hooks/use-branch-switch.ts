@@ -30,7 +30,7 @@ export function branchShortcutIndex(event: KeyboardEvent): number | null {
 
 /**
  * หน้าที่ผูกกับเอกสารของสาขา (มี path param เช่น /buy/$id · /customers/$id) → ปลายทางที่ปลอดภัยหลังสลับสาขา
- * (breadcrumb ก่อนหน้าที่เป็นลิงก์ หรือหน้าแรก) · หน้ารายการ/หน้าทั่วไป = อยู่หน้าเดิม (undefined)
+ * (breadcrumb ก่อนหน้าที่เป็นลิงก์ หรือหน้าหลัก) · หน้ารายการ/หน้าทั่วไป = อยู่หน้าเดิม (undefined)
  */
 function safeDestination(router: ReturnType<typeof useRouter>) {
   const leaf = router.state.matches.at(-1);

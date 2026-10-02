@@ -40,12 +40,12 @@ async function submitCredentials() {
 const toasts = () => document.querySelector<HTMLElement>('[data-slot="toaster-host"]') ?? document.body;
 
 describe("หน้า login", () => {
-  it("login สำเร็จ (สาขาเดียว) → ส่งอีเมล/รหัสผ่าน แล้วเข้าหน้าแรก", async () => {
+  it("login สำเร็จ (สาขาเดียว) → ส่งอีเมล/รหัสผ่าน แล้วเข้าหน้าหลัก", async () => {
     const api = signInServer(makeMe("staff"));
     const router = renderApp("/login");
     await submitCredentials();
 
-    expect(await screen.findByRole("heading", { level: 1, name: "หน้าแรก" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "หน้าหลัก" })).toBeInTheDocument();
     expect(api.callsTo("POST", "/api/auth/sign-in/email").map((c) => c.body)).toEqual([CREDENTIALS]);
     expect(api.callsTo("POST", "/api/me/branch")).toHaveLength(0);
     expect(router.state.location.pathname).toBe("/");
@@ -61,22 +61,22 @@ describe("หน้า login", () => {
   });
 
   it.each(["%2F%2Fevil.example", "%2F%09%2Fevil.example", "%2F.%2F%2Fevil.example", "%22%2F%5Ct%2Fevil.example%22"])(
-    "?redirect=%s ไปเว็บอื่นไม่ได้ (กัน open redirect) — ไปหน้าแรกแทน",
+    "?redirect=%s ไปเว็บอื่นไม่ได้ (กัน open redirect) — ไปหน้าหลักแทน",
     async (redirect) => {
       signInServer(makeMe("staff"));
       const router = renderApp(`/login?redirect=${redirect}`);
       await submitCredentials();
 
-      expect(await screen.findByRole("heading", { level: 1, name: "หน้าแรก" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { level: 1, name: "หน้าหลัก" })).toBeInTheDocument();
       expect(router.state.location.href).toBe("/");
     },
   );
 
-  it("login อยู่แล้วแต่ ?redirect= มีอักขระควบคุม → ไปหน้าแรก ไม่ error", async () => {
+  it("login อยู่แล้วแต่ ?redirect= มีอักขระควบคุม → ไปหน้าหลัก ไม่ error", async () => {
     fakeApi({ "GET /api/me": () => json(makeMe("staff")), "GET /api/gold-price/today": () => json(GOLD_PRICE) });
     const router = renderApp("/login?redirect=%2F%0A%2Fevil.example");
 
-    expect(await screen.findByRole("heading", { level: 1, name: "หน้าแรก" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "หน้าหลัก" })).toBeInTheDocument();
     expect(router.state.location.href).toBe("/");
   });
 
@@ -145,7 +145,7 @@ describe("หน้า login", () => {
     expect(screen.getByRole("radio", { name: "สำนักงานใหญ่ (สาขา 1)" })).toBeChecked();
     await user.keyboard("{Enter}");
 
-    expect(await screen.findByRole("heading", { level: 1, name: "หน้าแรก" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "หน้าหลัก" })).toBeInTheDocument();
     expect(api.callsTo("POST", "/api/me/branch").map((c) => c.body)).toEqual([{ branch_id: BRANCH_HQ.id }]);
   });
 
@@ -154,7 +154,7 @@ describe("หน้า login", () => {
     renderApp("/login");
     await submitCredentials();
 
-    expect(await screen.findByRole("heading", { level: 1, name: "หน้าแรก" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "หน้าหลัก" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "เลือกสาขาที่ทำงาน" })).not.toBeInTheDocument();
     expect(api.callsTo("POST", "/api/me/branch").map((c) => c.body)).toEqual([{ branch_id: BRANCH_2.id }]);
     expect(screen.getByRole("link", { name: /^สาขาปัจจุบัน/ })).toHaveTextContent(BRANCH_2.name);
@@ -164,7 +164,7 @@ describe("หน้า login", () => {
     fakeApi({ "GET /api/me": () => json(makeMe("staff")), "GET /api/gold-price/today": () => json(GOLD_PRICE) });
     const router = renderApp("/login");
 
-    expect(await screen.findByRole("heading", { level: 1, name: "หน้าแรก" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "หน้าหลัก" })).toBeInTheDocument();
     await waitFor(() => expect(router.state.location.pathname).toBe("/"));
   });
 });
@@ -304,5 +304,46 @@ describe("หน้า login — กฎฟอร์ม U0–U6", () => {
     expect(screen.getByLabelText("รหัสผ่าน")).toBeEnabled();
     expect(screen.getByRole("button", { name: "เข้าสู่ระบบ" })).toBeEnabled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("ประโยคยอมรับข้อกำหนด/นโยบายอยู่นอกการ์ด ใต้การ์ด เหนือเลขเวอร์ชัน · ลิงก์เปิดกล่องเอกสารได้", async () => {
+    signInServer(makeMe("staff"));
+    const user = userEvent.setup();
+    renderApp("/login");
+
+    const card = await screen.findByRole("heading", { level: 1, name: "เข้าสู่ระบบ" });
+    const consent = (await screen.findByText(/การคลิกเข้าใช้งานถือว่าคุณยอมรับ/)).closest("p");
+    const version = document.querySelector('[data-slot="app-version"]');
+    expect(consent).not.toBeNull();
+    expect(version).not.toBeNull();
+    // ย้ายออกมานอกการ์ด (30 ก.ย.) — ไม่ใช่ descendant ของฟอร์ม
+    expect(consent?.closest("form")).toBeNull();
+    // ลำดับ DOM: การ์ด → ประโยคยอมรับ → เวอร์ชัน
+    expect(card.compareDocumentPosition(consent!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(consent!.compareDocumentPosition(version!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    const terms = screen.getByRole("button", { name: "ข้อกำหนดการใช้บริการ" });
+    const privacy = screen.getByRole("button", { name: "นโยบายความเป็นส่วนตัว" });
+    await user.click(terms);
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(terms).toHaveFocus());
+
+    await user.click(privacy);
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(privacy).toHaveFocus());
+  });
+
+  it("บัญชีหลายสาขา → ขั้นเลือกสาขาไม่แสดงประโยคยอมรับซ้ำ (เหมือนก่อนย้าย) แต่เวอร์ชันยังอยู่เหมือนเดิม", async () => {
+    signInServer(makeMe("manager", [BRANCH_HQ, BRANCH_2]));
+    renderApp("/login");
+    await submitCredentials();
+
+    expect(await screen.findByRole("heading", { level: 1, name: "เลือกสาขาที่ทำงาน" })).toBeInTheDocument();
+    expect(screen.queryByText(/การคลิกเข้าใช้งานถือว่าคุณยอมรับ/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-slot="app-version"]')).not.toBeNull();
   });
 });

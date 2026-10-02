@@ -101,6 +101,14 @@ describe("ตัวช่วยเทสต์: ร่องรอยภาย�
       "$.lines[0].weight_g = 5 (เงิน/น้ำหนักเป็น number)",
     ]);
     expect(moneyShapeViolations({ rate: 0.95 })).toEqual(["$.rate = 0.95 (float)"]);
+    // เปอร์เซ็นต์ที่เข้าสูตรเงิน: เลขเต็มก็ต้องเป็น string ("3" ไม่ใช่ 3) · null = บิลเก่าที่ไม่มีค่า
+    expect(moneyShapeViolations({ lines: [{ purity_percent: "96.50", deduct_percent: "3" }] })).toEqual([]);
+    expect(moneyShapeViolations({ lines: [{ purity_percent: null, deduct_percent: null }] })).toEqual([]);
+    expect(moneyShapeViolations({ lines: [{ purity_percent: 96, deduct_percent: 3 }] })).toEqual([
+      "$.lines[0].purity_percent = 96 (เงิน/น้ำหนักเป็น number)",
+      "$.lines[0].deduct_percent = 3 (เงิน/น้ำหนักเป็น number)",
+    ]);
+    expect(moneyShapeViolations({ silver_per_g: 45, base_price: 67650, gross_amount: 1 })).toHaveLength(3);
   });
 
   it("fillParams เติมทุกพารามิเตอร์ด้วยค่าที่ encode แล้ว", () => {

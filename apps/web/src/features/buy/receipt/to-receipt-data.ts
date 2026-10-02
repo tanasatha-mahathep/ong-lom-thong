@@ -31,7 +31,14 @@ export function toReceiptData(bill: Bill): ReceiptData {
       address: bill.customer.address,
       nationalId: bill.customer.national_id_masked,
     },
-    lines: bill.lines.map((l) => ({ metalName: l.metal.name_th, weightG: l.weight_g, amount: l.amount })),
+    // ค่าบริสุทธิ์/หัก % ไปกับแถว — <Receipt/> ตั้งชื่อรายการ "ทอง 96.5% หัก 3%" ด้วยตัวเดียวกับ PDF (บิลเก่า null = ชื่อโลหะ)
+    lines: bill.lines.map((l) => ({
+      metalName: l.metal.name_th,
+      weightG: l.weight_g,
+      amount: l.amount,
+      purityPercent: l.purity_percent,
+      deductPercent: l.deduct_percent,
+    })),
     detail: bill.detail,
     totalAmount: bill.total_amount,
     payments: bill.payments.map((p) => ({ label: p.method_label, bank: p.bank, amount: p.amount })),

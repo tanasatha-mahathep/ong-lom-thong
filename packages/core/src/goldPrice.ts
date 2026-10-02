@@ -1,5 +1,5 @@
 import type Decimal from "decimal.js";
-import { D, fmtInt, halfUp, parseDecimal, type Numeric } from "./money";
+import { D, fmtInt, fmtMoney, halfUp, parseDecimal, type Numeric } from "./money";
 
 export interface GoldPriceSetting {
   /** ส่วนต่างทองแท่ง ขายออก → รับซื้อ (ระบบเดิม gold_setting.php = 200) */
@@ -41,11 +41,18 @@ export function deriveGoldPrice(barSell: Numeric, setting: GoldPriceSetting = DE
   return { barSell: sell, barBuy, jewelryBuy };
 }
 
-/** ด่านกันพิมพ์ผิด — คืนข้อความเตือน หรือ null เมื่อราคาอยู่ในเกณฑ์ / ไม่มีราคาก่อนหน้า */
+/** ราคาในข้อความเตือน: เต็มบาทพิมพ์ไม่มีทศนิยม (ราคาทอง) · มีสตางค์พิมพ์ 2 ตำแหน่ง (ราคาเงินต่อกรัม เช่น 45.50) */
+const showPrice = (v: Decimal) => (v.isInteger() ? fmtInt(v) : fmtMoney(v));
+
+/**
+ * ด่านกันพิมพ์ผิด — คืนข้อความเตือน หรือ null เมื่อราคาอยู่ในเกณฑ์ / ไม่มีราคาก่อนหน้า
+ * label = คำนำหน้าข้อความ ("ราคา" สำหรับทอง · "ราคาเงิน" / "ราคาแพลตตินั่ม" สำหรับราคาต่อกรัม)
+ */
 export function typoWarning(
   previousBarSell: Numeric | null | undefined,
   nextBarSell: Numeric,
   guardPercent: Numeric = DEFAULT_GOLD_SETTING.typoGuardPercent,
+  label = "ราคา",
 ): string | null {
   if (previousBarSell === null || previousBarSell === undefined) return null;
   const prev = D(previousBarSell);
@@ -53,5 +60,5 @@ export function typoWarning(
   if (prev.lte(0)) return null;
   const pct = next.minus(prev).abs().div(prev).times(100);
   if (pct.lte(D(guardPercent))) return null;
-  return `ราคาห่างจากครั้งก่อน ${pct.toFixed(1)}% (${fmtInt(prev)} → ${fmtInt(next)}) — ตรวจสอบก่อนบันทึก`;
+  return `${label}ห่างจากครั้งก่อน ${pct.toFixed(1)}% (${showPrice(prev)} → ${showPrice(next)}) — ตรวจสอบก่อนบันทึก`;
 }
