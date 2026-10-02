@@ -75,7 +75,7 @@ export function PaymentsCard({ c }: { c: BuyController }) {
     <Card className="gap-4">
       <CardHeader>
         <CardTitle>
-          <h2 className="text-base">{t("cards.payments")}</h2>
+          <h2>{t("cards.payments")}</h2>
         </CardTitle>
       </CardHeader>
       {/* แถวเดียวเมื่อการ์ดกว้างพอ (@4xl = 56rem ของการ์ดเอง ไม่ใช่ของจอ — sidebar กางที่ 1024 แล้วไม่ล้นขอบ) */}

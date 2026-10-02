@@ -27,7 +27,8 @@ function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
 }
 
 function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
-  return <div data-slot="card-title" className={cn("leading-none font-semibold", className)} {...props} />;
+  // text-lg (เจ้าของขอ 3 ต.ค. 2569 — ของเดิม text-base/ไม่ตั้งค่าเลยเล็กไปเทียบกับ h1 ของหน้า text-2xl)
+  return <div data-slot="card-title" className={cn("text-lg leading-none font-semibold", className)} {...props} />;
 }
 
 function CardDescription({ className, ...props }: React.ComponentProps<"div">) {

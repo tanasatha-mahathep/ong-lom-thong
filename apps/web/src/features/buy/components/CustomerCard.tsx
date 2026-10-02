@@ -25,7 +25,7 @@ export function CustomerCard({ c }: { c: BuyController }) {
     <Card className="gap-4">
       <CardHeader>
         <CardTitle>
-          <h2 className="text-base">{t("cards.customer")}</h2>
+          <h2>{t("cards.customer")}</h2>
         </CardTitle>
       </CardHeader>
       {/* แถวเดียวเมื่อการ์ดกว้างพอ (@3xl = 48rem ของการ์ดเอง ไม่ใช่ของจอ) — คอลัมน์เลขบัตรกว้างพอให้คำอธิบายอยู่บรรทัดเดียว */}
