@@ -75,10 +75,11 @@ export function PaymentsCard({ c }: { c: BuyController }) {
     <Card className="gap-4">
       <CardHeader>
         <CardTitle>
-          <h2 className="text-base">{t("cards.payments")}</h2>
+          <h2>{t("cards.payments")}</h2>
         </CardTitle>
       </CardHeader>
-      <CardContent className="flex flex-col gap-4">
+      {/* แถวเดียวเมื่อการ์ดกว้างพอ (@4xl = 56rem ของการ์ดเอง ไม่ใช่ของจอ — sidebar กางที่ 1024 แล้วไม่ล้นขอบ) */}
+      <CardContent className="@container/payments flex flex-col gap-4">
         <p
           className={cn("flex items-center gap-2 text-xl font-semibold", TONE[balance.tone])}
           role="status"
@@ -94,7 +95,7 @@ export function PaymentsCard({ c }: { c: BuyController }) {
           {balance.text}
         </p>
 
-        <div className="grid items-start gap-4 md:grid-cols-[auto_12rem_13rem_auto]">
+        <div className="grid items-start gap-4 @4xl/payments:grid-cols-[auto_12rem_13rem_auto]">
           <FieldSet className="gap-2" data-invalid={!!methodError}>
             <FieldLegend variant="label" className="mb-0">
               {t("payments.method")}
@@ -147,7 +148,7 @@ export function PaymentsCard({ c }: { c: BuyController }) {
               <FieldError id={`${id}-bank-error`}>{bankError}</FieldError>
             </Field>
           ) : (
-            <div className="hidden md:block" aria-hidden="true" />
+            <div className="hidden @4xl/payments:block" aria-hidden="true" />
           )}
 
           <Field data-invalid={!!amountError}>
@@ -158,6 +159,7 @@ export function PaymentsCard({ c }: { c: BuyController }) {
               type="text"
               inputMode="decimal"
               autoComplete="off"
+              placeholder={t("payments.amountPlaceholder")}
               value={entry.amount}
               onChange={(e) => actions.setPaymentEntry({ amount: e.target.value })}
               onKeyDown={onAmountKey}
@@ -168,9 +170,10 @@ export function PaymentsCard({ c }: { c: BuyController }) {
             <FieldError id={`${id}-amount-error`}>{amountError}</FieldError>
           </Field>
 
-          <div className="flex gap-2 md:mt-[1.375rem]">
+          {/* ระยะบน = ความสูงป้าย (text-sm × leading-snug) + gap-3 ของ Field → ปุ่มตรงแนวกับช่องจำนวนเงินในแถวเดียวกัน */}
+          <div className="flex gap-2 @4xl/payments:mt-[calc(0.875rem*1.375+0.75rem)]">
             {/* คีย์บอร์ดใช้ Enter ในช่องจำนวนเงิน — ปุ่มนี้สำหรับเมาส์ */}
-            <Button type="button" variant="secondary" tabIndex={-1} onClick={() => void actions.addPayment()}>
+            <Button type="button" variant="outline" tabIndex={-1} onClick={() => void actions.addPayment()}>
               {t("payments.add")}
             </Button>
             <Button

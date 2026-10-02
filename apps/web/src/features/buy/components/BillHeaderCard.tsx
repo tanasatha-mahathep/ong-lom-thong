@@ -28,7 +28,7 @@ export function BillHeaderCard({ c }: { c: BuyController }) {
     <Card className="gap-4">
       <CardHeader>
         <CardTitle>
-          <h2 className="text-base">{t("cards.header")}</h2>
+          <h2>{t("cards.header")}</h2>
         </CardTitle>
         {c.canBackdate && (
           <CardAction className="flex items-center gap-2">
