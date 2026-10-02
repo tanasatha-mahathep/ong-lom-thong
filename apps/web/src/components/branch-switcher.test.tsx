@@ -205,7 +205,7 @@ describe("ฟอร์มที่ยังไม่บันทึก", () => {
     await user.keyboard("{Enter}");
     await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
     expect(switchCalls(api)).toEqual([]);
-    expect(screen.getByLabelText(buyT("customer.idLabel"))).toHaveValue("1909");
+    expect(screen.getByLabelText(buyT("customer.idLabel"))).toHaveValue("1 909"); // จัดกลุ่มแบบหน้าบัตรขณะพิมพ์
 
     menu = await openSwitcher(user);
     await user.click(within(menu).getByRole("menuitemradio", { name: /สาขา 2/ }));
@@ -299,7 +299,7 @@ describe("สาขาเปลี่ยนจากที่อื่น (แ�
 
     const notice = await screen.findByRole("alertdialog", { name: "สาขาถูกเปลี่ยนจากที่อื่น" });
     expect(notice).toHaveTextContent(BRANCH_2.name);
-    expect(screen.getByLabelText(buyT("customer.idLabel"))).toHaveValue("1909");
+    expect(screen.getByLabelText(buyT("customer.idLabel"))).toHaveValue("1 909"); // จัดกลุ่มแบบหน้าบัตรขณะพิมพ์
     // Esc ปิดไม่ได้ · Ctrl+Enter (บันทึก) ไม่ถึงหน้า
     await user.keyboard("{Escape}{Control>}{Enter}{/Control}");
     expect(screen.getByRole("alertdialog")).toBeInTheDocument();
