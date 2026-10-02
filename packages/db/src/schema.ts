@@ -171,10 +171,22 @@ export const goldPrice = pgTable(
     barSell: money("bar_sell").notNull(),
     barBuy: money("bar_buy").notNull(),
     jewelryBuy: money("jewelry_buy").notNull(),
+    /**
+     * ราคารับซื้อต่อกรัมที่ร้านตั้งเองรายวัน (UAT 30 ก.ย. 2569) — ฐานของสูตรเงิน/แพลตตินั่ม (METAL_PRICING ใน @ong/core)
+     * null = วันนั้นยังไม่ได้ตั้ง → รับซื้อโลหะนั้นไม่ได้ · ทอง/นากใช้ bar_buy
+     */
+    silverPerG: money("silver_per_g"),
+    platinumPerG: money("platinum_per_g"),
     setBy: text("set_by").references(() => user.id),
     createdAt: createdAt(),
   },
-  (t) => [unique("gold_price_branch_date").on(t.branchId, t.date).nullsNotDistinct()],
+  (t) => [
+    unique("gold_price_branch_date").on(t.branchId, t.date).nullsNotDistinct(),
+    check(
+      "gold_price_metal_per_g_positive",
+      sql`(${t.silverPerG} IS NULL OR ${t.silverPerG} > 0) AND (${t.platinumPerG} IS NULL OR ${t.platinumPerG} > 0)`,
+    ),
+  ],
 );
 
 export const goldPriceSetting = pgTable(
@@ -352,15 +364,34 @@ export const buyLine = pgTable(
       .notNull()
       .references(() => metal.id),
     weightG: grams("weight_g").notNull(),
+    /** ยอดที่จ่ายจริงของแถว (หลังหัก %) */
     amount: money("amount").notNull(),
+    /** amount ÷ weight HALF_UP 2 — แสดงเท่านั้น (R3) */
     pricePerG: money("price_per_g").notNull(),
+    // ---- ราคาที่ระบบคิด (assessBuyLine ใน @ong/core · UAT 30 ก.ย. 2569) — null ทั้งชุด = บิลก่อนมีสูตรนี้ (ราคาพิมพ์เอง)
+    /** ยอดก่อนหัก % = ⌊ราคาต่อกรัมที่คิดได้ × น้ำหนัก⌋ */
     assessmentAmount: money("assessment_amount"),
+    /** ค่าบริสุทธิ์ของชิ้น (%) 1–100 */
     purityPercent: numeric("purity_percent", { precision: 6, scale: 3 }),
+    /** หัก % ที่เลือก 0–10 */
+    deductPercent: numeric("deduct_percent", { precision: 5, scale: 2 }),
+    /** ราคาตั้งต้นที่ใช้คิด ณ วันบิล — ทอง/นาก = ทองแท่งรับซื้อ (บาทต่อบาททอง) · เงิน/แพลตตินั่ม = บาทต่อกรัม */
+    basePrice: money("base_price"),
+    /** ราคาต่อกรัมหลังคิดค่าบริสุทธิ์ ก่อนหัก % (ปัดลงบาทเต็ม) */
+    assessedPricePerG: money("assessed_price_per_g"),
   },
   (t) => [
     unique("buy_line_receipt_line_no").on(t.receiptId, t.lineNo),
     check("buy_line_weight_positive", sql`${t.weightG} > 0`),
     check("buy_line_amount_positive", sql`${t.amount} > 0`),
+    check(
+      "buy_line_purity_range",
+      sql`${t.purityPercent} IS NULL OR (${t.purityPercent} > 0 AND ${t.purityPercent} <= 100)`,
+    ),
+    check(
+      "buy_line_deduct_range",
+      sql`${t.deductPercent} IS NULL OR (${t.deductPercent} >= 0 AND ${t.deductPercent} <= 100)`,
+    ),
   ],
 );
 

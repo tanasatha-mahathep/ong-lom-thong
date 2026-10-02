@@ -50,6 +50,13 @@
       "when": 1790752043915,
       "tag": "0006_gold_reference_announcement",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790900608838,
+      "tag": "0007_buy_line_purity_deduct",
+      "breakpoints": true
     }
   ]
 }
