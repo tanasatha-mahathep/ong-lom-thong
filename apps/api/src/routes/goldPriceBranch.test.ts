@@ -589,7 +589,9 @@ describe.skipIf(!available)("ราคาทองเฉพาะสาขา (�
       const res = await put("mgr1", b1, body);
       expect(res.status, `PUT ${where}`).toBe(400);
       expect(await res.json(), `PUT ${where}`).toEqual({ error: BRANCH_ONLY, field });
-      const q = await quote({ ...body, branch_id: b1 });
+      // quote รับเฉพาะช่องที่หน้าเว็บส่ง (strict) — confirm_typo เป็นช่องของการบันทึก ไม่ส่งไป preview
+      const { confirm_typo: _confirm, ...quoteBody } = body;
+      const q = await quote({ ...quoteBody, branch_id: b1 });
       expect(q.status, `quote ${where}`).toBe(400);
       expect(await q.json(), `quote ${where}`).toEqual({ error: BRANCH_ONLY, field });
     }

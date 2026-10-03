@@ -864,7 +864,9 @@ describe.skipIf(!available)("สัญญา API ราคาทอง: สิ�
     const seen: Record<string, { status: number; field: string | null }> = {};
     try {
       for (const [method, path] of BODY_ROUTES) {
-        const body = JSON.stringify({ bar_sell: "1000000000000", confirm_typo: true });
+        // confirm_typo เป็นช่องของการบันทึก — POST /quote รับเฉพาะช่องของหน้าเว็บ (strict) จึงส่งเฉพาะกับ PUT
+        const confirm = method === "PUT" ? { confirm_typo: true } : {};
+        const body = JSON.stringify({ bar_sell: "1000000000000", ...confirm });
         seen[method] = await outcome(await raw(method, path, { cookie: cookies.manager, body }));
       }
     } finally {
