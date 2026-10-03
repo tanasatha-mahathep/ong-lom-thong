@@ -17,9 +17,13 @@ const NO_UUID = "00000000-0000-4000-8000-000000000000";
 const DAY = {
   quote: "2027-01-04", // quote อย่างเดียว ไม่เขียน — ต้องเป็นวันแรกสุด
   branch: "2027-01-05", // ราคาเฉพาะสาขา: ปฏิเสธช่องที่ไม่รู้จัก แล้วคำขอปกติเขียนลงวันนี้
+  oversize: "2027-01-06", // body เกินเพดาน · ลำดับด่าน — ไม่มีอะไรถูกเขียน
+  atLimit: "2027-01-07", // body 16 KB พอดี — เขียนลงวันนี้
 } as const;
 
 /** สัญญา API ที่เทสต์นี้ตรึงไว้ — เขียนตรงตัว ไม่ import จาก route/service */
+const LIMIT = 16 * 1024; // เพดาน body แบบ routes/admin.ts
+const TOO_LARGE = { error: "ข้อมูลใหญ่เกินไป" };
 const PARSE_ERROR = { error: "ต้องส่ง bar_sell เป็นข้อความตัวเลข", field: "bar_sell" };
 const BRANCH_ID_ERROR = { error: "branch_id ไม่ถูกต้อง", field: "branch_id" };
 const FROM_REFERENCE_ERROR = {
@@ -40,10 +44,19 @@ const G67950 = { bar_sell: "67950.00", bar_buy: "67750.00", jewelry_buy: "64363"
 const NO_PER_GRAM = { silver_per_g: null, platinum_per_g: null };
 
 const QUOTE = "/api/gold-price/quote";
+const CENTRAL = "/api/gold-price/today";
 const branchPath = (branchId: string) => `/api/gold-price/today/branches/${branchId}`;
 
+/** JSON ที่ถูกต้องเติมช่องว่างท้าย (JSON อนุญาต) ให้ยาว `bytes` ไบต์พอดี — ไม่มีเพดานเมื่อไร body นี้ผ่านทุกด่านและ PUT เขียนจริง */
+function padded(value: unknown, bytes: number): string {
+  const json = JSON.stringify(value);
+  const size = Buffer.byteLength(json);
+  if (size > bytes) throw new Error(`JSON ยาว ${size} ไบต์ เกิน ${bytes}`);
+  return json + " ".repeat(bytes - size);
+}
+
 describe.skipIf(!available)(
-  "ด่าน body ของราคาทอง: ช่องที่ไม่รู้จัก (ราคาเฉพาะสาขา · quote) (API3 · ASVS V5.1.2)",
+  "ด่าน body ของราคาทอง: ช่องที่ไม่รู้จัก (ราคาเฉพาะสาขา · quote) · เพดาน 16 KB ทั้งสามเส้นทาง (API3 · API4 · ASVS V5.1.2)",
   () => {
     let t: TestApp;
     let clock = new Date(`${DAY.quote}T03:00:00Z`);
@@ -75,6 +88,7 @@ describe.skipIf(!available)(
         },
         { who: "admin", email: "gb-admin@ong.test", password: PW, role: "admin", branch: "00000", viewAll: true },
         { who: "staff", email: "gb-staff@ong.test", password: PW, role: "staff", branch: "00000" },
+        { who: "accounting", email: "gb-accounting@ong.test", password: PW, role: "accounting", branch: "00000" },
       ];
       for (const { who, ...account } of accounts) {
         const created = await t.createUser(account);
@@ -94,11 +108,14 @@ describe.skipIf(!available)(
     const quote = (who: string, body: unknown) => t.request(QUOTE, { method: "POST", cookie: cookies[who], body });
     const putBranch = (who: string, branchId: string, body: unknown) =>
       t.request(branchPath(branchId), { method: "PUT", cookie: cookies[who], body });
-    /** request ดิบ: body เป็นข้อความตามที่ส่ง (เช่น JSON ที่มีช่อง "__proto__" จริง) · origin ไม่ส่ง = origin ของแอป */
+    /**
+     * request ดิบ: body เป็นข้อความตามที่ส่ง · length = ใส่ Content-Length ตามจำนวนไบต์จริง (ทางเดียวกับ request จริงที่
+     * @hono/node-server ส่งต่อ) · ไม่ใส่ = สตรีมที่ไม่รู้ขนาดล่วงหน้า (เพดานต้องนับไบต์เอง) · origin ไม่ส่ง = origin ของแอป
+     */
     const raw = (
       method: string,
       path: string,
-      init: { who?: string; body?: string; contentType?: string; origin?: string },
+      init: { who?: string; body?: string; length?: boolean; contentType?: string; origin?: string },
     ) => {
       const headers: Record<string, string> = {
         "content-type": init.contentType ?? "application/json",
@@ -106,6 +123,7 @@ describe.skipIf(!available)(
       };
       const cookie = init.who ? cookies[init.who] : undefined;
       if (cookie) headers.cookie = cookie;
+      if (init.length && init.body !== undefined) headers["content-length"] = String(Buffer.byteLength(init.body));
       return t.app.request(path, { method, headers, body: init.body });
     };
     /** ทุกแถวของ gold_price + audit_log — พิสูจน์ว่า request ที่ถูกปฏิเสธไม่เขียนอะไรเลย */
@@ -113,6 +131,23 @@ describe.skipIf(!available)(
       prices: await t.db.select().from(goldPrice).orderBy(goldPrice.id),
       audits: await t.db.select().from(auditLog).orderBy(auditLog.id),
     });
+    /**
+     * สามเส้นทางที่มี body — ผู้ใช้ที่มีสิทธิ์ + body ที่ถูกต้องครบ: ไม่มีด่าน body เมื่อไร คำขอนี้ผ่านทุกด่านจริง (PUT เขียนลง DB)
+     * ราคาเฉพาะสาขา = 00001 ที่ manager ตั้งได้
+     */
+    const bodyRoutes = () =>
+      [
+        { name: "PUT /today", method: "PUT", path: CENTRAL, who: "manager", body: { bar_sell: "67900" } },
+        {
+          name: "PUT /today/branches/:id",
+          method: "PUT",
+          path: branchPath(bid("00001")),
+          who: "manager",
+          body: { bar_sell: "67900" },
+        },
+        { name: "POST /quote", method: "POST", path: QUOTE, who: "staff", body: { bar_sell: "67850" } },
+      ] as const;
+
     it("PUT /today/branches/:id — ช่องที่ไม่รู้จัก (สะกด silver_per_gram · branch_id ใน body · ค่าที่ derive · ช่องของระบบ) = 400 ชี้ช่องแรก ทั้ง manager และ admin · ไม่เขียนแถวสาขา ไม่ลง audit · ด่านราคาต่อกรัมของสาขาเหมือนเดิม · คำขอปกติยัง 200", async () => {
       onDay(DAY.branch);
       const b1 = bid("00001");
@@ -255,6 +290,114 @@ describe.skipIf(!available)(
         expect(json, label).toEqual(expected);
       }
       expect(await writes()).toEqual(before);
+    });
+
+    it("body เกิน 16 KB → 413 ข้อความไทย ทั้งสามเส้นทาง (มี Content-Length · สตรีมที่ไม่บอกขนาด) แม้ JSON ถูกต้องทุกช่อง · ราคาเฉพาะสาขาได้ 413 เหมือนกันทุกสาขา (ไม่บอกว่าสาขามีอยู่) · ไม่เขียนอะไร · GET ไม่ถูกแตะ", async () => {
+      onDay(DAY.oversize);
+      const before = await writes();
+      for (const route of bodyRoutes()) {
+        for (const length of [true, false]) {
+          for (const bytes of [LIMIT + 1, 4 * LIMIT]) {
+            const where = `${route.name} ${bytes} ไบต์ ${length ? "มี" : "ไม่มี"} Content-Length`;
+            const res = await raw(route.method, route.path, {
+              who: route.who,
+              body: padded(route.body, bytes),
+              length,
+            });
+            expect(await expectApiError(res, 413, where)).toEqual(TOO_LARGE);
+          }
+        }
+      }
+      // สาขาที่ manager เขียนได้ (00001) · เขียนไม่ได้ (00002) · ไม่มีจริง · uuid ผิดรูป — 413 ตัวเดียวกันทุกตัวอักษร
+      for (const target of [bid("00001"), bid("00002"), NO_UUID, "not-a-uuid"]) {
+        const res = await raw("PUT", branchPath(target), {
+          who: "manager",
+          body: padded({ bar_sell: "67900" }, LIMIT + 1),
+          length: true,
+        });
+        expect(await expectApiError(res, 413, `PUT สาขา ${target}`)).toEqual(TOO_LARGE);
+      }
+      expect(await writes()).toEqual(before);
+
+      // GET ของราคาทองไม่ผ่านเพดาน body (ผูกเฉพาะสามเส้นทางที่มี body) — ตอบตามเดิม
+      const empty = await t.request(CENTRAL, { cookie: cookies.staff });
+      expect(await expectApiError(empty, 404, "GET /today")).toEqual({
+        error: "ยังไม่ได้ตั้งราคาทองของวันนี้",
+        date: DAY.oversize,
+      });
+      for (const path of ["/api/gold-price/today/branches", "/api/gold-price/reference/history?days=7"]) {
+        expect((await t.request(path, { cookie: cookies.manager })).status, `GET ${path}`).toBe(200);
+      }
+    });
+
+    it("ลำดับด่านเดิมกับ body เกินเพดาน: ไม่มี session = 401 · role ที่ตั้งราคาไม่ได้ = 403 (role ตัดสินก่อนอ่าน body) · origin อื่น = 403 · ไม่ใช่ JSON = 415 · ไม่เขียนอะไร", async () => {
+      onDay(DAY.oversize);
+      const before = await writes();
+      for (const route of bodyRoutes()) {
+        const body = padded(route.body, LIMIT + 1);
+        const anonymous = await raw(route.method, route.path, { body, length: true });
+        expect(await expectApiError(anonymous, 401, `${route.name} ไม่มี session`)).toEqual({ error: "unauthorized" });
+        const foreign = await raw(route.method, route.path, { who: route.who, body, origin: "https://evil.example" });
+        expect(await expectApiError(foreign, 403, `${route.name} origin อื่น`)).toEqual({ error: "forbidden origin" });
+        const text = await raw(route.method, route.path, { who: route.who, body, contentType: "text/plain" });
+        expect(await expectApiError(text, 415, `${route.name} text/plain`)).toEqual({
+          error: "ต้องส่งเป็น application/json",
+        });
+      }
+      // staff · accounting ตั้งราคาไม่ได้ — 403 เดิมไม่ว่า body ใหญ่แค่ไหน (ไม่ใช่ 413)
+      for (const route of bodyRoutes().filter((r) => r.method === "PUT")) {
+        for (const who of ["staff", "accounting"]) {
+          for (const length of [true, false]) {
+            const res = await raw(route.method, route.path, { who, body: padded(route.body, 4 * LIMIT), length });
+            expect(await expectApiError(res, 403, `${route.name} โดย ${who}`)).toEqual({ error: "forbidden" });
+          }
+        }
+      }
+      expect(await writes()).toEqual(before);
+    });
+
+    it("body 16 KB พอดี (JSON ถูกต้อง + ช่องว่างท้าย) ยังผ่านตามปกติทั้งสามเส้นทาง — มีและไม่มี Content-Length · ผลและ audit เหมือน body ปกติ", async () => {
+      onDay(DAY.atLimit);
+      const b1 = bid("00001");
+      const before = await writes();
+      const ok = async (res: Response, where: string) => {
+        const text = await res.text();
+        expect(res.status, `${where}: ${text.slice(0, 200)}`).toBe(200);
+        const json = JSON.parse(text) as Record<string, unknown>;
+        expectMoneyAsStrings(json, where);
+        return json;
+      };
+      for (const length of [true, false]) {
+        const res = await raw("POST", QUOTE, { who: "staff", body: padded({ bar_sell: "67850" }, LIMIT), length });
+        expect(await ok(res, `quote 16 KB length=${length}`)).toEqual(G67850);
+      }
+      const central = { date: DAY.atLimit, ...NO_PER_GRAM, diff: "200.00", source: "central" };
+      const created = await raw("PUT", CENTRAL, {
+        who: "manager",
+        body: padded({ bar_sell: "67900" }, LIMIT),
+        length: true,
+      });
+      expect(await ok(created, "PUT /today 16 KB มี Content-Length")).toEqual({ ...central, ...G67900 });
+      const updated = await raw("PUT", CENTRAL, { who: "admin", body: padded({ bar_sell: "67950" }, LIMIT) });
+      expect(await ok(updated, "PUT /today 16 KB สตรีม")).toEqual({ ...central, ...G67950 });
+
+      const branch = { branch: { id: b1, code: "00001", name: "สาขา 2" }, ...NO_PER_GRAM, source: "branch" };
+      const own = await raw("PUT", branchPath(b1), {
+        who: "manager",
+        body: padded({ bar_sell: "67900" }, LIMIT),
+        length: true,
+      });
+      expect(await ok(own, "PUT สาขา 16 KB มี Content-Length")).toEqual({ ...branch, ...G67900 });
+      const again = await raw("PUT", branchPath(b1), { who: "admin", body: padded({ bar_sell: "67950" }, LIMIT) });
+      expect(await ok(again, "PUT สาขา 16 KB สตรีม")).toEqual({ ...branch, ...G67950 });
+
+      const added = (await writes()).audits.slice(before.audits.length);
+      expect(added).toMatchObject([
+        { action: "gold_price.create", tableName: "gold_price", userId: uid("manager") },
+        { action: "gold_price.update", tableName: "gold_price", userId: uid("admin") },
+        { action: "gold_price.set_branch", tableName: "gold_price", userId: uid("manager") },
+        { action: "gold_price.set_branch", tableName: "gold_price", userId: uid("admin") },
+      ]);
     });
   },
 );

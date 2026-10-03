@@ -1,5 +1,6 @@
 import { businessDate } from "@ong/core";
 import { type Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { type AppEnv, apiError, requireAnyBranch, requireRole, requireSession } from "../lib/context";
 import { type BranchRef, currentBranch, forUser } from "../lib/scope";
@@ -82,6 +83,17 @@ const BranchSetBody = SetBody.strict();
  * → บันทึกแค่ราคาต่อกรัมที่ส่งมา ค่าทองของแถวราคากลางคงเดิม · ตัวเลข JSON ยังเป็น 400 (กฎ 1)
  */
 const CentralSetBody = SetBody.extend({ bar_sell: z.string().nullable().optional() }).strict();
+
+/**
+ * เพดาน body ของ PUT /today · PUT /today/branches/:id · POST /quote — body จริงมีไม่เกิน 5 ช่อง (ไม่กี่ร้อยไบต์)
+ * เกินนี้ตัดทิ้งก่อน parse และไม่เขียนอะไร (413 · แบบเดียวกับ routes/admin.ts) · ผูกทีละ route ที่มี body เท่านั้น ไม่ใช้ .use():
+ * GET ไม่ผ่านตัวนี้เลย (และ bodyLimit ปล่อย request ที่ไม่มี body อยู่แล้ว) · DELETE ราคาเฉพาะสาขาไม่อ่าน body
+ * วางหลัง requireRole — role ที่ตั้งราคาไม่ได้ได้ 403 เสมอ ไม่ว่า body ใหญ่แค่ไหน (role ตัดสินก่อนอ่าน body)
+ */
+const jsonLimit = bodyLimit({
+  maxSize: 16 * 1024,
+  onError: (c) => c.json(apiError("ข้อมูลใหญ่เกินไป"), 413),
+});
 
 /** ?days= จำนวนวันย้อนหลัง (นับวันนี้ด้วย) — ตัวเลขล้วน 1–366 · ไม่ส่ง = 90 · รูปอื่นทั้งหมด (0 · ติดลบ · ทศนิยม · ว่าง) = 400 */
 const HistoryQuery = z.object({
@@ -261,8 +273,8 @@ export const goldPriceRoutes = new Hono<AppEnv>()
     const rows = await listGoldAnnouncements(c.var.db, new Date(from));
     return c.json({ days, from, items: rows.map(historyItemJson) });
   })
-  // live preview ของฟอร์มราคา (ทุก role ที่มีสาขา) — ช่องที่ไม่รู้จัก = 400 (QuoteBody strict)
-  .post("/quote", async (c) => {
+  // live preview ของฟอร์มราคา (ทุก role ที่มีสาขา) — body เกิน 16 KB = 413 · ช่องที่ไม่รู้จัก = 400 (QuoteBody strict)
+  .post("/quote", jsonLimit, async (c) => {
     const body = QuoteBody.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json(quoteBodyError(body.error), 400);
     let branchId: string | null = null;
@@ -296,9 +308,9 @@ export const goldPriceRoutes = new Hono<AppEnv>()
     }
   })
   // ตั้งราคากลางของวัน — manager/admin (spec §10) · ห่างเกินเกณฑ์ต้องยืนยัน (409 ชี้ confirm_typo)
-  // role ตัดสินก่อนอ่าน body (role อื่น = 403 เสมอ) · ช่องที่ไม่รู้จัก = 400 ทุกคำขอ (CentralSetBody strict)
+  // role ตัดสินก่อนอ่าน body (role อื่น = 403 เสมอ) · body เกิน 16 KB = 413 · ช่องที่ไม่รู้จัก = 400 ทุกคำขอ (CentralSetBody strict)
   // ไม่ส่ง bar_sell = แก้แค่ราคาเงิน/แพลตตินั่มของราคากลางที่มีแล้ว ค่าทองคงเดิม (quoteGoldPrice ตัวเดียวกัน ข้ามส่วนทอง)
-  .put("/today", requireRole("manager", "admin"), async (c) => {
+  .put("/today", requireRole("manager", "admin"), jsonLimit, async (c) => {
     const body = CentralSetBody.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json(setBodyError(body.error), 400);
     const date = businessDate(c.var.now());
@@ -327,8 +339,8 @@ export const goldPriceRoutes = new Hono<AppEnv>()
   })
   // ราคาเฉพาะสาขาของวันนี้ (อิงราคากลาง override ได้) — manager/admin เฉพาะสาขาที่เปิดอยู่และมีสิทธิ์
   // สูตรเดียวกับราคากลาง (quoteGoldPrice) · ด่านพิมพ์ผิดเทียบราคาที่สาขานั้นใช้จริงครั้งก่อน
-  // role ก่อน → สาขา 404 → ช่องที่ไม่รู้จัก 400 (BranchSetBody strict)
-  .put("/today/branches/:branchId", requireRole("manager", "admin"), async (c) => {
+  // role ก่อน → body เกิน 16 KB = 413 (เหมือนกันทุกสาขา ไม่บอกว่าสาขามีอยู่) → สาขา 404 → ช่องที่ไม่รู้จัก 400 (BranchSetBody strict)
+  .put("/today/branches/:branchId", requireRole("manager", "admin"), jsonLimit, async (c) => {
     const target = await writableBranch(c);
     if (!target) return c.json(apiError("not found"), 404);
     const body = BranchSetBody.safeParse(await c.req.json().catch(() => null));
