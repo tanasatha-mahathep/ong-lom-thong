@@ -4,10 +4,12 @@ import { z } from "zod";
 import { type AppEnv, apiError, requireAnyBranch, requireRole, requireSession } from "../lib/context";
 import { type BranchRef, currentBranch, forUser } from "../lib/scope";
 import {
+  GOLD_PRICE_FIRST,
   GoldPriceInputError,
   type PerGramInput,
   type TodayPrice,
   clearBranchPrice,
+  isGoldQuote,
   loadGoldSetting,
   priceForBranch,
   pricesForBranches,
@@ -55,6 +57,12 @@ const SetBody = z.object({
     .strict()
     .optional(),
 });
+/**
+ * PUT /today (ราคากลาง) — bar_sell ไม่บังคับ: ไม่ส่ง · null · "" หรือช่องว่างล้วน (แบบเดียวกับราคาต่อกรัม) = ไม่ตั้งราคาทอง
+ * → บันทึกแค่ราคาต่อกรัมที่ส่งมา ค่าทองของแถวราคากลางคงเดิม · ตัวเลข JSON ยังเป็น 400 (กฎ 1)
+ * ราคาเฉพาะสาขา (PUT /today/branches/:id) ยังใช้ SetBody — บังคับ bar_sell เหมือนเดิม
+ */
+const CentralSetBody = SetBody.extend({ bar_sell: z.string().nullable().optional() });
 
 /** ?days= จำนวนวันย้อนหลัง (นับวันนี้ด้วย) — ตัวเลขล้วน 1–366 · ไม่ส่ง = 90 · รูปอื่นทั้งหมด (0 · ติดลบ · ทศนิยม · ว่าง) = 400 */
 const HistoryQuery = z.object({
@@ -71,6 +79,11 @@ const DAYS_ERROR = apiError(`days ต้องเป็นจำนวนเต�
 const BRANCH_ID_ERROR = apiError("branch_id ไม่ถูกต้อง", "branch_id");
 const CONFIRM_TYPO_ERROR = apiError("confirm_typo ต้องเป็นจริงหรือเท็จ", "confirm_typo");
 const FROM_REFERENCE_ERROR = apiError("from_reference ต้องมี announced_at และ round ของประกาศ", "from_reference");
+const GOLD_PRICE_FIRST_ERROR = apiError(GOLD_PRICE_FIRST, "bar_sell");
+const FROM_REFERENCE_WITHOUT_GOLD_ERROR = apiError(
+  "from_reference ใช้คู่กับ bar_sell เท่านั้น — ราคาสมาคมเป็นที่มาของราคาทอง",
+  "from_reference",
+);
 const perGramError = (field: "silver_per_g" | "platinum_per_g") =>
   apiError(`ต้องส่ง ${field} เป็นข้อความตัวเลข หรือ null เพื่อล้าง`, field);
 /** ราคาต่อกรัมตั้งได้ที่ราคากลางเท่านั้น — ส่งมากับราคาเฉพาะสาขา = 400 (ไม่ทิ้งเงียบ ๆ) */
@@ -143,6 +156,23 @@ const perGramOf = (b: { silver_per_g?: string | null; platinum_per_g?: string | 
   silverPerG: b.silver_per_g,
   platinumPerG: b.platinum_per_g,
 });
+
+/** bar_sell ของ PUT /today — ไม่ส่ง · null · "" หรือช่องว่างล้วน = ไม่ตั้งราคาทอง (null) · ข้อความอื่นส่งให้ quoteGoldPrice ตรวจตามเดิม */
+const barSellOf = (input: string | null | undefined): string | null =>
+  input == null || input.trim() === "" ? null : input;
+
+/**
+ * PUT /today ที่ไม่ได้ตั้งราคาทอง — ปฏิเสธก่อนตรวจราคาต่อกรัม (ลำดับเดียวกับหลายช่องผิด: bar_sell ก่อน) · null = ไปต่อได้
+ * - ไม่มีราคาให้บันทึกเลย (ไม่ส่งทั้งเงินและแพลตตินั่ม) = 400 เดิมของ bar_sell
+ * - from_reference คือที่มาของราคาทอง — ไม่มีราคาทองให้อ้าง = 400 (ไม่ทิ้งเงียบ ๆ)
+ * - วันนี้ยังไม่มีราคากลาง = 400 ชี้ bar_sell · อ่านแถวราคากลางเท่านั้น (branchId = null) แถวราคาเฉพาะสาขาไม่นับ
+ */
+async function keepGoldRefusal(c: Context<AppEnv>, body: z.infer<typeof CentralSetBody>, date: string) {
+  if (body.silver_per_g === undefined && body.platinum_per_g === undefined) return BAR_SELL_ERROR;
+  if (body.from_reference !== undefined) return FROM_REFERENCE_WITHOUT_GOLD_ERROR;
+  if (!(await priceForBranch(c.var.db, date, null))) return GOLD_PRICE_FIRST_ERROR;
+  return null;
+}
 
 /**
  * สาขาที่ตั้ง/ลบราคาเฉพาะสาขาได้ — ต้องอยู่ใน forUser (เปิดอยู่ + มีสิทธิ์) เท่านั้น
@@ -226,16 +256,25 @@ export const goldPriceRoutes = new Hono<AppEnv>()
     }
   })
   // ตั้งราคากลางของวัน — manager/admin (spec §10) · ห่างเกินเกณฑ์ต้องยืนยัน (409 ชี้ confirm_typo)
+  // ไม่ส่ง bar_sell = แก้แค่ราคาเงิน/แพลตตินั่มของราคากลางที่มีแล้ว ค่าทองคงเดิม (quoteGoldPrice ตัวเดียวกัน ข้ามส่วนทอง)
   .put("/today", requireRole("manager", "admin"), async (c) => {
-    const body = SetBody.safeParse(await c.req.json().catch(() => null));
+    const body = CentralSetBody.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json(setBodyError(body.error), 400);
     const date = businessDate(c.var.now());
+    const barSell = barSellOf(body.data.bar_sell);
+    if (barSell === null) {
+      const refused = await keepGoldRefusal(c, body.data, date);
+      if (refused) return c.json(refused, 400);
+    }
     try {
-      const q = await quoteGoldPrice(c.var.db, body.data.bar_sell, date, null, perGramOf(body.data));
+      const q = await quoteGoldPrice(c.var.db, barSell, date, null, perGramOf(body.data));
       if (q.warning && !body.data.confirm_typo) {
         return c.json({ ...apiError(q.warning, "confirm_typo"), warning: q.warning }, 409);
       }
-      const reference = referenceAudit(c.var.goldReference.peek(), body.data.from_reference ?? null, q.barSell);
+      // ราคาสมาคมอ้างอิงราคาทองที่บันทึก — แก้แค่ราคาต่อกรัมไม่มีราคาทองให้เทียบ จึงไม่มีคีย์ reference ใน audit
+      const reference = isGoldQuote(q)
+        ? referenceAudit(c.var.goldReference.peek(), body.data.from_reference ?? null, q.barSell)
+        : null;
       await setCentralPrice(c.var.db, date, q, c.var.viewer.userId, !!q.warning, reference);
       const price = await priceForBranch(c.var.db, date, null);
       const setting = await loadGoldSetting(c.var.db);
