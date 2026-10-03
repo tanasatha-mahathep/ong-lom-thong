@@ -124,14 +124,18 @@ const branchPerGramError = (body: { silver_per_g?: unknown; platinum_per_g?: unk
   return field ? apiError("ราคาเงิน/แพลตตินั่มต่อกรัมตั้งได้ที่ราคากลางเท่านั้น", field) : null;
 };
 
+/** ชื่อช่องในข้อความ — ชื่อว่าง ("" หรือช่องว่างล้วน) แสดงเป็น "(ว่าง)" ไม่ให้ข้อความเหลือแค่ "ไม่รู้จักช่อง " */
+const keyLabel = (key: string) => (key.trim() === "" ? "(ว่าง)" : key);
+
 /**
  * ช่องระดับบนสุดที่ไม่รู้จัก (schema strict ทั้งสามตัว) → 400 ข้อความแบบ routes/admin.ts ("ไม่รู้จักช่อง a, b")
- * field = ช่องแรกที่ไม่รู้จักตามลำดับใน body · ช่องเกินข้างใน from_reference (path ไม่ว่าง) ไม่ใช่กรณีนี้ = null
+ * field = ชื่อจริงของช่องแรกตามลำดับใน body — ช่องชื่อว่างก็ชี้ field "" (apiError ตัด field ที่เป็นข้อความว่างทิ้ง
+ * จึงประกอบ {error, field} เอง รูปเดียวกับ spec §5) · ช่องเกินข้างใน from_reference (path ไม่ว่าง) ไม่ใช่กรณีนี้ = null
  * zod ตรวจช่องที่รู้จักก่อนช่องเกิน — body ที่ผิดทั้งสองแบบได้ issue ของช่องที่รู้จักเป็นตัวแรก (ไม่มาถึงที่นี่)
  */
 function unknownFieldError(issue: z.ZodError["issues"][number] | undefined) {
   if (issue?.code !== "unrecognized_keys" || issue.path.length > 0) return null;
-  return apiError(`ไม่รู้จักช่อง ${issue.keys.join(", ")}`, issue.keys[0]);
+  return { error: `ไม่รู้จักช่อง ${issue.keys.map(keyLabel).join(", ")}`, field: issue.keys[0] ?? "" };
 }
 
 /**

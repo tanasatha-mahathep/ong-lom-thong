@@ -19,6 +19,7 @@ const DAY = {
   branch: "2027-01-05", // ราคาเฉพาะสาขา: ปฏิเสธช่องที่ไม่รู้จัก แล้วคำขอปกติเขียนลงวันนี้
   oversize: "2027-01-06", // body เกินเพดาน · ลำดับด่าน — ไม่มีอะไรถูกเขียน
   atLimit: "2027-01-07", // body 16 KB พอดี — เขียนลงวันนี้
+  emptyKey: "2027-01-08", // ชื่อช่องว่าง — ไม่มีอะไรถูกเขียน
 } as const;
 
 /** สัญญา API ที่เทสต์นี้ตรึงไว้ — เขียนตรงตัว ไม่ import จาก route/service */
@@ -56,7 +57,7 @@ function padded(value: unknown, bytes: number): string {
 }
 
 describe.skipIf(!available)(
-  "ด่าน body ของราคาทอง: ช่องที่ไม่รู้จัก (ราคาเฉพาะสาขา · quote) · เพดาน 16 KB ทั้งสามเส้นทาง (API3 · API4 · ASVS V5.1.2)",
+  "ด่าน body ของราคาทอง: ช่องที่ไม่รู้จัก (ราคาเฉพาะสาขา · quote) · เพดาน 16 KB ทั้งสามเส้นทาง · ชื่อช่องว่าง (API3 · API4 · ASVS V5.1.2)",
   () => {
     let t: TestApp;
     let clock = new Date(`${DAY.quote}T03:00:00Z`);
@@ -398,6 +399,41 @@ describe.skipIf(!available)(
         { action: "gold_price.set_branch", tableName: "gold_price", userId: uid("manager") },
         { action: "gold_price.set_branch", tableName: "gold_price", userId: uid("admin") },
       ]);
+    });
+
+    it('ชื่อช่องว่างใน body ("" · ช่องว่างล้วน) → 400 "ไม่รู้จักช่อง (ว่าง)" ไม่ใช่ข้อความว่าง · field = ชื่อจริงของช่อง ทั้งสามเส้นทาง · ไม่เขียนอะไร', async () => {
+      onDay(DAY.emptyKey);
+      const before = await writes();
+      for (const route of bodyRoutes()) {
+        const cases: [Record<string, unknown>, ApiErrorBody][] = [
+          [
+            { ...route.body, "": "x" },
+            { error: "ไม่รู้จักช่อง (ว่าง)", field: "" },
+          ],
+          [
+            { ...route.body, " ": "x" },
+            { error: "ไม่รู้จักช่อง (ว่าง)", field: " " },
+          ],
+          // หลายช่อง — ชื่อว่างอยู่ตรงไหนก็แสดง (ว่าง) ตามลำดับใน body · field = ช่องแรก
+          [
+            { ...route.body, "": "x", note: "y" },
+            { error: "ไม่รู้จักช่อง (ว่าง), note", field: "" },
+          ],
+          [
+            { ...route.body, note: "y", "": "x" },
+            { error: "ไม่รู้จักช่อง note, (ว่าง)", field: "note" },
+          ],
+        ];
+        for (const [body, expected] of cases) {
+          const where = `${route.name} ${JSON.stringify(body)}`;
+          const res = await raw(route.method, route.path, { who: route.who, body: JSON.stringify(body) });
+          const error = await expectApiError(res, 400, where);
+          expect(error, where).toEqual(expected);
+          // ข้อความต้องบอกชื่อช่อง — ไม่ใช่ "ไม่รู้จักช่อง " ที่ตามด้วยความว่างเปล่า
+          expect(error.error.replace("ไม่รู้จักช่อง", "").trim(), where).not.toBe("");
+        }
+      }
+      expect(await writes()).toEqual(before);
     });
   },
 );
