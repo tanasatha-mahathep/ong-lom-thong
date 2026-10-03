@@ -40,7 +40,7 @@ export function PageHeader({
     // ชื่อ/ปุ่มยังตรงแนวเนื้อหา · หน้าอยู่ในกล่อง mx-auto (max-w-5xl) ก็ยังชิดขอบ
     <div
       data-slot="page-header"
-      className="relative flex flex-wrap items-end justify-between gap-x-4 gap-y-3 pb-4 after:pointer-events-none after:absolute after:bottom-0 after:left-[calc((100%_-_100cqw)/2_-_var(--main-px,1rem))] after:h-px after:w-[calc(100cqw_+_2*var(--main-px,1rem))] after:bg-border"
+      className="relative flex flex-wrap items-center justify-between gap-x-4 gap-y-3 pb-4 after:pointer-events-none after:absolute after:bottom-0 after:left-[calc((100%_-_100cqw)/2_-_var(--main-px,1rem))] after:h-px after:w-[calc(100cqw_+_2*var(--main-px,1rem))] after:bg-border"
     >
       {/* items-center: ปุ่มย้อนกลับอยู่กึ่งกลางของบล็อกชื่อ+คำอธิบายทั้งก้อน ไม่ใช่แค่บรรทัดชื่อ (เจ้าของขอ 3 ต.ค. 2569) */}
       <div className="flex min-w-0 items-center gap-3">
@@ -50,6 +50,7 @@ export function PageHeader({
           {description && <p className="text-muted-foreground">{description}</p>}
         </div>
       </div>
+      {/* ปุ่มหน้า (เช่น ซื้อเข้าบิลใหม่) กึ่งกลางกับบล็อกชื่อ+คำอธิบายเหมือนปุ่มย้อนกลับ (เจ้าของขอ 3 ต.ค. 2569) */}
       {actions && <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
