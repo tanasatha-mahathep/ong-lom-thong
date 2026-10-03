@@ -153,10 +153,10 @@ function BillView({ bill, autoPrint }: { bill: Bill; autoPrint: boolean }) {
           <BillActions bill={bill} role={me.role} />
         </div>
 
-        {/* กรอบเป็นสัดส่วน A5 แนวตั้งเสมอ · เนื้อหาที่ยาวกว่ากรอบเลื่อนดูในกรอบ */}
+        {/* กรอบเป็นสัดส่วน A5 แนวตั้งเสมอ · ใบบนจอย่อ 0.7 ให้พอดีคอลัมน์ (พิมพ์/PDF ไม่ใช้ค่านี้) · ล้นยังเลื่อนดูได้ */}
         <section
           aria-label={t("bill.receiptLabel")}
-          className="theme-light aspect-[148/210] overflow-auto rounded-xl border bg-card p-4 md:p-6"
+          className="theme-light aspect-[148/210] overflow-auto rounded-xl border bg-card p-4 md:p-6 [&_.ong-receipt]:w-[190mm] [&_.ong-receipt]:max-w-none [&_.ong-receipt]:[zoom:0.7]"
         >
           <ReceiptErrorBoundary
             fallback={receiptError}
