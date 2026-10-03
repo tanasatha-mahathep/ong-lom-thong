@@ -10,6 +10,7 @@ import {
   createCustomer,
   findCustomer,
   parseCustomerInput,
+  recordPhotoView,
   searchCustomers,
   toDetail,
   toListItem,
@@ -46,6 +47,7 @@ const NOT_MULTIPART = apiError("ต้องส่งเป็น multipart/form
 /**
  * ลูกค้าใช้ร่วมทั้งร้าน (ไม่มี branch_id) แต่ต้องมีสิทธิ์อย่างน้อยหนึ่งสาขา — fail-closed
  * เลขบัตรเต็มออกเฉพาะ GET /:id (R13) — PUT ตอบแบบมาสก์ · รูปออกทาง api เท่านั้น ไม่ cache
+ * รูปทุกครั้งที่ส่งลง audit customer.photo_view (PDPA) — บันทึกไม่ได้ = ไม่ส่งรูป
  */
 export const customerRoutes = new Hono<AppEnv>()
   .use(requireSession, requireAnyBranch)
@@ -96,7 +98,9 @@ export const customerRoutes = new Hono<AppEnv>()
   .get("/:id/photo", async (c) => {
     const row = await findCustomer(c.var.db, c.req.param("id"));
     const object = row?.photoKey ? await c.var.storage.get(row.photoKey) : null;
-    if (!object) return c.json(apiError("not found"), 404);
+    if (!row || !object) return c.json(apiError("not found"), 404);
+    // บันทึกก่อนส่งทุกครั้ง — บันทึกไม่ได้ = throw → 500 ไม่ส่งรูป (แนวเดียวกับ GET /buy/:id/idcard)
+    await recordPhotoView(c.var.db, c.var.viewer.userId, row.id);
     return c.body(object.body, 200, {
       "Content-Type": object.contentType,
       "Cache-Control": "no-store",
