@@ -31,15 +31,19 @@ const PER_GRAM = [
   { key: "platinumPerG", field: "platinum_per_g", name: "แพลตตินั่ม" },
 ] as const;
 
-export interface GoldQuote {
-  barSell: string;
-  barBuy: string;
-  jewelryBuy: string;
+/** ส่วนราคาต่อกรัมของ quote — GoldQuote = ส่วนนี้ + ค่าทองที่ derive แล้ว */
+export interface PerGramQuote {
   /** ราคาต่อกรัมรูปมาตรฐาน 2 ตำแหน่ง — undefined = ไม่ได้ส่งมา (คงค่าเดิม) */
   silverPerG?: string | null;
   platinumPerG?: string | null;
   /** ด่านกันพิมพ์ผิด — ห่างจากราคาครั้งก่อน (ราคากลาง หรือราคาที่สาขาใช้จริง) เกินเกณฑ์ · หลายราคาต่อด้วย " · " */
   warning: string | null;
+}
+
+export interface GoldQuote extends PerGramQuote {
+  barSell: string;
+  barBuy: string;
+  jewelryBuy: string;
 }
 
 /** numeric จาก DB มาเป็น string เสมอ (postgres.js) — เข้า decimal.js ตรง ๆ ไม่ผ่าน float */
@@ -101,6 +105,15 @@ function perGramPrice(input: string | null | undefined, field: GoldPriceField, n
   return v;
 }
 
+/** ทองแท่งขายออกที่พิมพ์มา → Decimal ที่ผ่านด่านรูปแบบ/เพดาน/ทศนิยม */
+function barSellPrice(input: string) {
+  const sell = parseDecimal(input);
+  if (!sell || sell.lte(0)) throw new GoldPriceInputError("ราคาทองแท่งขายออกต้องเป็นตัวเลขมากกว่า 0");
+  if (sell.gt(MAX_BAR_SELL)) throw new GoldPriceInputError("ราคาทองสูงผิดปกติ — ตรวจตัวเลขอีกครั้ง");
+  if (sell.decimalPlaces() > 2) throw new GoldPriceInputError("ราคาทศนิยมไม่เกิน 2 ตำแหน่ง");
+  return sell;
+}
+
 /**
  * ฟังก์ชันเดียวที่ quote และการบันทึกราคา (กลาง/เฉพาะสาขา) ใช้ (R8 · CLAUDE.md กฎ 2)
  * ร้านกรอกแค่ทองแท่งขายออก → derive รับซื้อ + รูปพรรณจากค่าตั้งใน DB · ราคาต่อกรัมของเงิน/แพลตตินั่ม (ถ้าส่งมา) ตรวจรูปแล้วเก็บตรงตัว
@@ -113,10 +126,7 @@ export async function quoteGoldPrice(
   branchId: string | null = null,
   perGram: PerGramInput = {},
 ): Promise<GoldQuote> {
-  const sell = parseDecimal(barSellInput);
-  if (!sell || sell.lte(0)) throw new GoldPriceInputError("ราคาทองแท่งขายออกต้องเป็นตัวเลขมากกว่า 0");
-  if (sell.gt(MAX_BAR_SELL)) throw new GoldPriceInputError("ราคาทองสูงผิดปกติ — ตรวจตัวเลขอีกครั้ง");
-  if (sell.decimalPlaces() > 2) throw new GoldPriceInputError("ราคาทศนิยมไม่เกิน 2 ตำแหน่ง");
+  const sell = barSellPrice(barSellInput);
   const metals = PER_GRAM.map((m) => ({ ...m, value: perGramPrice(perGram[m.key], m.field, m.name) }));
   const setting = await loadGoldSetting(db);
   const q = deriveGoldPrice(sell, setting);
@@ -220,14 +230,19 @@ const auditValues = (r: GoldPriceRow) => ({
   set_by: r.setBy,
 });
 
-/** ช่องที่ upsert — ราคาต่อกรัมที่ไม่ได้ส่งมา (undefined) ไม่อยู่ในชุด → แถวเดิมคงค่าเดิม · แถวใหม่ = null */
+/** ราคาต่อกรัมที่ส่งมา — ที่ไม่ได้ส่ง (undefined) ไม่อยู่ในชุด → แถวเดิมคงค่าเดิม · แถวใหม่ = null */
+const perGramValues = (quote: PerGramQuote) => ({
+  ...(quote.silverPerG === undefined ? {} : { silverPerG: quote.silverPerG }),
+  ...(quote.platinumPerG === undefined ? {} : { platinumPerG: quote.platinumPerG }),
+});
+
+/** ช่องที่ upsert — ค่าทอง + ผู้ตั้ง + ราคาต่อกรัมที่ส่งมา */
 const upsertValues = (quote: GoldQuote, userId: string) => ({
   barSell: quote.barSell,
   barBuy: quote.barBuy,
   jewelryBuy: quote.jewelryBuy,
   setBy: userId,
-  ...(quote.silverPerG === undefined ? {} : { silverPerG: quote.silverPerG }),
-  ...(quote.platinumPerG === undefined ? {} : { platinumPerG: quote.platinumPerG }),
+  ...perGramValues(quote),
 });
 
 /**
