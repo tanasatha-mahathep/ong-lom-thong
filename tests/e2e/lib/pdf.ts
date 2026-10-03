@@ -40,8 +40,8 @@ export const GOTENBERG_USERNAME = "ong";
 /** ISO 216 A4 in PostScript points (1/72 in): 210 × 297 mm = 595.28 × 841.89 pt */
 export const A4_PT = { width: (210 / 25.4) * 72, height: (297 / 25.4) * 72 } as const;
 
-/** ISO 216 A3 in points: 297 × 420 mm = 841.89 × 1190.55 pt (ใบรับซื้อตั้งแต่ 3 ต.ค. 2569) */
-export const A3_PT = { width: (297 / 25.4) * 72, height: (420 / 25.4) * 72 } as const;
+/** ISO 216 A5 in points: 148 × 210 mm = 419.53 × 595.28 pt (ใบรับซื้อตั้งแต่ 3 ต.ค. 2569) */
+export const A5_PT = { width: (148 / 25.4) * 72, height: (210 / 25.4) * 72 } as const;
 
 /** the only faces a receipt may use — services/gotenberg/Dockerfile installs exactly these two */
 export const SARABUN_FACES = ["Sarabun-Regular", "Sarabun-Bold"] as const;
