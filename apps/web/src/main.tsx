@@ -5,17 +5,19 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { i18nReady } from "@/i18n";
 import { listenForAppUpdates } from "@/lib/app-update";
+import { initErrorTracking, reportError } from "@/lib/error-tracking";
 import { createAppRouter } from "@/router";
 import "./styles.css";
 
 const router = createAppRouter();
 listenForAppUpdates();
+void initErrorTracking();
 const root = document.getElementById("root");
 if (!root) throw new Error("ไม่พบ #root ใน index.html");
 
 // ภาษาที่จำไว้ (อังกฤษ = โหลด chunk ก่อน) — render ครั้งแรกเป็นภาษาที่เลือกเลย ไม่กะพริบ
 void i18nReady.then(() =>
-  createRoot(root).render(
+  createRoot(root, { onUncaughtError: (error) => reportError(error) }).render(
     <StrictMode>
       <RouterProvider router={router} />
     </StrictMode>,
