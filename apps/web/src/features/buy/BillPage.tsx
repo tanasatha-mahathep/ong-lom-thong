@@ -147,21 +147,26 @@ function BillView({ bill, autoPrint }: { bill: Bill; autoPrint: boolean }) {
         })}
       </p>
 
-      <BillActions bill={bill} role={me.role} />
+      {/* ตัวอย่างใบ (แนวตั้ง A5) ซ้าย · ปุ่มพิมพ์/PDF/ยกเลิก/สถานะ ขวาบนจอกว้าง · บนมือถือปุ่มขึ้นก่อน */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start">
+        <div className="order-first lg:order-none lg:sticky lg:top-4">
+          <BillActions bill={bill} role={me.role} />
+        </div>
 
-      <section
-        aria-label={t("bill.receiptLabel")}
-        className="theme-light overflow-x-auto rounded-xl border bg-card p-4 md:p-8"
-      >
-        <ReceiptErrorBoundary
-          fallback={receiptError}
-          onError={() => {
-            receiptBroken.current = true;
-          }}
+        <section
+          aria-label={t("bill.receiptLabel")}
+          className="theme-light overflow-x-auto rounded-xl border bg-card p-4 md:p-8"
         >
-          <Receipt data={receipt} />
-        </ReceiptErrorBoundary>
-      </section>
+          <ReceiptErrorBoundary
+            fallback={receiptError}
+            onError={() => {
+              receiptBroken.current = true;
+            }}
+          >
+            <Receipt data={receipt} />
+          </ReceiptErrorBoundary>
+        </section>
+      </div>
 
       <PrintPortal>
         <ReceiptErrorBoundary
