@@ -7,10 +7,13 @@ import { createBackgroundTasks } from "./lib/background";
 import { createGotenbergClient } from "./lib/gotenberg";
 import { closeHttpServer, createShutdown } from "./lib/shutdown";
 import { serveSpa } from "./lib/spa";
+import { closeSentry, initSentry } from "./lib/sentry";
 import { createS3Storage, probeConditionalWrites } from "./lib/storage";
 import { companyFromEnv, createReceiptPdfService, loadPdfFonts, startPdfRetryLoop } from "./services/receiptPdf";
 
 const env = loadEnv();
+// เปิด Sentry ก่อนสร้างทุกอย่าง — error ตอนเริ่มระบบก็ถูกส่ง · ไม่ตั้ง SENTRY_DSN = ไม่ส่งอะไรเลย
+initSentry({ dsn: env.SENTRY_DSN, environment: env.SENTRY_ENVIRONMENT ?? env.NODE_ENV });
 const db = createDb(env.DATABASE_URL);
 const storage = createS3Storage(env);
 const tasks = createBackgroundTasks();
@@ -57,4 +60,6 @@ shutdown.add("stop", "pdf retry loop", startPdfRetryLoop(pdf));
 // PDF ที่กำลังสร้างให้จบก่อนปิด DB (รอไม่เกิน 5 วินาที) — ที่ยังไม่เริ่ม/ไม่ทัน ยัง pending ให้ retry หลัง start ใหม่
 shutdown.add("drain", "pdf tasks", () => tasks.close(5_000));
 shutdown.add("close", "postgres", () => db.$client.end({ timeout: 5 }));
+// event ค้างในคิวของ Sentry ต้องส่งก่อน exit (ไม่มี DSN = ทันที)
+shutdown.add("close", "sentry", closeSentry);
 shutdown.listen();

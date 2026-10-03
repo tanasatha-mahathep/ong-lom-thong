@@ -183,6 +183,10 @@ export default defineRailway((ctx) => {
       // domain *.up.railway.app สร้างด้วย `railway domain -s api` (IaC ไม่จัดการ generated domain)
       BETTER_AUTH_URL: "https://${{RAILWAY_PUBLIC_DOMAIN}}",
 
+      // Sentry — DSN เป็นค่าลับแบบ sealed (ตั้งผ่าน RAILWAY_SET_SENTRY_DSN ตอน apply) · ไม่ตั้ง = preserve ค่าเดิม
+      SENTRY_DSN: secret("SENTRY_DSN"),
+      SENTRY_ENVIRONMENT: environment,
+
       ...COMPANY,
       // ใบจากระบบทดสอบต้องไม่ดูเหมือนใบรับซื้อจริง — production ไม่ประกาศ (apply แล้วถูกล้าง = ไม่มีลายน้ำ)
       ...(production ? {} : { RECEIPT_WATERMARK: "ตัวอย่าง — ระบบทดสอบ ไม่ใช่ใบรับซื้อจริง" }),
