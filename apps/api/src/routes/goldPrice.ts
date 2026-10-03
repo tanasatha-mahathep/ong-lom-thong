@@ -1,5 +1,6 @@
 import { businessDate } from "@ong/core";
 import { type Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { type AppEnv, apiError, requireAnyBranch, requireRole, requireSession } from "../lib/context";
 import { type BranchRef, currentBranch, forUser } from "../lib/scope";
@@ -33,13 +34,22 @@ import {
  * ไม่ส่ง = คงค่าเดิมของวันนี้ · null หรือ "" = ล้าง (วันนี้รับซื้อโลหะนั้นไม่ได้) · ข้อความตัวเลข = ตั้งใหม่
  */
 const perGramText = z.string().max(32).nullable().optional();
-const QuoteBody = z.object({
-  bar_sell: z.string(),
-  /** ใส่เมื่อกำลังตั้งราคาเฉพาะสาขา — คำเตือนเทียบราคาที่สาขานั้นใช้ครั้งก่อน (เหมือนตอนบันทึก) */
-  branch_id: z.string().max(64).nullish(),
-  silver_per_g: perGramText,
-  platinum_per_g: perGramText,
-});
+/**
+ * POST /quote (live preview) — strict: รับเฉพาะช่องที่หน้าเว็บส่งจริง (features/gold-price/queries.ts
+ * goldPriceQuoteQueryOptions): bar_sell · branch_id (ตอนตั้งราคาเฉพาะสาขา) · silver_per_g · platinum_per_g (ช่องที่เปลี่ยน)
+ * ช่องอื่น = 400 ชี้ชื่อช่อง ไม่ตัดทิ้งเงียบ ๆ — สะกดผิด (barSell · branchId) จะได้ราคาที่ไม่ได้ขอ (branchId หายไป = ราคากลาง)
+ * ช่องของการบันทึก (confirm_typo · from_reference) ไม่มีความหมายกับ preview ก็เป็น 400 เช่นกัน (API3 · ASVS V5.1.2)
+ */
+const QuoteBody = z
+  .object({
+    bar_sell: z.string(),
+    /** ใส่เมื่อกำลังตั้งราคาเฉพาะสาขา — คำเตือนเทียบราคาที่สาขานั้นใช้ครั้งก่อน (เหมือนตอนบันทึก) */
+    branch_id: z.string().max(64).nullish(),
+    silver_per_g: perGramText,
+    platinum_per_g: perGramText,
+  })
+  .strict();
+/** ช่องของการตั้งราคา (spec §5) — ฐานร่วมของ PUT ทั้งสอง · แต่ละ route ใช้ฉบับ strict ของตัวเอง (BranchSetBody · CentralSetBody) */
 const SetBody = z.object({
   bar_sell: z.string(),
   silver_per_g: perGramText,
@@ -58,15 +68,32 @@ const SetBody = z.object({
     .optional(),
 });
 /**
+ * PUT /today/branches/:id (ราคาเฉพาะสาขา) — strict: รับเฉพาะช่องของ SetBody · bar_sell ยังบังคับ · สาขามาจาก path เท่านั้น
+ * ช่องสะกดผิด (silver_per_gram · barSell) · branch_id ใน body · ค่าที่ derive (bar_buy · jewelry_buy) · ช่องของระบบ
+ * = 400 ชี้ชื่อช่อง ไม่เขียนแถวสาขา ไม่ลง audit — ไม่ตัดทิ้งเงียบ ๆ แล้วตอบ 200 (API3 · ASVS V5.1.2)
+ * ราคาต่อกรัมเป็นช่องที่รู้จัก: ผ่าน schema แล้วไปโดนด่าน branchPerGramError (400 เดิม — ตั้งได้ที่ราคากลางเท่านั้น)
+ */
+const BranchSetBody = SetBody.strict();
+/**
  * PUT /today (ราคากลางของทุกสาขา) — ด่านเดียวของ body ทุกคำขอ ทั้งที่ส่งและไม่ส่ง bar_sell (spec §5)
  * รับเฉพาะช่องของ SetBody (bar_sell · silver_per_g · platinum_per_g · confirm_typo · from_reference) — strict:
  * ช่องสะกดผิด (barSell) · ค่าที่เซิร์ฟเวอร์ derive เอง (bar_buy · jewelry_buy) · branch_id (PUT นี้เปลี่ยนราคาของทุกสาขา) ·
  * ช่องของระบบ (diff · date · set_by · source) = 400 ชี้ชื่อช่อง ไม่บันทึกอะไร — ไม่ตัดทิ้งเงียบ ๆ แล้วตอบ 200 (API3 · ASVS V5.1.2)
  * bar_sell ไม่บังคับ: ไม่ส่ง · null · "" หรือช่องว่างล้วน (แบบเดียวกับราคาต่อกรัม) = ไม่ตั้งราคาทอง
  * → บันทึกแค่ราคาต่อกรัมที่ส่งมา ค่าทองของแถวราคากลางคงเดิม · ตัวเลข JSON ยังเป็น 400 (กฎ 1)
- * ราคาเฉพาะสาขา (PUT /today/branches/:id) ยังใช้ SetBody — บังคับ bar_sell และไม่ strict เหมือนเดิม
  */
 const CentralSetBody = SetBody.extend({ bar_sell: z.string().nullable().optional() }).strict();
+
+/**
+ * เพดาน body ของ PUT /today · PUT /today/branches/:id · POST /quote — body จริงมีไม่เกิน 5 ช่อง (ไม่กี่ร้อยไบต์)
+ * เกินนี้ตัดทิ้งก่อน parse และไม่เขียนอะไร (413 · แบบเดียวกับ routes/admin.ts) · ผูกทีละ route ที่มี body เท่านั้น ไม่ใช้ .use():
+ * GET ไม่ผ่านตัวนี้เลย (และ bodyLimit ปล่อย request ที่ไม่มี body อยู่แล้ว) · DELETE ราคาเฉพาะสาขาไม่อ่าน body
+ * วางหลัง requireRole — role ที่ตั้งราคาไม่ได้ได้ 403 เสมอ ไม่ว่า body ใหญ่แค่ไหน (role ตัดสินก่อนอ่าน body)
+ */
+const jsonLimit = bodyLimit({
+  maxSize: 16 * 1024,
+  onError: (c) => c.json(apiError("ข้อมูลใหญ่เกินไป"), 413),
+});
 
 /** ?days= จำนวนวันย้อนหลัง (นับวันนี้ด้วย) — ตัวเลขล้วน 1–366 · ไม่ส่ง = 90 · รูปอื่นทั้งหมด (0 · ติดลบ · ทศนิยม · ว่าง) = 400 */
 const HistoryQuery = z.object({
@@ -97,23 +124,44 @@ const branchPerGramError = (body: { silver_per_g?: unknown; platinum_per_g?: unk
   return field ? apiError("ราคาเงิน/แพลตตินั่มต่อกรัมตั้งได้ที่ราคากลางเท่านั้น", field) : null;
 };
 
+/** ชื่อช่องในข้อความ — ชื่อว่าง ("" หรือช่องว่างล้วน) แสดงเป็น "(ว่าง)" ไม่ให้ข้อความเหลือแค่ "ไม่รู้จักช่อง " */
+const keyLabel = (key: string) => (key.trim() === "" ? "(ว่าง)" : key);
+
+/**
+ * ช่องระดับบนสุดที่ไม่รู้จัก (schema strict ทั้งสามตัว) → 400 ข้อความแบบ routes/admin.ts ("ไม่รู้จักช่อง a, b")
+ * field = ชื่อจริงของช่องแรกตามลำดับใน body — ช่องชื่อว่างก็ชี้ field "" (apiError ตัด field ที่เป็นข้อความว่างทิ้ง
+ * จึงประกอบ {error, field} เอง รูปเดียวกับ spec §5) · ช่องเกินข้างใน from_reference (path ไม่ว่าง) ไม่ใช่กรณีนี้ = null
+ * zod ตรวจช่องที่รู้จักก่อนช่องเกิน — body ที่ผิดทั้งสองแบบได้ issue ของช่องที่รู้จักเป็นตัวแรก (ไม่มาถึงที่นี่)
+ */
+function unknownFieldError(issue: z.ZodError["issues"][number] | undefined) {
+  if (issue?.code !== "unrecognized_keys" || issue.path.length > 0) return null;
+  return { error: `ไม่รู้จักช่อง ${issue.keys.map(keyLabel).join(", ")}`, field: issue.keys[0] ?? "" };
+}
+
 /**
  * ช่องที่ผิดจริงของ SetBody (F5) — zod คืน issue ของ bar_sell ก่อนเสมอถ้าทั้งคู่ผิด (ลำดับตาม schema)
  * confirm_typo ผิดชนิด (เช่นส่ง "yes" แทน boolean) ต้องชี้ field "confirm_typo" ไม่ใช่ "bar_sell" ที่จริงแล้วถูก
+ * ช่องที่ไม่รู้จัก (CentralSetBody · BranchSetBody) ชี้ช่องแรกที่ไม่รู้จัก · ช่องเกินข้างใน from_reference ยังชี้ from_reference
  */
 const setBodyError = (e: z.ZodError) => {
   const issue = e.issues[0];
-  // ช่องระดับบนสุดที่ไม่รู้จัก (CentralSetBody) — ชี้ช่องแรกที่ไม่รู้จัก แบบเดียวกับ routes/admin.ts
-  // zod ตรวจช่องที่รู้จักก่อนช่องเกิน — body ที่ผิดทั้งสองแบบชี้ช่องที่รู้จักแต่ค่าผิดก่อน
-  // ช่องเกินข้างใน from_reference (path = ["from_reference"]) ยังชี้ from_reference ตามเดิม
-  if (issue?.code === "unrecognized_keys" && issue.path.length === 0) {
-    return apiError(`ไม่รู้จักช่อง ${issue.keys.join(", ")}`, issue.keys[0]);
-  }
+  const unknown = unknownFieldError(issue);
+  if (unknown) return unknown;
   const field = issue?.path[0];
   if (field === "confirm_typo") return CONFIRM_TYPO_ERROR;
   if (field === "from_reference") return FROM_REFERENCE_ERROR;
   if (field === "silver_per_g" || field === "platinum_per_g") return perGramError(field);
   return BAR_SELL_ERROR;
+};
+
+/** ช่องที่ผิดของ QuoteBody — ช่องที่ไม่รู้จักชี้ชื่อช่อง · ที่เหลือเหมือนเดิม (ไม่มี body · JSON เสีย · bar_sell ผิด = bar_sell) */
+const quoteBodyError = (e: z.ZodError) => {
+  const issue = e.issues[0];
+  const unknown = unknownFieldError(issue);
+  if (unknown) return unknown;
+  const field = issue?.path[0];
+  if (field === "silver_per_g" || field === "platinum_per_g") return perGramError(field);
+  return field === "branch_id" ? BRANCH_ID_ERROR : BAR_SELL_ERROR;
 };
 
 /** ราคาอ้างอิงสมาคม — เงินเป็น string 2 ตำแหน่ง (กฎ 1) · round เป็นจำนวนเต็ม (ไม่ใช่เงิน) */
@@ -229,13 +277,10 @@ export const goldPriceRoutes = new Hono<AppEnv>()
     const rows = await listGoldAnnouncements(c.var.db, new Date(from));
     return c.json({ days, from, items: rows.map(historyItemJson) });
   })
-  .post("/quote", async (c) => {
+  // live preview ของฟอร์มราคา (ทุก role ที่มีสาขา) — body เกิน 16 KB = 413 · ช่องที่ไม่รู้จัก = 400 (QuoteBody strict)
+  .post("/quote", jsonLimit, async (c) => {
     const body = QuoteBody.safeParse(await c.req.json().catch(() => null));
-    if (!body.success) {
-      const field = body.error.issues[0]?.path[0];
-      if (field === "silver_per_g" || field === "platinum_per_g") return c.json(perGramError(field), 400);
-      return c.json(field === "branch_id" ? BRANCH_ID_ERROR : BAR_SELL_ERROR, 400);
-    }
+    if (!body.success) return c.json(quoteBodyError(body.error), 400);
     let branchId: string | null = null;
     if (body.data.branch_id != null) {
       const perGram = branchPerGramError(body.data);
@@ -267,9 +312,9 @@ export const goldPriceRoutes = new Hono<AppEnv>()
     }
   })
   // ตั้งราคากลางของวัน — manager/admin (spec §10) · ห่างเกินเกณฑ์ต้องยืนยัน (409 ชี้ confirm_typo)
-  // role ตัดสินก่อนอ่าน body (role อื่น = 403 เสมอ) · ช่องที่ไม่รู้จัก = 400 ทุกคำขอ (CentralSetBody strict)
+  // role ตัดสินก่อนอ่าน body (role อื่น = 403 เสมอ) · body เกิน 16 KB = 413 · ช่องที่ไม่รู้จัก = 400 ทุกคำขอ (CentralSetBody strict)
   // ไม่ส่ง bar_sell = แก้แค่ราคาเงิน/แพลตตินั่มของราคากลางที่มีแล้ว ค่าทองคงเดิม (quoteGoldPrice ตัวเดียวกัน ข้ามส่วนทอง)
-  .put("/today", requireRole("manager", "admin"), async (c) => {
+  .put("/today", requireRole("manager", "admin"), jsonLimit, async (c) => {
     const body = CentralSetBody.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json(setBodyError(body.error), 400);
     const date = businessDate(c.var.now());
@@ -298,10 +343,11 @@ export const goldPriceRoutes = new Hono<AppEnv>()
   })
   // ราคาเฉพาะสาขาของวันนี้ (อิงราคากลาง override ได้) — manager/admin เฉพาะสาขาที่เปิดอยู่และมีสิทธิ์
   // สูตรเดียวกับราคากลาง (quoteGoldPrice) · ด่านพิมพ์ผิดเทียบราคาที่สาขานั้นใช้จริงครั้งก่อน
-  .put("/today/branches/:branchId", requireRole("manager", "admin"), async (c) => {
+  // role ก่อน → body เกิน 16 KB = 413 (เหมือนกันทุกสาขา ไม่บอกว่าสาขามีอยู่) → สาขา 404 → ช่องที่ไม่รู้จัก 400 (BranchSetBody strict)
+  .put("/today/branches/:branchId", requireRole("manager", "admin"), jsonLimit, async (c) => {
     const target = await writableBranch(c);
     if (!target) return c.json(apiError("not found"), 404);
-    const body = SetBody.safeParse(await c.req.json().catch(() => null));
+    const body = BranchSetBody.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json(setBodyError(body.error), 400);
     const perGram = branchPerGramError(body.data);
     if (perGram) return c.json(perGram, 400);
