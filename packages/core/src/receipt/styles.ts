@@ -14,9 +14,7 @@ const PAGE = `@page { size: A4 portrait; margin: 12mm 14mm; }`;
  */
 const PAGE_A5 = `@page { size: A5 portrait; margin: 8.5mm 10mm; }`;
 /** 1/√2 ของขนาดบนจอ · กว้าง 181 mm × 0.70711 = 128 mm = ความกว้างเนื้อหาของ A5 (148 − 2 × 10) */
-const PRINT_SCALE_A5 = `@media print { .ong-receipt { zoom: 0.70711; width: 181mm; max-width: none; } }
-/* จอ: กรอบตัวอย่างสูงอย่างน้อยตามสัดส่วน A5 (148 × 210) ที่ความกว้างเต็ม 190 mm · เนื้อหายาวกว่านั้นก็ขยายตาม */
-@media screen { .ong-receipt { min-height: 269mm; } }`;
+const PRINT_SCALE_A5 = `@media print { .ong-receipt { zoom: 0.70711; width: 181mm; max-width: none; } }`;
 
 /** ลายน้ำระบบทดสอบ — ทับทั้งเอกสารแนวทแยง จางพอให้อ่านข้อมูลได้ แต่ถ่ายเอกสารก็ยังเห็น */
 const WATERMARK = `.ong-watermark { position: absolute; inset: 0; z-index: 3; display: flex; align-items: center;
