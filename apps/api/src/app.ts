@@ -9,6 +9,7 @@ import type { Env } from "./env";
 import { type AppEnv, apiError } from "./lib/context";
 import { loggableError } from "./lib/log";
 import { sameOriginOnly } from "./lib/origin";
+import { captureError } from "./lib/sentry";
 import type { Storage } from "./lib/storage";
 import { type GoldReferenceService, createGoldReferenceService, providerFromEnv } from "./services/goldReference";
 import { recordGoldAnnouncement, withAnnouncementHistory } from "./services/goldReferenceHistory";
@@ -93,8 +94,10 @@ export function createApp({ db, auth, env, storage, pdf, goldReference, now = ()
   app.all("/api/*", (c) => c.json(apiError("not found"), 404));
 
   app.onError((err, c) => {
-    // ห้าม log ค่า params ของ query — มีข้อมูลลูกค้า (lib/log.ts)
-    console.error(loggableError(err));
+    // ห้าม log ค่า params ของ query — มีข้อมูลลูกค้า (lib/log.ts) · Sentry รับเฉพาะค่าที่ผ่านตัวนี้เช่นกัน
+    const safe = loggableError(err);
+    console.error(safe);
+    captureError(safe);
     return c.json(apiError("internal error"), 500);
   });
   return app;

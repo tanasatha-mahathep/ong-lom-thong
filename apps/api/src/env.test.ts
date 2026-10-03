@@ -128,3 +128,24 @@ describe("loadEnv — ราคาอ้างอิงสมาคม", () => {
     expect(problem({ ...EXAMPLE, GOLD_REFERENCE_PROVIDER: "scrape-anything" })).toContain("GOLD_REFERENCE_PROVIDER");
   });
 });
+
+describe("loadEnv — Sentry", () => {
+  const DSN = "https://publickey@o0.ingest.sentry.io/1234567";
+
+  it("ไม่ตั้ง DSN = ปิด (undefined) · ค่าว่างก็ถือว่าไม่ตั้ง", () => {
+    expect(loadEnv(EXAMPLE).SENTRY_DSN).toBeUndefined();
+    expect(loadEnv({ ...EXAMPLE, SENTRY_DSN: "   " }).SENTRY_DSN).toBeUndefined();
+    expect(loadEnv(EXAMPLE).SENTRY_ENVIRONMENT).toBeUndefined();
+  });
+
+  it("DSN ต้องเป็น https และตัดช่องว่าง", () => {
+    expect(loadEnv({ ...EXAMPLE, SENTRY_DSN: ` ${DSN} ` }).SENTRY_DSN).toBe(DSN);
+    expect(problem({ ...EXAMPLE, SENTRY_DSN: "http://publickey@o0.ingest.sentry.io/1" })).toContain("SENTRY_DSN");
+    expect(problem({ ...EXAMPLE, SENTRY_DSN: "ไม่ใช่-url" })).toContain("SENTRY_DSN");
+  });
+
+  it("SENTRY_ENVIRONMENT ตัดช่องว่าง · ว่าง = undefined", () => {
+    expect(loadEnv({ ...EXAMPLE, SENTRY_ENVIRONMENT: " staging " }).SENTRY_ENVIRONMENT).toBe("staging");
+    expect(loadEnv({ ...EXAMPLE, SENTRY_ENVIRONMENT: " " }).SENTRY_ENVIRONMENT).toBeUndefined();
+  });
+});
