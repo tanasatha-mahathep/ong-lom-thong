@@ -13,6 +13,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./consignment": "./src/consignment/index.ts",
     "./receipt": "./src/receipt/index.ts"
   },
   "scripts": {
