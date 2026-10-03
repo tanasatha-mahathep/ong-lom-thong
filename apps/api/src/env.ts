@@ -79,6 +79,19 @@ const EnvSchema = z
           }, "ห้ามใส่ user/password ใน URL")
           .optional(),
       ),
+    // Sentry (ไม่บังคับ) — ไม่ตั้ง = ไม่ส่ง error ออกนอกเซิร์ฟเวอร์ · DSN เป็นค่าตั้งค่า ไม่ใช่ token
+    SENTRY_DSN: z
+      .string()
+      .trim()
+      .optional()
+      .transform((v) => v || undefined)
+      .pipe(z.url({ protocol: /^https$/, error: "ต้องเป็น URL https" }).optional()),
+    // แยก staging / production ใน Sentry (ค่าเริ่มต้น = NODE_ENV)
+    SENTRY_ENVIRONMENT: z
+      .string()
+      .trim()
+      .optional()
+      .transform((v) => v || undefined),
   })
   .superRefine((env, ctx) => {
     if (env.GOLD_REFERENCE_PROVIDER !== "none" && !env.GOLD_REFERENCE_URL) {
