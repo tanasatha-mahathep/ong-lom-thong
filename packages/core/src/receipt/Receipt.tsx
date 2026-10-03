@@ -9,7 +9,7 @@ import type { ReceiptData } from "./types";
 import { assertReceiptTotals } from "./validate";
 
 /**
- * ใบรับซื้อของเก่า/ใบสำคัญจ่าย — A3 ตั้ง (ตอนพิมพ์ขยาย √2 จาก A4 · styles.ts)
+ * ใบรับซื้อของเก่า/ใบสำคัญจ่าย — A5 ตั้ง (ตอนพิมพ์ย่อ 1/√2 จาก A4 · styles.ts)
  * พอร์ตจาก Django print/buy_receipt.html (จำลองจากใบจริง RC6909-0010) — ข้อความ ลำดับ และตำแหน่งตามใบจริง
  * ห้ามแก้ข้อความ/ลำดับโดยไม่เทียบใบจริงของร้าน · สำเนาบัตรแยกเป็น <IdCardCopy/> (สิทธิ์เข้าถึงต่างกัน)
  * markup ชุดเดียวใช้ทั้งหน้าเว็บ (/buy/$id, window.print) และ PDF เก็บถาวร (renderReceiptHtml)

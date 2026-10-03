@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { APIRequestContext } from "@playwright/test";
 import { expect, test } from "../../lib/fixtures";
 import { FOREIGN_ORIGIN, expectApiError, expectFieldError } from "../../lib/http";
-import { A3_PT, A4_PT, fontProblems, inspect } from "../../lib/pdf";
+import { A4_PT, A5_PT, fontProblems, inspect } from "../../lib/pdf";
 import { PNG_1X1, syntheticNationalId, thaiName } from "../../lib/synthetic";
 
 interface Metal {
@@ -331,8 +331,8 @@ const printed = (value: string) => {
   return `${whole.replace(/\B(?=(\d{3})+$)/g, ",")}${fraction === undefined ? "" : `.${fraction}`}`;
 };
 
-/** ใบรับซื้อ = A3 (ใบใหม่ตั้งแต่ 3 ต.ค. 2569) · Chromium ปัดขนาดหน้าเป็นพิกเซล จึงยอมให้ต่างจาก ISO ได้ 1 pt */
-const RECEIPT_PAPER = { name: "A3", ...A3_PT, tolerance: 1 } as const;
+/** ใบรับซื้อ = A5 แนวตั้ง (ใบใหม่ตั้งแต่ 3 ต.ค. 2569) · Chromium ปัดขนาดหน้าเป็นพิกเซล จึงยอมให้ต่างจาก ISO ได้ 1 pt */
+const RECEIPT_PAPER = { name: "A5", ...A5_PT, tolerance: 1 } as const;
 /** สำเนาบัตรยังเป็น A4 แยกไฟล์ */
 const ID_CARD_PAPER = { name: "A4", ...A4_PT, tolerance: 0.5 } as const;
 
@@ -367,7 +367,7 @@ async function downloadPdf(
 const WATERMARK = "ตัวอย่าง — ระบบทดสอบ ไม่ใช่ใบรับซื้อจริง";
 
 test.describe("receipt PDF — archived, private, immutable (R15 · rule 5 · R13 · spec §9.2)", () => {
-  test("a saved bill gets its A3 receipt and A4 ID card copy in the bucket, served only through the api", async ({
+  test("a saved bill gets its A5 receipt and A4 ID card copy in the bucket, served only through the api", async ({
     signedIn,
     anonymous,
   }) => {
@@ -394,7 +394,7 @@ test.describe("receipt PDF — archived, private, immutable (R15 · rule 5 · R1
     expect(detailText).not.toMatch(/https?:\/\/|receipts\/|idcards\/|X-Amz-/);
     expect(detailText).not.toContain(nationalId);
 
-    const receipt = await test.step("the receipt: A3, Thai, the api's numbers as printed", async () => {
+    const receipt = await test.step("the receipt: A5, Thai, the api's numbers as printed", async () => {
       const file = await downloadPdf(staff, `/api/buy/${id}/pdf`, `${doc_no}.pdf`, RECEIPT_PAPER);
       expect(file.pdf.pageCount).toBe(1);
       const expected = [
