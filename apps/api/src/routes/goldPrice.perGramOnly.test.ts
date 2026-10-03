@@ -12,7 +12,8 @@ const PW = "correct-horse-battery";
 
 /**
  * วันทำการแยกตามเรื่อง — ด่านพิมพ์ผิดเทียบวันก่อนหน้าล่าสุดที่มีค่า จึงให้ราคาทุกวันก่อน normalPrev ห่างกันไม่ถึง 3%
- * (ทอง 67,850–68,500 · เงิน 45.00–45.50 · แพลตตินั่ม 1,000–1,005.50) · *Prev และ typo ใส่ตรงใน DB (ไม่พึ่งลำดับเทสต์)
+ * (ทอง 67,850–68,500 · เงิน 45.00–45.50 · แพลตตินั่ม 1,000–1,005.50)
+ * ทุกเทสต์ตั้งข้อมูลของตัวเอง (ในเทสต์ หรือใส่ตรงใน DB ใน beforeAll) — รันเดี่ยวหรือสลับลำดับ (--sequence.shuffle.tests) ได้ผลเดิม
  */
 const DAY = {
   noCentral: "2026-12-01", // ไม่มีราคากลาง — มีแค่ราคาเฉพาะสาขา 00001 (ใส่ตรงใน beforeAll)
@@ -22,6 +23,8 @@ const DAY = {
   branch: "2026-12-05",
   race: "2026-12-06",
   vanish: "2026-12-07",
+  // ราคากลางใส่ตรงใน DB (ทอง 67,850 · เงิน 45.00 · แพลตตินั่ม 1,000.00) — คำขอที่ต้องถูกปฏิเสธ "แม้มีราคากลางแล้ว" (ไม่เขียนอะไร)
+  rejected: "2026-12-08",
   normalPrev: "2026-12-14", // ครั้งก่อนของ normal: ทอง 67,900 · เงิน 45.00 · แพลตตินั่ม 1,000.00
   normal: "2026-12-15",
   typoPrev: "2026-12-20", // ครั้งก่อนของ typo: ทอง 67,900 · เงิน 45.00 · แพลตตินั่ม 1,000.00
@@ -119,6 +122,14 @@ describe.skipIf(!available)(
         // วันที่ยังไม่มีราคากลาง แต่สาขา 00001 ตั้งราคาของตัวเองแล้ว — แถวสาขาต้องไม่ถูกนับเป็นราคากลาง
         { branchId: bid("00001"), date: DAY.noCentral, barSell: "68500", barBuy: "68300", jewelryBuy: "64885" },
         {
+          date: DAY.rejected,
+          barSell: "67850",
+          barBuy: "67650",
+          jewelryBuy: "64268",
+          silverPerG: "45.00",
+          platinumPerG: "1000.00",
+        },
+        {
           date: DAY.normalPrev,
           barSell: "67900",
           barBuy: "67700",
@@ -177,6 +188,15 @@ describe.skipIf(!available)(
       barBuy: row?.barBuy,
       jewelryBuy: row?.jewelryBuy,
     });
+    /** วันที่มีราคากลางอยู่แล้ว (ใส่ใน beforeAll) — ยืนยันเงื่อนไขก่อน "ถูกปฏิเสธแม้มีราคากลาง" จึงจริงทุกลำดับการรัน */
+    const onRejectedDay = async () => {
+      onDay(DAY.rejected);
+      expect(await centralRow(DAY.rejected), "ราคากลางที่ใส่ไว้ต้องยังอยู่").toMatchObject({
+        ...dbGold(GOLD.g67850),
+        silverPerG: "45.00",
+        platinumPerG: "1000.00",
+      });
+    };
     /** audit ที่เพิ่มขึ้นหลัง snapshot */
     const auditsSince = async (before: Awaited<ReturnType<typeof writes>>) =>
       (await writes()).audits.slice(before.audits.length);
@@ -308,7 +328,7 @@ describe.skipIf(!available)(
     });
 
     it('ไม่มีราคาให้บันทึกเลย ({} · bar_sell null/"" อย่างเดียว · confirm_typo อย่างเดียว) → 400 เดิมของ bar_sell แม้มีราคากลางแล้ว · ไม่เขียนอะไร', async () => {
-      onDay(DAY.keep);
+      await onRejectedDay();
       const before = await writes();
       for (const body of [{}, { bar_sell: null }, { bar_sell: "" }, { bar_sell: "  " }, { confirm_typo: true }]) {
         const where = `PUT ${JSON.stringify(body)}`;
@@ -318,7 +338,7 @@ describe.skipIf(!available)(
     });
 
     it("from_reference (ที่มาของราคาทอง) มากับคำขอที่ไม่ได้ตั้งราคาทอง → 400 ชี้ from_reference (ไม่ทิ้งเงียบ ๆ) · ไม่เขียนอะไร", async () => {
-      onDay(DAY.keep);
+      await onRejectedDay();
       const before = await writes();
       for (const body of [
         { silver_per_g: "45.50", from_reference: PREFILL },
@@ -333,7 +353,7 @@ describe.skipIf(!available)(
     });
 
     it("ราคาต่อกรัมผิดรูป (มีราคากลางแล้ว) → 400 ชี้ช่องนั้น ข้อความเดียวกับตอนส่ง bar_sell · ตัวเลข JSON = 400 (กฎ 1) · ไม่เขียนอะไร", async () => {
-      onDay(DAY.keep);
+      await onRejectedDay();
       const before = await writes();
       const cases: [Record<string, unknown>, { error: string; field: string }][] = [
         [{ silver_per_g: "abc" }, { error: "ราคาเงินต่อกรัมต้องเป็นตัวเลขมากกว่า 0", field: "silver_per_g" }],
@@ -458,7 +478,7 @@ describe.skipIf(!available)(
     });
 
     it("สิทธิ์เหมือนเดิม: role ที่ตั้งราคาไม่ได้ = 403 (ตัดสินก่อนดู body) แม้มีราคากลางแล้ว · ไม่ login/cookie ปลอม = 401 · origin อื่น = 403 · ไม่เขียนอะไร", async () => {
-      onDay(DAY.keep);
+      await onRejectedDay();
       const before = await writes();
       const bodies = [{ silver_per_g: "45.50" }, { platinum_per_g: null }, { bar_sell: null, silver_per_g: "45.50" }];
       for (const role of ROLES.filter((r) => !PRICE_SETTERS.includes(r))) {
