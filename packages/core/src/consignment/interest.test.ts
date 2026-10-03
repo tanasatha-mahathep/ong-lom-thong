@@ -1,7 +1,9 @@
 import Decimal from "decimal.js";
 import { describe, expect, it } from "vitest";
+import djangoParity from "./django-parity.json";
 import {
   type ConsignmentQuote,
+  type ConsignmentQuoteInput,
   DEFAULT_FEE_RATE,
   DEFAULT_INTEREST_RATE,
   DEFAULT_VAT_RATE,
@@ -13,6 +15,7 @@ import legacy from "./legacy-redeem-12.json";
 
 // ข้อสอบของสูตรไถ่ถอน: golden = ใบจริง 12 ใบ (ถ้าไม่ตรงแม้ใบเดียว งานไม่ผ่าน)
 // ค่าที่คาดหวังนอก golden คิดมือจากกฎในหัว interest.ts แล้วตรวจไขว้กับ Django consignment/interest.py — ตรงทุกตัว
+// django-parity.json = ผลของ Django เอง (oracle) ในกรณีที่ความละเอียดหรือลำดับการคำนวณทำให้ผลต่างกัน
 
 type Doc = (typeof legacy.redemptions)[number];
 const DOCS: readonly Doc[] = legacy.redemptions;
@@ -391,6 +394,48 @@ describe("ความละเอียดกลางทางเท่าก�
       vat: "1.31",
       total: "6220.00",
     } satisfies ConsignmentQuote);
+  });
+});
+
+describe("ตรงกับ Django ทุกแถวของ oracle (django-parity.json — ผลจาก Django interest.py เอง)", () => {
+  // แถว: "tag principal contractDate redeemDate interestRate feeRate vatRate | months days daysInMonth interest fee
+  // gross vatBase vat total" · tag บอกว่าแถวนั้นจับการเบี่ยงจาก Django แบบไหน (คำอธิบายอยู่ที่ tags ในไฟล์)
+  const ROW =
+    /^([a-z0-9-]+) (\S+) (\S+) (\S+) (\S+) (\S+) (\S+) \| (\d+) (\d+) (\d+) (\S+) (\S+) (\S+) (\S+) (\S+) (\S+)$/;
+  const rows = djangoParity.rows.map((line) => {
+    const f = ROW.exec(line)?.slice(1);
+    if (f?.length !== 16) throw new Error(`django-parity.json: แถวผิดรูป "${line}"`);
+    const at = (i: number): string => f[i] ?? "";
+    const input: ConsignmentQuoteInput = {
+      principal: at(1),
+      contractDate: at(2),
+      redeemDate: at(3),
+      interestRate: at(4),
+      feeRate: at(5),
+      vatRate: at(6),
+    };
+    const expected: ConsignmentQuote = {
+      months: Number.parseInt(at(7), 10),
+      days: Number.parseInt(at(8), 10),
+      daysInMonth: Number.parseInt(at(9), 10),
+      interest: at(10),
+      fee: at(11),
+      gross: at(12),
+      vatBase: at(13),
+      vat: at(14),
+      total: at(15),
+    };
+    return { tag: at(0), label: `${at(0)} ${at(1)} ${at(2)} → ${at(3)}`, input, expected };
+  });
+
+  it("ทุกแท็กที่อธิบายไว้มีแถว และทุกแถวใช้แท็กที่อธิบายไว้", () => {
+    const tags = Object.keys(djangoParity.tags).sort();
+    expect([...new Set(rows.map((r) => r.tag))].sort()).toEqual(tags);
+    expect(tags).toEqual(["below-exact", "general", "one-division", "rate-times-factor", "vs-20-digits"]);
+  });
+
+  it.each(rows.map((r) => [r.label, r] as const))("%s", (_, r) => {
+    expect(quote(r.input)).toEqual(r.expected);
   });
 });
 
