@@ -3,7 +3,7 @@
   "note": "อินพุตสมมติทั้งหมด ไม่ใช่ข้อมูลลูกค้า · เงินแสดง 2 ตำแหน่งแบบ fmtMoney (ค่าเท่ากับ Django ทุกตัว)",
   "columns": "tag principal contractDate redeemDate interestRate feeRate vatRate | months days daysInMonth interest fee gross vatBase vat total",
   "tags": {
-    "below-exact": "Django ต่ำกว่าการปัดครึ่งขึ้นของค่าแม่นยำ 1 บาท (ค่าจริงลงที่ .5 พอดี) — ยึด Django ตามการตัดสินใจของเจ้าของ 4 ต.ค. 2569",
+    "below-exact": "Django ต่ำกว่าการปัดครึ่งขึ้นของค่าแม่นยำ 1 บาท (ค่าจริงลงที่ .5 พอดี) — ชั่วคราว: ยึด Django ระหว่างรอหัวหน้ายืนยัน (ถ้าระบบเดิมพิมพ์ 8 ในกรณีครึ่งบาทพอดี ให้เปลี่ยนเป็นปัดครึ่งขึ้นและปรับเทสต์ที่ปักกรณี 1,800 และ 6,200)",
     "vs-20-digits": "decimal.js ค่าตั้งต้น (20 หลัก HALF_UP) ได้ผลต่างจาก Django",
     "one-division": "ถ้าคิด factor เป็น (เดือน × วันในเดือน + วัน) / วันในเดือน (หารครั้งเดียว) จะต่างจาก Django",
     "rate-times-factor": "ถ้าคูณ อัตรา × factor ก่อนคูณเงินต้น จะต่างจาก Django",
