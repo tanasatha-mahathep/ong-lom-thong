@@ -16,3 +16,8 @@
 # After ignoreUntil osv-scanner stops honouring the entry, so the finding comes back by itself and must
 # be triaged again. sca.sh rejects entries without a reason or expiry, expiries further than 90 days
 # ahead, and [[PackageOverrides]] without reason/effectiveUntil. One key per line; reason on one line.
+
+[[IgnoredVulns]]
+id = "GHSA-vfj7-8cjw-p6xm"
+ignoreUntil = 2026-11-02T00:00:00Z
+reason = "braces@3.0.3 (CVE-2026-93687, stack exhaustion via deeply nested patterns) comes only through semantic-release (devDependency, release tooling) via micromatch; not in the runtime image; no fixed version exists yet. Decided by repo owner 2026-10-03 in chat. Advisory: https://github.com/advisories/GHSA-vfj7-8cjw-p6xm"

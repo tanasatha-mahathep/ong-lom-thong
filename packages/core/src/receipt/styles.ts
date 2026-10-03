@@ -1,12 +1,22 @@
 /**
  * CSS ของใบพิมพ์ — ขนาดทั้งหมดขยาย √2 จากต้นฉบับ A5 (Django print/buy_receipt.html ที่เทียบใบจริง RC6909-0010)
- * ให้สัดส่วนบน A4 ตั้งเท่าเดิม · ทุก selector อยู่ใต้ .ong-receipt / .ong-idcard จึงไม่ชนกับ CSS ของเว็บ
- * @page อยู่ในนี้ด้วย เพื่อให้ window.print() ของหน้าเว็บได้ A4 ตั้งเหมือน PDF
+ * ให้สัดส่วนบน A4 ตั้งเท่าเดิม (ใบรับซื้อพิมพ์ A5 ด้วยการย่อ 1/√2 ตอนพิมพ์) · ทุก selector อยู่ใต้ .ong-receipt / .ong-idcard จึงไม่ชนกับ CSS ของเว็บ
+ * @page อยู่ในนี้ด้วย เพื่อให้ window.print() ของหน้าเว็บได้ A5 ตั้งเหมือน PDF
  */
 
 const FONT_STACK = `"Sarabun", "TH Sarabun New", "THSarabunPSK", "Garuda", "Kinnari", sans-serif`;
 
 const PAGE = `@page { size: A4 portrait; margin: 12mm 14mm; }`;
+
+/**
+ * ใบรับซื้อพิมพ์บน A5 แนวตั้ง (ใบใหม่ทุกใบตั้งแต่ 3 ต.ค. 2569 · PDF ที่เก็บไว้แล้วไม่แก้)
+ * ตอนพิมพ์ย่อเนื้อหา 1/√2 จากขนาด A4 ที่ออกแบบไว้ (ต้นฉบับ A5 จริง) · จอยังแสดงขนาดเดิม (กว้างไม่เกิน 190 mm)
+ */
+const PAGE_A5 = `@page { size: A5 portrait; margin: 8.5mm 10mm; }`;
+/** 1/√2 ของขนาดบนจอ · กว้าง 181 mm × 0.70711 = 128 mm = ความกว้างเนื้อหาของ A5 (148 − 2 × 10) */
+const PRINT_SCALE_A5 = `@media print { .ong-receipt { zoom: 0.70711; width: 181mm; max-width: none; } }
+/* จอ: กรอบตัวอย่างสูงอย่างน้อยตามสัดส่วน A5 (148 × 210) ที่ความกว้างเต็ม 190 mm · เนื้อหายาวกว่านั้นก็ขยายตาม */
+@media screen { .ong-receipt { min-height: 269mm; } }`;
 
 /** ลายน้ำระบบทดสอบ — ทับทั้งเอกสารแนวทแยง จางพอให้อ่านข้อมูลได้ แต่ถ่ายเอกสารก็ยังเห็น */
 const WATERMARK = `.ong-watermark { position: absolute; inset: 0; z-index: 3; display: flex; align-items: center;
@@ -16,7 +26,8 @@ const WATERMARK = `.ong-watermark { position: absolute; inset: 0; z-index: 3; di
 /* พิมพ์: fixed = ซ้ำทุกหน้า (ใบยาวเกินหนึ่งหน้าก็ยังมีลายน้ำทุกแผ่น) */
 @media print { .ong-watermark { position: fixed; } }`;
 
-export const RECEIPT_CSS = `${PAGE}
+export const RECEIPT_CSS = `${PAGE_A5}
+${PRINT_SCALE_A5}
 ${WATERMARK}
 .ong-receipt { position: relative; box-sizing: border-box; width: 100%; max-width: 190mm; margin: 0 auto;
   background: #fff; color: #000; font-family: ${FONT_STACK}; font-size: 13.5px; font-weight: 400; line-height: 1.45;

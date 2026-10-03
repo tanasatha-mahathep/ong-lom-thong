@@ -39,14 +39,21 @@ function rc6909(over: Partial<ReceiptData> = {}): ReceiptData {
 
 const count = (haystack: string, needle: string) => haystack.split(needle).length - 1;
 
-describe("renderReceiptHtml — ใบรับซื้อของเก่า/ใบสำคัญจ่าย A4", () => {
-  it("เป็นเอกสาร HTML เต็ม A4 ตั้ง ภาษาไทย", () => {
+describe("renderReceiptHtml — ใบรับซื้อของเก่า/ใบสำคัญจ่าย A5", () => {
+  it("เป็นเอกสาร HTML เต็ม A5 ตั้ง ภาษาไทย", () => {
     const html = renderReceiptHtml(rc6909());
     expect(html.startsWith("<!DOCTYPE html>")).toBe(true);
     expect(html).toContain('<html lang="th">');
     expect(html).toContain('<meta charset="utf-8">');
-    expect(html).toContain("@page { size: A4 portrait;");
+    expect(html).toContain("@page { size: A5 portrait; margin: 8.5mm 10mm; }");
     expect(html).toContain("<title>ใบรับซื้อของเก่า RC6909-0010</title>");
+  });
+
+  it("ตอนพิมพ์ย่อใบ 1/√2 ให้เต็มความกว้าง A5 (จอไม่เปลี่ยน)", () => {
+    const html = renderReceiptHtml(rc6909());
+    expect(html).toContain("@media print { .ong-receipt { zoom: 0.70711; width: 181mm; max-width: none; } }");
+    // ส่วนจอยังคงกว้างสูงสุด 190 mm เหมือนเดิม
+    expect(html).toContain("max-width: 190mm;");
   });
 
   it("มีทุกช่วงของใบจริง RC6909-0010 (เช็กลิสต์จาก Django test_buy_receipt)", () => {

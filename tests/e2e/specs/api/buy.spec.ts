@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { APIRequestContext } from "@playwright/test";
 import { expect, test } from "../../lib/fixtures";
 import { FOREIGN_ORIGIN, expectApiError, expectFieldError } from "../../lib/http";
-import { A4_PT, fontProblems, inspect } from "../../lib/pdf";
+import { A4_PT, A5_PT, fontProblems, inspect } from "../../lib/pdf";
 import { PNG_1X1, syntheticNationalId, thaiName } from "../../lib/synthetic";
 
 interface Metal {
@@ -331,8 +331,18 @@ const printed = (value: string) => {
   return `${whole.replace(/\B(?=(\d{3})+$)/g, ",")}${fraction === undefined ? "" : `.${fraction}`}`;
 };
 
-/** GET a stored file: private (no-store · nosniff · inline) and a well-formed A4 PDF embedding only Sarabun */
-async function downloadPdf(client: APIRequestContext, path: string, filename: string) {
+/** ใบรับซื้อ = A5 แนวตั้ง (ใบใหม่ตั้งแต่ 3 ต.ค. 2569) · Chromium ปัดขนาดหน้าเป็นพิกเซล จึงยอมให้ต่างจาก ISO ได้ 1 pt */
+const RECEIPT_PAPER = { name: "A5", ...A5_PT, tolerance: 1 } as const;
+/** สำเนาบัตรยังเป็น A4 แยกไฟล์ */
+const ID_CARD_PAPER = { name: "A4", ...A4_PT, tolerance: 0.5 } as const;
+
+/** GET a stored file: private (no-store · nosniff · inline) and a well-formed PDF of the given paper, embedding only Sarabun */
+async function downloadPdf(
+  client: APIRequestContext,
+  path: string,
+  filename: string,
+  paper: { name: string; width: number; height: number; tolerance: number },
+) {
   const res = await client.get(path);
   expect(res.status(), `${path} → ${(await res.body()).toString("utf8", 0, 200)}`).toBe(200);
   expect(res.headers()).toMatchObject({
@@ -346,8 +356,8 @@ async function downloadPdf(client: APIRequestContext, path: string, filename: st
   expect(pdf.header).toMatch(/^%PDF-/);
   expect(pdf.eofTail).not.toBeNull();
   for (const box of pdf.mediaBoxes) {
-    expect(Math.abs(box.width - A4_PT.width), "A4 width (ISO 216)").toBeLessThanOrEqual(0.5);
-    expect(Math.abs(box.height - A4_PT.height), "A4 height (ISO 216)").toBeLessThanOrEqual(0.5);
+    expect(Math.abs(box.width - paper.width), `${paper.name} width (ISO 216)`).toBeLessThanOrEqual(paper.tolerance);
+    expect(Math.abs(box.height - paper.height), `${paper.name} height (ISO 216)`).toBeLessThanOrEqual(paper.tolerance);
   }
   expect(fontProblems(pdf.fonts), "Sarabun only, embedded").toEqual([]);
   return { bytes, pdf, text: pdf.text.join("\n") };
@@ -357,7 +367,7 @@ async function downloadPdf(client: APIRequestContext, path: string, filename: st
 const WATERMARK = "ตัวอย่าง — ระบบทดสอบ ไม่ใช่ใบรับซื้อจริง";
 
 test.describe("receipt PDF — archived, private, immutable (R15 · rule 5 · R13 · spec §9.2)", () => {
-  test("a saved bill gets its A4 receipt and ID card copy in the bucket, served only through the api", async ({
+  test("a saved bill gets its A5 receipt and A4 ID card copy in the bucket, served only through the api", async ({
     signedIn,
     anonymous,
   }) => {
@@ -384,8 +394,8 @@ test.describe("receipt PDF — archived, private, immutable (R15 · rule 5 · R1
     expect(detailText).not.toMatch(/https?:\/\/|receipts\/|idcards\/|X-Amz-/);
     expect(detailText).not.toContain(nationalId);
 
-    const receipt = await test.step("the receipt: A4, Thai, the api's numbers as printed", async () => {
-      const file = await downloadPdf(staff, `/api/buy/${id}/pdf`, `${doc_no}.pdf`);
+    const receipt = await test.step("the receipt: A5, Thai, the api's numbers as printed", async () => {
+      const file = await downloadPdf(staff, `/api/buy/${id}/pdf`, `${doc_no}.pdf`, RECEIPT_PAPER);
       expect(file.pdf.pageCount).toBe(1);
       const expected = [
         "ใบรับซื้อของเก่า/ใบสำคัญจ่าย",
@@ -420,7 +430,7 @@ test.describe("receipt PDF — archived, private, immutable (R15 · rule 5 · R1
 
     await test.step("the ID card copy is a separate file only accounting and admin open (rule 5)", async () => {
       await expectApiError(await staff.get(`/api/buy/${id}/idcard`), 403);
-      const copy = await downloadPdf(accounting, `/api/buy/${id}/idcard`, `${doc_no}_idcard.pdf`);
+      const copy = await downloadPdf(accounting, `/api/buy/${id}/idcard`, `${doc_no}_idcard.pdf`, ID_CARD_PAPER);
       expect(Buffer.compare(copy.bytes, receipt.bytes)).not.toBe(0);
       expect(copy.text).toContain(doc_no);
       expect(copy.text).toContain(WATERMARK);
@@ -435,7 +445,7 @@ test.describe("receipt PDF — archived, private, immutable (R15 · rule 5 · R1
       await staff.post("/api/buy", { data: { ...body, idempotency_key: idempotencyKey() } })
     ).json()) as Saved;
     expect(await settled(staff, saved.id, "pdf_status")).toBe("ready");
-    const original = await downloadPdf(staff, `/api/buy/${saved.id}/pdf`, `${saved.doc_no}.pdf`);
+    const original = await downloadPdf(staff, `/api/buy/${saved.id}/pdf`, `${saved.doc_no}.pdf`, RECEIPT_PAPER);
 
     const reason = "ทดสอบ e2e ยกเลิกบิล";
     await test.step("only a manager or admin cancels, with a reason", async () => {
@@ -450,7 +460,7 @@ test.describe("receipt PDF — archived, private, immutable (R15 · rule 5 · R1
     expect(await settled(staff, saved.id, "void_pdf_status")).toBe("ready");
 
     await test.step("the bill now opens as a new, stamped file", async () => {
-      const stamped = await downloadPdf(staff, `/api/buy/${saved.id}/pdf`, `${saved.doc_no}_void.pdf`);
+      const stamped = await downloadPdf(staff, `/api/buy/${saved.id}/pdf`, `${saved.doc_no}_void.pdf`, RECEIPT_PAPER);
       expect(Buffer.compare(stamped.bytes, original.bytes)).not.toBe(0);
       for (const text of ["ยกเลิก", `ใบรับซื้อฉบับนี้ถูกยกเลิก · เหตุผล: ${reason}`, saved.doc_no]) {
         expect(stamped.text, text).toContain(text);
@@ -460,7 +470,12 @@ test.describe("receipt PDF — archived, private, immutable (R15 · rule 5 · R1
     });
 
     await test.step("the original is still there, unchanged — never deleted or overwritten", async () => {
-      const kept = await downloadPdf(staff, `/api/buy/${saved.id}/pdf?version=original`, `${saved.doc_no}.pdf`);
+      const kept = await downloadPdf(
+        staff,
+        `/api/buy/${saved.id}/pdf?version=original`,
+        `${saved.doc_no}.pdf`,
+        RECEIPT_PAPER,
+      );
       expect(Buffer.compare(kept.bytes, original.bytes)).toBe(0);
     });
 

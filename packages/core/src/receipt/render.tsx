@@ -26,7 +26,7 @@ function htmlDocument(title: string, body: string, opts: RenderHtmlOptions): str
 }
 
 /**
- * ไฟล์ HTML เต็ม (A4 ตั้ง) ของใบรับซื้อ — ส่งเข้า Gotenberg เป็น index.html
+ * ไฟล์ HTML เต็ม (A5 ตั้ง) ของใบรับซื้อ — ส่งเข้า Gotenberg เป็น index.html
  * ข้อมูลผิดทุกกรณี = ReceiptDataError (ความล้มเหลวถาวร ไม่ต้อง retry): ยอดไม่ตรง · วันที่ · ตัวเลข ·
  * ไม่มี/ผิดรูป tax_branch_code (PDF เท่านั้นที่บังคับต้องมี — เอกสารถาวรห้ามไม่มีป้ายสาขา)
  */
