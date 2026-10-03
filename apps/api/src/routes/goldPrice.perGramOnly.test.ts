@@ -352,6 +352,50 @@ describe.skipIf(!available)(
       expect(await writes()).toEqual(before);
     });
 
+    it("ไม่ได้ตั้งราคาทอง + ช่องที่ไม่รู้จัก (สะกดผิด · ค่าทอง · branch_id · ช่องของระบบ) → 400 ชี้ชื่อช่องนั้น แม้มีราคาเงินมาด้วยและมีราคากลางแล้ว · ราคากลางและ audit ไม่เปลี่ยน (API3)", async () => {
+      await onRejectedDay();
+      const before = await writes();
+      const unknownField = (...keys: string[]) => ({ error: `ไม่รู้จักช่อง ${keys.join(", ")}`, field: keys[0] ?? "" });
+      const cases: [Record<string, unknown>, { error: string; field: string }][] = [
+        // ก่อน bar_sell จะไม่บังคับ body เหล่านี้ได้ 400 เพราะขาด bar_sell — ต้องไม่กลายเป็น 200 ที่บันทึกแค่ราคาเงิน
+        [{ barSell: "68000", silver_per_g: "45.10" }, unknownField("barSell")],
+        [{ bar_sel: "68000", silver_per_g: "45.10" }, unknownField("bar_sel")],
+        [{ bar_buy: "1.00", jewelry_buy: "1", silver_per_g: "45.10" }, unknownField("bar_buy", "jewelry_buy")],
+        // ราคาต่อกรัมตั้งได้ที่ราคากลางเท่านั้น — ใส่ branch_id มาต้องไม่ไปเปลี่ยนราคาเงินของทุกสาขา
+        [{ branch_id: bid("00001"), silver_per_g: "30.00" }, unknownField("branch_id")],
+        [{ bar_sell: null, barSell: "68000", platinum_per_g: "1000" }, unknownField("barSell")],
+        [{ bar_sell: "", diff: "0", silver_per_g: "45.10", confirm_typo: true }, unknownField("diff")],
+        [{ barSell: "68000" }, unknownField("barSell")],
+        // ช่องเกินข้างใน from_reference ยังชี้ from_reference (ไม่ใช่ชื่อช่องข้างใน)
+        [
+          { silver_per_g: "45.10", from_reference: { ...PREFILL, bar_sell: "1" } },
+          { error: "from_reference ต้องมี announced_at และ round ของประกาศ", field: "from_reference" },
+        ],
+        [
+          { silver_per_g: "45.10", set_by: uid("admin"), date: "2026-01-01", source: "branch" },
+          unknownField("set_by", "date", "source"),
+        ],
+      ];
+      for (const who of ["manager", "admin", "mgr1"]) {
+        for (const [body, expected] of cases) {
+          const where = `PUT โดย ${who} ${JSON.stringify(body)}`;
+          expect(await expectApiError(await put(who, body), 400, where), where).toEqual(expected);
+        }
+      }
+      expect(await writes()).toEqual(before);
+      expect(await centralRow(DAY.rejected)).toMatchObject({
+        ...dbGold(GOLD.g67850),
+        silverPerG: "45.00",
+        platinumPerG: "1000.00",
+      });
+
+      // วันที่ยังไม่มีราคากลาง: ช่องที่สะกดผิดถูกชี้ก่อน "กรอกราคาทองก่อน" (บอกให้แก้ชื่อช่อง ไม่ใช่ให้กรอกซ้ำ)
+      onDay(DAY.noCentral);
+      const typo = await put("manager", { barSell: "68000", silver_per_g: "45.10" });
+      expect(await expectApiError(typo, 400, "ไม่มีราคากลาง + สะกดผิด")).toEqual(unknownField("barSell"));
+      expect(await writes()).toEqual(before);
+    });
+
     it("ราคาต่อกรัมผิดรูป (มีราคากลางแล้ว) → 400 ชี้ช่องนั้น ข้อความเดียวกับตอนส่ง bar_sell · ตัวเลข JSON = 400 (กฎ 1) · ไม่เขียนอะไร", async () => {
       await onRejectedDay();
       const before = await writes();
