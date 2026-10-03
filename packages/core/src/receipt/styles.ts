@@ -1,12 +1,19 @@
 /**
  * CSS ของใบพิมพ์ — ขนาดทั้งหมดขยาย √2 จากต้นฉบับ A5 (Django print/buy_receipt.html ที่เทียบใบจริง RC6909-0010)
- * ให้สัดส่วนบน A4 ตั้งเท่าเดิม · ทุก selector อยู่ใต้ .ong-receipt / .ong-idcard จึงไม่ชนกับ CSS ของเว็บ
- * @page อยู่ในนี้ด้วย เพื่อให้ window.print() ของหน้าเว็บได้ A4 ตั้งเหมือน PDF
+ * ให้สัดส่วนบน A4 ตั้งเท่าเดิม (ใบรับซื้อพิมพ์ A3 ด้วยการขยาย √2 ตอนพิมพ์) · ทุก selector อยู่ใต้ .ong-receipt / .ong-idcard จึงไม่ชนกับ CSS ของเว็บ
+ * @page อยู่ในนี้ด้วย เพื่อให้ window.print() ของหน้าเว็บได้ A3 ตั้งเหมือน PDF
  */
 
 const FONT_STACK = `"Sarabun", "TH Sarabun New", "THSarabunPSK", "Garuda", "Kinnari", sans-serif`;
 
 const PAGE = `@page { size: A4 portrait; margin: 12mm 14mm; }`;
+
+/**
+ * ใบรับซื้อพิมพ์บน A3 (ใบใหม่ทุกใบตั้งแต่ 3 ต.ค. 2569 · PDF ที่เก็บไว้แล้วไม่แก้) — ขยาย √2 จาก A4 ทั้งหน้าและเนื้อหา
+ * ตอนพิมพ์เท่านั้น: จอยังแสดงขนาดเดิม (กว้างไม่เกิน 190 mm) ไม่ต้องเลื่อนแนวนอนบนมือถือ
+ */
+const PAGE_A3 = `@page { size: A3 portrait; margin: 17mm 20mm; }`;
+const PRINT_SCALE_A3 = `@media print { .ong-receipt { zoom: 1.41421; width: 181.7mm; max-width: none; } }`;
 
 /** ลายน้ำระบบทดสอบ — ทับทั้งเอกสารแนวทแยง จางพอให้อ่านข้อมูลได้ แต่ถ่ายเอกสารก็ยังเห็น */
 const WATERMARK = `.ong-watermark { position: absolute; inset: 0; z-index: 3; display: flex; align-items: center;
@@ -16,7 +23,8 @@ const WATERMARK = `.ong-watermark { position: absolute; inset: 0; z-index: 3; di
 /* พิมพ์: fixed = ซ้ำทุกหน้า (ใบยาวเกินหนึ่งหน้าก็ยังมีลายน้ำทุกแผ่น) */
 @media print { .ong-watermark { position: fixed; } }`;
 
-export const RECEIPT_CSS = `${PAGE}
+export const RECEIPT_CSS = `${PAGE_A3}
+${PRINT_SCALE_A3}
 ${WATERMARK}
 .ong-receipt { position: relative; box-sizing: border-box; width: 100%; max-width: 190mm; margin: 0 auto;
   background: #fff; color: #000; font-family: ${FONT_STACK}; font-size: 13.5px; font-weight: 400; line-height: 1.45;
