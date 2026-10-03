@@ -107,7 +107,7 @@ function BillView({ bill, autoPrint }: { bill: Bill; autoPrint: boolean }) {
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-4">
       <PageHeader
         back="/bills"
         description={
@@ -147,15 +147,16 @@ function BillView({ bill, autoPrint }: { bill: Bill; autoPrint: boolean }) {
         })}
       </p>
 
-      {/* ตัวอย่างใบ (แนวตั้ง A5) ซ้าย · ปุ่มพิมพ์/PDF/ยกเลิก/สถานะ ขวาบนจอกว้าง · บนมือถือปุ่มขึ้นก่อน */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem] lg:items-start">
-        <div className="order-first lg:order-none lg:sticky lg:top-4">
+      {/* บนจอกว้าง: ใบ A5 แนวตั้งซ้าย · ปุ่มพิมพ์/PDF/ยกเลิก/สถานะขวา กว้างเท่ากัน · บนมือถือปุ่มขึ้นก่อน */}
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+        <div className="order-first lg:order-last lg:sticky lg:top-4">
           <BillActions bill={bill} role={me.role} />
         </div>
 
+        {/* กรอบเป็นสัดส่วน A5 แนวตั้งเสมอ · เนื้อหาที่ยาวกว่ากรอบเลื่อนดูในกรอบ */}
         <section
           aria-label={t("bill.receiptLabel")}
-          className="theme-light overflow-x-auto rounded-xl border bg-card p-4 md:p-8"
+          className="theme-light aspect-[148/210] overflow-auto rounded-xl border bg-card p-4 md:p-6"
         >
           <ReceiptErrorBoundary
             fallback={receiptError}
