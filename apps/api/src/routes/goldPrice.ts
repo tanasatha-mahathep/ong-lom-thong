@@ -58,17 +58,15 @@ const SetBody = z.object({
     .optional(),
 });
 /**
- * PUT /today (ราคากลาง) — bar_sell ไม่บังคับ: ไม่ส่ง · null · "" หรือช่องว่างล้วน (แบบเดียวกับราคาต่อกรัม) = ไม่ตั้งราคาทอง
+ * PUT /today (ราคากลางของทุกสาขา) — ด่านเดียวของ body ทุกคำขอ ทั้งที่ส่งและไม่ส่ง bar_sell (spec §5)
+ * รับเฉพาะช่องของ SetBody (bar_sell · silver_per_g · platinum_per_g · confirm_typo · from_reference) — strict:
+ * ช่องสะกดผิด (barSell) · ค่าที่เซิร์ฟเวอร์ derive เอง (bar_buy · jewelry_buy) · branch_id (PUT นี้เปลี่ยนราคาของทุกสาขา) ·
+ * ช่องของระบบ (diff · date · set_by · source) = 400 ชี้ชื่อช่อง ไม่บันทึกอะไร — ไม่ตัดทิ้งเงียบ ๆ แล้วตอบ 200 (API3 · ASVS V5.1.2)
+ * bar_sell ไม่บังคับ: ไม่ส่ง · null · "" หรือช่องว่างล้วน (แบบเดียวกับราคาต่อกรัม) = ไม่ตั้งราคาทอง
  * → บันทึกแค่ราคาต่อกรัมที่ส่งมา ค่าทองของแถวราคากลางคงเดิม · ตัวเลข JSON ยังเป็น 400 (กฎ 1)
- * ราคาเฉพาะสาขา (PUT /today/branches/:id) ยังใช้ SetBody — บังคับ bar_sell เหมือนเดิม
+ * ราคาเฉพาะสาขา (PUT /today/branches/:id) ยังใช้ SetBody — บังคับ bar_sell และไม่ strict เหมือนเดิม
  */
-const CentralSetBody = SetBody.extend({ bar_sell: z.string().nullable().optional() });
-/**
- * PUT /today ที่ไม่ได้ตั้งราคาทอง — รับเฉพาะช่องที่รู้จัก: ช่องสะกดผิด (barSell) · ค่าทองที่ตั้งเองไม่ได้ (bar_buy) ·
- * branch_id (ราคาต่อกรัมตั้งได้ที่ราคากลางเท่านั้น) = 400 ชี้ชื่อช่อง ไม่ตัดทิ้งเงียบ ๆ แล้วบันทึกแค่ราคาต่อกรัม
- * (ก่อน bar_sell จะไม่บังคับ body แบบนี้ได้ 400 เพราะขาด bar_sell) · คำขอที่ส่ง bar_sell ยังตัดช่องเกินทิ้งเหมือนเดิม
- */
-const PerGramOnlyBody = CentralSetBody.strict();
+const CentralSetBody = SetBody.extend({ bar_sell: z.string().nullable().optional() }).strict();
 
 /** ?days= จำนวนวันย้อนหลัง (นับวันนี้ด้วย) — ตัวเลขล้วน 1–366 · ไม่ส่ง = 90 · รูปอื่นทั้งหมด (0 · ติดลบ · ทศนิยม · ว่าง) = 400 */
 const HistoryQuery = z.object({
@@ -105,7 +103,8 @@ const branchPerGramError = (body: { silver_per_g?: unknown; platinum_per_g?: unk
  */
 const setBodyError = (e: z.ZodError) => {
   const issue = e.issues[0];
-  // ช่องระดับบนสุดที่ไม่รู้จัก (PerGramOnlyBody) — ชี้ชื่อช่องนั้น แบบเดียวกับ routes/admin.ts
+  // ช่องระดับบนสุดที่ไม่รู้จัก (CentralSetBody) — ชี้ช่องแรกที่ไม่รู้จัก แบบเดียวกับ routes/admin.ts
+  // zod ตรวจช่องที่รู้จักก่อนช่องเกิน — body ที่ผิดทั้งสองแบบชี้ช่องที่รู้จักแต่ค่าผิดก่อน
   // ช่องเกินข้างใน from_reference (path = ["from_reference"]) ยังชี้ from_reference ตามเดิม
   if (issue?.code === "unrecognized_keys" && issue.path.length === 0) {
     return apiError(`ไม่รู้จักช่อง ${issue.keys.join(", ")}`, issue.keys[0]);
@@ -268,16 +267,14 @@ export const goldPriceRoutes = new Hono<AppEnv>()
     }
   })
   // ตั้งราคากลางของวัน — manager/admin (spec §10) · ห่างเกินเกณฑ์ต้องยืนยัน (409 ชี้ confirm_typo)
+  // role ตัดสินก่อนอ่าน body (role อื่น = 403 เสมอ) · ช่องที่ไม่รู้จัก = 400 ทุกคำขอ (CentralSetBody strict)
   // ไม่ส่ง bar_sell = แก้แค่ราคาเงิน/แพลตตินั่มของราคากลางที่มีแล้ว ค่าทองคงเดิม (quoteGoldPrice ตัวเดียวกัน ข้ามส่วนทอง)
   .put("/today", requireRole("manager", "admin"), async (c) => {
-    const raw: unknown = await c.req.json().catch(() => null);
-    const body = CentralSetBody.safeParse(raw);
+    const body = CentralSetBody.safeParse(await c.req.json().catch(() => null));
     if (!body.success) return c.json(setBodyError(body.error), 400);
     const date = businessDate(c.var.now());
     const barSell = barSellOf(body.data.bar_sell);
     if (barSell === null) {
-      const known = PerGramOnlyBody.safeParse(raw);
-      if (!known.success) return c.json(setBodyError(known.error), 400);
       const refused = await keepGoldRefusal(c, body.data, date);
       if (refused) return c.json(refused, 400);
     }
