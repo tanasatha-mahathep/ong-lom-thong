@@ -15,6 +15,11 @@ COPY packages/db/package.json packages/db/
 RUN pnpm install --frozen-lockfile
 
 COPY . .
+# Sentry ของเบราว์เซอร์: ใช้ค่า SENTRY_DSN ของ service (Railway ส่งเป็น build arg เมื่อประกาศ ARG) · ฝังลง bundle ตอน build เท่านั้น
+# ไม่อยู่ใน stage runtime · ไม่ตั้ง = ไม่ส่ง error จากเบราว์เซอร์
+ARG SENTRY_DSN
+ARG SENTRY_ENVIRONMENT
+ENV VITE_SENTRY_DSN=$SENTRY_DSN VITE_SENTRY_ENVIRONMENT=$SENTRY_ENVIRONMENT
 RUN pnpm --filter @ong/web build && pnpm --filter @ong/api build
 RUN pnpm --filter @ong/api deploy --prod --legacy /out
 
