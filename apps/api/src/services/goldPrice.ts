@@ -31,16 +31,23 @@ const PER_GRAM = [
   { key: "platinumPerG", field: "platinum_per_g", name: "แพลตตินั่ม" },
 ] as const;
 
-export interface GoldQuote {
-  barSell: string;
-  barBuy: string;
-  jewelryBuy: string;
+/** ส่วนราคาต่อกรัมของ quote — ทั้งหมดของผลเมื่อไม่ได้ตั้งราคาทอง (quoteGoldPrice ที่ barSellInput = null) */
+export interface PerGramQuote {
   /** ราคาต่อกรัมรูปมาตรฐาน 2 ตำแหน่ง — undefined = ไม่ได้ส่งมา (คงค่าเดิม) */
   silverPerG?: string | null;
   platinumPerG?: string | null;
   /** ด่านกันพิมพ์ผิด — ห่างจากราคาครั้งก่อน (ราคากลาง หรือราคาที่สาขาใช้จริง) เกินเกณฑ์ · หลายราคาต่อด้วย " · " */
   warning: string | null;
 }
+
+export interface GoldQuote extends PerGramQuote {
+  barSell: string;
+  barBuy: string;
+  jewelryBuy: string;
+}
+
+/** quote ที่ตั้งราคาทองด้วย — อีกแบบคือแก้แค่ราคาต่อกรัม (ค่าทองของแถวคงเดิม) */
+export const isGoldQuote = (quote: GoldQuote | PerGramQuote): quote is GoldQuote => "barSell" in quote;
 
 /** numeric จาก DB มาเป็น string เสมอ (postgres.js) — เข้า decimal.js ตรง ๆ ไม่ผ่าน float */
 export type GoldSettingRow = { [K in keyof GoldPriceSetting]: string };
@@ -55,6 +62,12 @@ export const MAX_BAR_SELL = "999999.99";
 
 /** เพดานราคาต่อกรัม — เงิน ~40 · แพลตตินั่ม ~1,000 บาท/กรัม เผื่อไว้มาก แต่กันเลขหลุดช่องไม่ให้ล้น numeric(14,2) */
 export const MAX_PER_G = "99999.99";
+
+/**
+ * PUT /today ที่ไม่ส่งราคาทองแต่วันนี้ยังไม่มีราคากลาง — ราคาต่อกรัมอยู่ในแถวราคากลาง ซึ่งเกิดได้จากการตั้งราคาทองเท่านั้น
+ * (bar_sell · bar_buy · jewelry_buy เป็น NOT NULL และห้ามแต่งค่าทองขึ้นเอง) → 400 ชี้ bar_sell
+ */
+export const GOLD_PRICE_FIRST = "ต้องกรอกราคาทองแท่งขายออกของวันนี้ก่อน แล้วจึงบันทึกราคาเงิน/แพลตตินั่มอย่างเดียวได้";
 
 export async function loadGoldSetting(db: Db): Promise<GoldSettingRow> {
   const [s] = await db.select().from(goldPriceSetting).where(eq(goldPriceSetting.id, 1)).limit(1);
@@ -101,35 +114,57 @@ function perGramPrice(input: string | null | undefined, field: GoldPriceField, n
   return v;
 }
 
+/** ทองแท่งขายออกที่พิมพ์มา → Decimal ที่ผ่านด่านรูปแบบ/เพดาน/ทศนิยม */
+function barSellPrice(input: string) {
+  const sell = parseDecimal(input);
+  if (!sell || sell.lte(0)) throw new GoldPriceInputError("ราคาทองแท่งขายออกต้องเป็นตัวเลขมากกว่า 0");
+  if (sell.gt(MAX_BAR_SELL)) throw new GoldPriceInputError("ราคาทองสูงผิดปกติ — ตรวจตัวเลขอีกครั้ง");
+  if (sell.decimalPlaces() > 2) throw new GoldPriceInputError("ราคาทศนิยมไม่เกิน 2 ตำแหน่ง");
+  return sell;
+}
+
 /**
  * ฟังก์ชันเดียวที่ quote และการบันทึกราคา (กลาง/เฉพาะสาขา) ใช้ (R8 · CLAUDE.md กฎ 2)
  * ร้านกรอกแค่ทองแท่งขายออก → derive รับซื้อ + รูปพรรณจากค่าตั้งใน DB · ราคาต่อกรัมของเงิน/แพลตตินั่ม (ถ้าส่งมา) ตรวจรูปแล้วเก็บตรงตัว
  * branchId = null → เตือนเทียบราคากลางครั้งก่อน · มีสาขา → เทียบราคาที่สาขานั้นใช้จริงครั้งก่อน
+ * barSellInput = null → ไม่ได้ตั้งราคาทอง (PUT /today ที่แก้แค่ราคาต่อกรัม · ราคากลางเท่านั้น): ข้ามส่วนทองทั้งหมด —
+ *   ไม่ derive ไม่เตือนราคาทอง ไม่มีค่าทองในผล (PerGramQuote) · ค่าทองของแถวคงเดิมที่ setCentralPrice
  */
-export async function quoteGoldPrice(
+export function quoteGoldPrice(
   db: Db,
   barSellInput: string,
   date: string,
+  branchId?: string | null,
+  perGram?: PerGramInput,
+): Promise<GoldQuote>;
+export function quoteGoldPrice(
+  db: Db,
+  barSellInput: string | null,
+  date: string,
+  branchId: null,
+  perGram: PerGramInput,
+): Promise<GoldQuote | PerGramQuote>;
+export async function quoteGoldPrice(
+  db: Db,
+  barSellInput: string | null,
+  date: string,
   branchId: string | null = null,
   perGram: PerGramInput = {},
-): Promise<GoldQuote> {
-  const sell = parseDecimal(barSellInput);
-  if (!sell || sell.lte(0)) throw new GoldPriceInputError("ราคาทองแท่งขายออกต้องเป็นตัวเลขมากกว่า 0");
-  if (sell.gt(MAX_BAR_SELL)) throw new GoldPriceInputError("ราคาทองสูงผิดปกติ — ตรวจตัวเลขอีกครั้ง");
-  if (sell.decimalPlaces() > 2) throw new GoldPriceInputError("ราคาทศนิยมไม่เกิน 2 ตำแหน่ง");
+): Promise<GoldQuote | PerGramQuote> {
+  const sell = barSellInput === null ? null : barSellPrice(barSellInput);
   const metals = PER_GRAM.map((m) => ({ ...m, value: perGramPrice(perGram[m.key], m.field, m.name) }));
   const setting = await loadGoldSetting(db);
-  const q = deriveGoldPrice(sell, setting);
-  if (q.barBuy.lte(0)) throw new GoldPriceInputError("ราคาต่ำกว่าส่วนต่างรับซื้อ");
-  const warnings = [
-    typoWarning(await previousValue(db, date, branchId, goldPrice.barSell), q.barSell, setting.typoGuardPercent),
-  ];
-  const quote: GoldQuote = {
-    barSell: fmtMoney(q.barSell),
-    barBuy: fmtMoney(q.barBuy),
-    jewelryBuy: fmtInt(q.jewelryBuy),
-    warning: null,
-  };
+  const warnings: (string | null)[] = [];
+  let gold: Pick<GoldQuote, "barSell" | "barBuy" | "jewelryBuy"> | null = null;
+  if (sell !== null) {
+    const q = deriveGoldPrice(sell, setting);
+    if (q.barBuy.lte(0)) throw new GoldPriceInputError("ราคาต่ำกว่าส่วนต่างรับซื้อ");
+    warnings.push(
+      typoWarning(await previousValue(db, date, branchId, goldPrice.barSell), q.barSell, setting.typoGuardPercent),
+    );
+    gold = { barSell: fmtMoney(q.barSell), barBuy: fmtMoney(q.barBuy), jewelryBuy: fmtInt(q.jewelryBuy) };
+  }
+  const quote: PerGramQuote = { warning: null };
   for (const m of metals) {
     if (m.value === undefined) continue;
     quote[m.key] = m.value === null ? null : fmtMoney(m.value);
@@ -138,7 +173,7 @@ export async function quoteGoldPrice(
     warnings.push(typoWarning(previous, m.value, setting.typoGuardPercent, `ราคา${m.name}`));
   }
   quote.warning = warnings.filter((w) => w !== null).join(" · ") || null;
-  return quote;
+  return gold ? { ...gold, ...quote } : quote;
 }
 
 export interface TodayPrice {
@@ -220,14 +255,19 @@ const auditValues = (r: GoldPriceRow) => ({
   set_by: r.setBy,
 });
 
-/** ช่องที่ upsert — ราคาต่อกรัมที่ไม่ได้ส่งมา (undefined) ไม่อยู่ในชุด → แถวเดิมคงค่าเดิม · แถวใหม่ = null */
+/** ราคาต่อกรัมที่ส่งมา — ที่ไม่ได้ส่ง (undefined) ไม่อยู่ในชุด → แถวเดิมคงค่าเดิม · แถวใหม่ = null */
+const perGramValues = (quote: PerGramQuote) => ({
+  ...(quote.silverPerG === undefined ? {} : { silverPerG: quote.silverPerG }),
+  ...(quote.platinumPerG === undefined ? {} : { platinumPerG: quote.platinumPerG }),
+});
+
+/** ช่องที่ upsert — ค่าทอง + ผู้ตั้ง + ราคาต่อกรัมที่ส่งมา */
 const upsertValues = (quote: GoldQuote, userId: string) => ({
   barSell: quote.barSell,
   barBuy: quote.barBuy,
   jewelryBuy: quote.jewelryBuy,
   setBy: userId,
-  ...(quote.silverPerG === undefined ? {} : { silverPerG: quote.silverPerG }),
-  ...(quote.platinumPerG === undefined ? {} : { platinumPerG: quote.platinumPerG }),
+  ...perGramValues(quote),
 });
 
 /**
@@ -250,11 +290,17 @@ async function lockPriceRow(tx: Executor, branchId: string | null, date: string)
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
 }
 
-/** ตั้งราคากลางของวัน (upsert) + audit ในทรานแซกชันเดียว (R12) */
+/**
+ * ตั้งราคากลางของวัน + audit ในทรานแซกชันเดียว (R12)
+ * - GoldQuote: upsert ค่าทอง (+ ราคาต่อกรัมที่ส่งมา)
+ * - PerGramQuote (ไม่ได้ตั้งราคาทอง): UPDATE แถวราคากลางของวันนั้นเฉพาะผู้ตั้ง + ราคาต่อกรัมที่ส่งมา — คอลัมน์ทองไม่อยู่ใน SET
+ *   จึงคงค่าเดิมทุกตัว (ไม่คัดลอกจากแถวไหน ไม่คำนวณใหม่ · ราคาทองที่อีกคนเพิ่งบันทึกก่อนได้ล็อกก็ไม่ถูกทับ)
+ *   ยังไม่มีแถวราคากลาง = GoldPriceInputError ชี้ bar_sell (route ตรวจก่อนแล้ว — ตรวจซ้ำใต้ล็อก)
+ */
 export async function setCentralPrice(
   db: Db,
   date: string,
-  quote: GoldQuote,
+  quote: GoldQuote | PerGramQuote,
   userId: string,
   confirmedWarning: boolean,
   reference: ReferenceAudit = null,
@@ -266,12 +312,22 @@ export async function setCentralPrice(
       .from(goldPrice)
       .where(and(isNull(goldPrice.branchId), eq(goldPrice.date, date)))
       .for("update");
-    const values = upsertValues(quote, userId);
-    const [row] = await tx
-      .insert(goldPrice)
-      .values({ branchId: null, date, ...values })
-      .onConflictDoUpdate({ target: [goldPrice.branchId, goldPrice.date], set: values })
-      .returning();
+    let row: GoldPriceRow | undefined;
+    if (isGoldQuote(quote)) {
+      const values = upsertValues(quote, userId);
+      [row] = await tx
+        .insert(goldPrice)
+        .values({ branchId: null, date, ...values })
+        .onConflictDoUpdate({ target: [goldPrice.branchId, goldPrice.date], set: values })
+        .returning();
+    } else {
+      if (!before) throw new GoldPriceInputError(GOLD_PRICE_FIRST);
+      [row] = await tx
+        .update(goldPrice)
+        .set({ setBy: userId, ...perGramValues(quote) })
+        .where(eq(goldPrice.id, before.id))
+        .returning();
+    }
     if (!row) throw new Error("upsert gold_price returned nothing");
     await tx.insert(auditLog).values({
       userId,

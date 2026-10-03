@@ -138,6 +138,20 @@ export async function findCustomer(db: Db, id: string): Promise<CustomerRow | nu
   return row ?? null;
 }
 
+/**
+ * บันทึกการเปิดดูรูปลูกค้า (PDPA) — route เรียกก่อนส่งรูปทุกครั้ง · เขียนไม่ได้ = throw → ไม่ส่งรูป (แนวเดียวกับ buy.idcard_view)
+ * entity = ลูกค้า (table customer · row = id) · payload ไม่มีข้อมูลส่วนตัวและไม่เก็บ key ของรูป (เหมือน customer.create/update)
+ */
+export async function recordPhotoView(db: Db, userId: string, customerId: string): Promise<void> {
+  await db.insert(auditLog).values({
+    userId,
+    action: "customer.photo_view",
+    tableName: "customer",
+    rowId: customerId,
+    diff: { photo: "set" },
+  });
+}
+
 async function storePhoto(storage: Storage, customerId: string, file: unknown): Promise<string | null> {
   if (!(file instanceof File) || file.size === 0) return null;
   if (file.size > MAX_PHOTO_BYTES) throw new CustomerInputError("รูปใหญ่เกิน 5 MB", "photo");

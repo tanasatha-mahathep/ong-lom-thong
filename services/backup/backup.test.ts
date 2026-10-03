@@ -27,6 +27,13 @@ const TIMEOUT_SHIM = `while [[ $1 == -* ]]; do case $1 in -s | -k) shift 2 ;; *)
 secs=$1; shift
 exec perl -e 'alarm shift @ARGV; exec @ARGV or die "exec: $!\\n"' "$secs" "$@"`;
 
+/**
+ * งบของเทสต์ "ค้าง" = งบทั้งรอบ (ทุกขั้นฐานข้อมูลกับไฟล์ใช้ร่วมกัน) และ date +%s ตัดเศษวินาที
+ * → งบ 2–3 วินาทีเหลือจริงแค่ราว 1–2 วินาที ใต้โหลดสูงขั้นปกติกินงบหมดก่อนถึงคำสั่งที่ค้างจริง → เทสต์ล้มสลับกัน
+ * 10 วินาที: ขั้นปกติจบในงบ และ sleep 60 ยังถูกฆ่าราว 10 วินาที (เทสต์ยืนยันด้วย elapsed < 20 วินาที)
+ */
+const HANG_BUDGET_SECONDS = "10";
+
 /** dump รายวันเวลา 19:17 UTC (= 02:17 น. เวลาไทย) ย้อนหลังจากวันที่ให้ */
 function dailyNames(env: string, newest: Date, days: number): string[] {
   return Array.from({ length: days }, (_, i) => {
@@ -576,21 +583,21 @@ esac`,
 
   it("pg_dump ค้าง → หยุดที่เส้นตายของรอบ · ไม่อัปโหลด · copy ไฟล์ไม่เริ่ม · exit ≠ 0", () => {
     const started = Date.now();
-    const r = run({ ...baseEnv(), BACKUP_TIMEOUT_SECONDS: "2", STUB_HANG_PGDUMP: "1" });
+    const r = run({ ...baseEnv(), BACKUP_TIMEOUT_SECONDS: HANG_BUDGET_SECONDS, STUB_HANG_PGDUMP: "1" });
     expect(Date.now() - started).toBeLessThan(20_000);
     expect(r.status).not.toBe(0);
-    expect(r.stderr).toMatch(/pg_dump stopped at BACKUP_TIMEOUT_SECONDS=2/);
-    expect(r.stderr).toMatch(/BACKUP_TIMEOUT_SECONDS=2 reached — not starting rclone/);
+    expect(r.stderr).toMatch(`pg_dump stopped at BACKUP_TIMEOUT_SECONDS=${HANG_BUDGET_SECONDS}`);
+    expect(r.stderr).toMatch(`BACKUP_TIMEOUT_SECONDS=${HANG_BUDGET_SECONDS} reached — not starting rclone`);
     expect(rcloneCalls()).toEqual([]);
   }, 30_000);
 
   it("rclone ค้าง → หยุดที่เส้นตายของรอบ · database ที่สำรองแล้วยังอยู่ · exit ≠ 0", () => {
     const started = Date.now();
-    const r = run({ ...baseEnv(), BACKUP_TIMEOUT_SECONDS: "3", STUB_HANG_COPY: "1" });
+    const r = run({ ...baseEnv(), BACKUP_TIMEOUT_SECONDS: HANG_BUDGET_SECONDS, STUB_HANG_COPY: "1" });
     expect(Date.now() - started).toBeLessThan(20_000);
     expect(r.status).not.toBe(0);
     expect(r.stdout).toMatch(/database backup done/);
-    expect(r.stderr).toMatch(/rclone stopped at BACKUP_TIMEOUT_SECONDS=3/);
+    expect(r.stderr).toMatch(`rclone stopped at BACKUP_TIMEOUT_SECONDS=${HANG_BUDGET_SECONDS}`);
     expect(remoteNames().some((n) => /^staging-\d{8}T\d{6}Z\.dump$/.test(n))).toBe(true);
   }, 30_000);
 });

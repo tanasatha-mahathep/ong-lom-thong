@@ -247,6 +247,10 @@ const DAY = {
 const PRICE_SETTERS: readonly Role[] = ["manager", "admin"];
 const FORGED_COOKIE = "better-auth.session_token=forged.signature";
 const PARSE_ERROR = { error: "ต้องส่ง bar_sell เป็นข้อความตัวเลข", field: "bar_sell" };
+/** 400 ของช่องระดับบนสุดที่ไม่รู้จัก — ข้อความแบบ routes/admin.ts · field = ช่องแรกที่ไม่รู้จักตามลำดับใน body */
+const unknownField = (...keys: string[]) => ({ error: `ไม่รู้จักช่อง ${keys.join(", ")}`, field: keys[0] ?? "" });
+/** ประกาศสมาคมที่ browser เติมมา (from_reference) — ช่องที่รู้จักของ PUT /today */
+const PREFILL = { announced_at: "2026-10-04T09:31:00+07:00", round: 2 };
 const MONEY_2DP = /^\d+\.\d{2}$/;
 const WHOLE_BAHT = /^\d+$/;
 const BODY_ROUTES = [
@@ -370,12 +374,15 @@ describe.skipIf(!available)("สัญญา API ราคาทอง: สิ�
       onDay(DAY.roles);
       const before = await writes();
       // รวมถึง body ที่ตั้งแค่ราคาต่อกรัมของเงิน/แพลตตินั่ม — สิทธิ์ตั้งราคาเดียวกับราคาทอง
+      // และ body ที่มีช่องที่ไม่รู้จัก (manager/admin ได้ 400 ชี้ชื่อช่อง) — role อื่นได้ 403 เดิม ไม่ถึงด่านตรวจ body
       for (const body of [
         { bar_sell: "67850", confirm_typo: true },
         {},
         { silver_per_g: "45.50" },
         { platinum_per_g: null },
         { bar_sell: "67850", silver_per_g: "45.50", platinum_per_g: "1000.00", confirm_typo: true },
+        { bar_sell: "67850", branch_id: "00000000-0000-4000-8000-000000000000", bar_buy: "1.00" },
+        { barSell: "67850", silver_per_g: "45.50" },
       ]) {
         const res = await put(cookies[who], body);
         expect(await expectApiError(res, 403, `PUT โดย ${who} body=${JSON.stringify(body)}`)).toEqual({
@@ -538,10 +545,9 @@ describe.skipIf(!available)("สัญญา API ราคาทอง: สิ�
     expect(await (await today(cookies.staff)).json()).toEqual(CENTRAL_SEEDED);
   });
 
-  it("PUT แนบช่องที่ไม่ได้เปิดให้ตั้ง (bar_buy · jewelry_buy · diff · date · branch_id · set_by · source · id) = ถูกตัดทิ้ง (API3 · ASVS V5.1.2)", async () => {
+  it("PUT แนบช่องที่ไม่ได้เปิดให้ตั้ง (bar_buy · jewelry_buy · diff · date · branch_id · set_by · source · id) มากับ bar_sell = 400 ชี้ช่องแรกที่ไม่รู้จัก · ไม่ตัดทิ้งเงียบ ๆ · ไม่เขียนอะไร (API3 · ASVS V5.1.2)", async () => {
     onDay(DAY.massAssign);
     const before = await writes();
-    const forgedId = "00000000-0000-4000-8000-000000000000";
     const res = await put(cookies.manager, {
       bar_sell: "67850",
       bar_buy: "1.00",
@@ -551,35 +557,100 @@ describe.skipIf(!available)("สัญญา API ราคาทอง: สิ�
       branch_id: bid("00001"),
       set_by: uid("admin"),
       source: "branch",
-      id: forgedId,
+      id: "00000000-0000-4000-8000-000000000000",
     });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      date: DAY.massAssign,
-      bar_sell: "67850.00",
-      bar_buy: "67650.00",
-      jewelry_buy: "64268",
-      ...NO_PER_GRAM,
-      diff: "200.00",
-      source: "central",
-    });
-    const after = await writes();
-    const added = after.prices.filter((p) => !before.prices.some((b) => b.id === p.id));
-    expect(added).toMatchObject([
-      {
-        branchId: null,
-        date: DAY.massAssign,
-        barSell: "67850.00",
-        barBuy: "67650.00",
-        jewelryBuy: "64268.00",
-        silverPerG: null,
-        platinumPerG: null,
-        setBy: uid("manager"),
-      },
-    ]);
-    expect(added[0]?.id).not.toBe(forgedId);
-    expect(after.prices.filter((p) => p.id !== added[0]?.id)).toEqual(before.prices);
+    expect(await expectApiError(res, 400, "PUT แนบช่องที่ไม่ได้เปิดให้ตั้ง")).toEqual(
+      unknownField("bar_buy", "jewelry_buy", "diff", "date", "branch_id", "set_by", "source", "id"),
+    );
+    // ราคากลาง · ราคาเฉพาะสาขา · audit เท่าเดิมทุกแถว · ส่วนต่างรับซื้อ (ค่าตั้งของร้าน) ไม่ถูกแตะ
+    expect(await writes()).toEqual(before);
     expect(await t.db.select({ diff: goldPriceSetting.diff }).from(goldPriceSetting)).toEqual([{ diff: "200.00" }]);
+  });
+
+  it("PUT /today ที่ส่ง bar_sell มาด้วย + ช่องที่ไม่รู้จัก (branch_id · ค่าที่ derive · ช่องของระบบ · สะกดผิด · __proto__) → 400 ชี้ช่องแรกที่ไม่รู้จัก ทั้ง manager และ admin · ราคากลาง ราคาสาขา audit ไม่เปลี่ยน · คำขอปกติยัง 200 (API3 · ASVS V5.1.2)", async () => {
+    onDay(DAY.massAssign);
+    // ราคากลางของวันนี้ที่มีอยู่แล้ว — คำขอที่ถูกปฏิเสธต้องไม่แตะแถวนี้ (รวมราคาเงิน/แพลตตินั่ม)
+    const created = await put(cookies.manager, { bar_sell: "67850", silver_per_g: "45.00", platinum_per_g: "1000" });
+    expect(created.status, "manager ตั้งราคาด้วยคำขอปกติ").toBe(200);
+    const before = await writes();
+    // ช่องที่รู้จักในทุก body ถูกต้อง (ทอง 67,900 ห่างจากเดิม 0.07% ไม่ติดด่านพิมพ์ผิด)
+    // — ถ้าช่องเกินถูกตัดทิ้งเงียบ ๆ ทุก body จะได้ 200 และเปลี่ยนราคากลางของทุกสาขาจริง
+    const cases: [Record<string, unknown>, { error: string; field: string }][] = [
+      // ตั้งใจตั้งราคาเฉพาะสาขา 00001 + ราคาเงิน แต่ส่งมาที่ราคากลาง
+      [{ bar_sell: "67900", branch_id: bid("00001"), silver_per_g: "30.00" }, unknownField("branch_id")],
+      // ค่าที่เซิร์ฟเวอร์ derive เอง (R8) ตั้งตรงไม่ได้
+      [{ bar_sell: "67900", bar_buy: "1.00", jewelry_buy: "1" }, unknownField("bar_buy", "jewelry_buy")],
+      // ช่องของระบบ ทีละช่อง และหลายช่องพร้อมกัน (ชี้ช่องแรก)
+      [{ bar_sell: "67900", diff: "0" }, unknownField("diff")],
+      [{ bar_sell: "67900", set_by: uid("admin") }, unknownField("set_by")],
+      [{ bar_sell: "67900", date: "2026-01-01" }, unknownField("date")],
+      [{ bar_sell: "67900", source: "branch" }, unknownField("source")],
+      [
+        { bar_sell: "67900", silver_per_g: "45.10", set_by: uid("admin"), date: "2026-01-01", source: "branch" },
+        unknownField("set_by", "date", "source"),
+      ],
+      // สะกดชื่อช่องผิด — ถ้าตัดทิ้งจะบันทึกเหมือนไม่ได้ส่งช่องนั้น (ราคาเงินไม่ถูกตั้ง · คำอ้างราคาสมาคมหาย)
+      [{ bar_sell: "67900", barSell: "68000" }, unknownField("barSell")],
+      [{ bar_sel: "68000", bar_sell: "67900" }, unknownField("bar_sel")],
+      [{ bar_sell: "67900", silver_per_gram: "45.10" }, unknownField("silver_per_gram")],
+      [{ bar_sell: "67900", platinumPerG: "1000" }, unknownField("platinumPerG")],
+      [{ bar_sell: "67900", confirmTypo: true }, unknownField("confirmTypo")],
+      [{ bar_sell: "67900", fromReference: PREFILL }, unknownField("fromReference")],
+      // ช่องที่รู้จักครบทั้ง 5 ช่องและถูกต้อง + ช่องเกินช่องเดียว ก็ยัง 400
+      [
+        {
+          bar_sell: "67900",
+          silver_per_g: "45.10",
+          platinum_per_g: null,
+          confirm_typo: true,
+          from_reference: PREFILL,
+          branch_id: bid("00000"),
+        },
+        unknownField("branch_id"),
+      ],
+      // ช่องที่รู้จักแต่ค่าผิด + ช่องที่ไม่รู้จัก → ชี้ช่องที่รู้จักก่อน (zod ตรวจ shape ก่อนช่องเกิน)
+      [{ bar_sell: 67900, bar_buy: "1.00" }, PARSE_ERROR],
+    ];
+    for (const who of PRICE_SETTERS) {
+      for (const [body, expected] of cases) {
+        const where = `PUT โดย ${who} ${JSON.stringify(body)}`;
+        expect(await expectApiError(await put(cookies[who], body), 400, where), where).toEqual(expected);
+      }
+      // JSON ดิบ: "__proto__" เป็นช่องของ body จริงหลัง JSON.parse — ปฏิเสธเหมือนช่องอื่น ไม่ข้ามเงียบ ๆ
+      const proto = await raw("PUT", "/api/gold-price/today", {
+        cookie: cookies[who],
+        body: '{"bar_sell":"67900","__proto__":{"bar_buy":"1.00"}}',
+      });
+      expect(await expectApiError(proto, 400, `PUT โดย ${who} __proto__`)).toEqual(unknownField("__proto__"));
+    }
+    // ไม่มีอะไรถูกเขียน: ราคากลาง ราคาเฉพาะสาขา audit เท่าเดิมทุกแถว · ส่วนต่างรับซื้อของร้านไม่ถูกแตะ
+    expect(await writes()).toEqual(before);
+    expect(await t.db.select({ diff: goldPriceSetting.diff }).from(goldPriceSetting)).toEqual([{ diff: "200.00" }]);
+
+    // คำขอปกติยังได้ 200: admin ส่งช่องที่รู้จักครบทั้ง 5 ช่อง · manager แก้แค่ราคาต่อกรัม (ไม่ส่ง bar_sell)
+    const full = await put(cookies.admin, {
+      bar_sell: "67900",
+      silver_per_g: "45.10",
+      platinum_per_g: null,
+      confirm_typo: true,
+      from_reference: PREFILL,
+    });
+    const gold67900 = { bar_sell: "67900.00", bar_buy: "67700.00", jewelry_buy: "64315" }; // 67,700 × 0.95
+    const saved = { date: DAY.massAssign, ...gold67900, diff: "200.00", source: "central" };
+    expect(full.status, "admin ส่งช่องที่รู้จักครบ").toBe(200);
+    expect(await full.json()).toEqual({ ...saved, silver_per_g: "45.10", platinum_per_g: null });
+    const perGramOnly = await put(cookies.manager, { platinum_per_g: "1,000", confirm_typo: false });
+    expect(perGramOnly.status, "manager แก้แค่ราคาต่อกรัม").toBe(200);
+    expect(await perGramOnly.json()).toEqual({ ...saved, silver_per_g: "45.10", platinum_per_g: "1000.00" });
+    const added = (await writes()).audits.slice(before.audits.length);
+    expect(added).toMatchObject([
+      { action: "gold_price.update", tableName: "gold_price", userId: uid("admin") },
+      { action: "gold_price.update", tableName: "gold_price", userId: uid("manager") },
+    ]);
+    // from_reference ยังรับและลง audit (ไม่ถูกตัดทิ้ง) · แหล่งราคาสมาคมปิดอยู่ในเทสต์ = มีแค่คำอ้างของ client
+    expect(added[0]?.diff).toMatchObject({
+      reference: { client_prefilled: true, client_announced_at: PREFILL.announced_at, client_round: PREFILL.round },
+    });
   });
 
   it("PUT ที่สร้างราคาของวัน → audit gold_price.create แถวเดียว · ผู้ทำ = manager · before null · เงินใน diff เป็น string 2 ตำแหน่ง ไม่มี float (R12)", async () => {

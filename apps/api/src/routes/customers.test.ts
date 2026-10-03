@@ -1,7 +1,7 @@
 import { isValidNationalId, maskNationalId } from "@ong/core";
 import { type Role, auditLog, branch, customer, session } from "@ong/db";
 import { and, eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { type TestApp, databaseAvailable, startTestApp } from "../test/harness";
 import { expectApiError } from "../test/assertions";
 import { expectNoNationalId, nationalIdsIn } from "../test/pii";
@@ -947,6 +947,67 @@ describe.skipIf(!available)("ลูกค้า — สัญญาราย rou
     const body = JSON.parse(text) as Record<string, unknown>;
     expect(body).not.toHaveProperty("national_id");
     expect(body).toMatchObject({ id: f1Target.id, national_id_masked: masked(f1Target.nid), mobile: "0800000005" });
+  });
+
+  // ── audit: เปิดดูรูปลูกค้า (PDPA · แนวเดียวกับ buy.idcard_view) ──────────────────────────────────────
+
+  const photoViews = (customerId: string) =>
+    t.db
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.rowId, customerId), eq(auditLog.action, "customer.photo_view")))
+      .orderBy(auditLog.id);
+
+  it("audit (PDPA): ส่งรูปสำเร็จทุกครั้ง = customer.photo_view 1 แถวต่อครั้ง · user_id คือผู้เปิด · entity คือลูกค้า", async () => {
+    const c = await createCustomer("audit เปิดรูป", png());
+    const viewers = ["staff", "staff2", "manager", "accounting", "admin"] as const;
+    for (const who of viewers) {
+      expect((await hit("GET /:id/photo", cookies[who], c.id)).status, who).toBe(200);
+    }
+    const views = await photoViews(c.id);
+    expect(views.map((r) => [r.userId, r.tableName, r.rowId])).toEqual(
+      viewers.map((who) => [userIds[who], "customer", c.id]),
+    );
+    // payload ห้ามมีเลขบัตร ชื่อ ที่อยู่ หรือ key ของรูป — มีแค่สถานะว่ามีรูป (เหมือน customer.create/update)
+    expect(views.map((r) => r.diff)).toEqual(viewers.map(() => ({ photo: "set" })));
+    const text = JSON.stringify(views);
+    expectNoNationalId(text, "audit photo_view", knownIds);
+    expect(text).not.toContain(c.fields.name_th);
+    expect(text).not.toContain(c.fields.address);
+    expect(text).not.toContain("photos/");
+  });
+
+  it("audit (PDPA): ไม่ได้ส่งรูปก็ไม่ลง audit — ไม่มีรูป / ไม่มีลูกค้า / id ผิดรูป = 404 เดิม · 401 · 403 · cross-site 403", async () => {
+    const noPhoto = await createCustomer("audit ไม่มีรูป");
+    const before = await sideEffects();
+    expect((await hit("GET /:id/photo", cookies.staff, noPhoto.id)).status).toBe(404);
+    expect((await hit("GET /:id/photo", cookies.staff, crypto.randomUUID())).status).toBe(404);
+    expect((await hit("GET /:id/photo", cookies.staff, "not-a-uuid")).status).toBe(404);
+    expect((await hit("GET /:id/photo", undefined)).status).toBe(401);
+    expect((await hit("GET /:id/photo", cookies.nobranch)).status).toBe(403);
+    const crossSite = await t.app.request(`/api/customers/${subject.id}/photo`, {
+      headers: { origin: "http://localhost:8787", cookie: cookies.staff, "sec-fetch-site": "cross-site" },
+    });
+    expect(crossSite.status).toBe(403);
+    expect(await sideEffects()).toEqual(before);
+  });
+
+  it("audit เขียนไม่ได้ → ไม่ส่งรูป: 500 internal error · ไม่มีแถว audit ใหม่ · ครั้งถัดไปที่บันทึกได้ส่งรูปและลง audit", async () => {
+    const c = await createCustomer("audit ล้ม", png());
+    const before = (await photoViews(c.id)).length;
+    const insert = vi.spyOn(t.db, "insert").mockImplementationOnce(() => {
+      throw new Error("simulated audit_log outage");
+    });
+    try {
+      const res = await hit("GET /:id/photo", cookies.staff, c.id);
+      expect(await expectApiError(res, 500, "GET /:id/photo เมื่อ audit ล้ม")).toEqual({ error: "internal error" });
+      expect(insert.mock.calls[0]?.[0]).toBe(auditLog);
+    } finally {
+      insert.mockRestore();
+    }
+    expect(await photoViews(c.id)).toHaveLength(before);
+    expect((await hit("GET /:id/photo", cookies.staff, c.id)).status).toBe(200);
+    expect(await photoViews(c.id)).toHaveLength(before + 1);
   });
 
   // อยู่ท้ายสุดโดยตั้งใจ — สแกนทุกแถวที่ทั้งชุดเขียน (รวม setup ของ F1/F2) · เขียนแถวแก้เลขบัตรของตัวเองก่อน ให้มีของตรวจแน่ ๆ
